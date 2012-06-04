@@ -1,0 +1,2 @@
+version=3
+http://trace.ncbi.nlm.nih.gov/Traces/sra/sra.cgi?view=software http://ftp-private.ncbi.nlm.nih.gov/sra/sdk/.+?/sra_sdk-(.*).tar.gz

@@ -1,0 +1,69 @@
+Source: sra-sdk
+Section: science
+Priority: optional
+Maintainer: Debian Med Packaging Team <debian-med-packaging@lists.alioth.debian.org>
+Uploaders: Charles Plessy <plessy@debian.org>, Andreas Tille <tille@debian.org>
+DM-Upload-Allowed: yes
+Build-Depends: debhelper (>= 8),
+ libbz2-dev,
+ zlib1g-dev,
+ libxml2-dev
+Standards-Version: 3.9.2
+Homepage: http://trace.ncbi.nlm.nih.gov/Traces/sra/sra.cgi?view=software
+Vcs-Git: git://git.debian.org/debian-med/sra-sdk.git
+Vcs-Browser: http://git.debian.org/?p=debian-med/sra-sdk.git;a=summary
+
+Package: sra-toolkit
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: utilities for the NCBI Sequence Read Archive
+ Tools for reading the SRA archive, generally by converting individual runs
+ into some commonly used format such as fastq.
+ .
+ The textual dumpers "sra-dump" and "vdb-dump" are provided in this
+ release as an aid in visual inspection. It is likely that their
+ actual output formatting will be changed in the near future to a
+ stricter, more formalized representation[s]. PLEASE DO NOT RELY UPON
+ THE OUTPUT FORMAT SEEN IN THIS RELEASE.
+ .
+ The "help" information will be improved in near future releases, and
+ the tool options will become standardized across the set. More documentation
+ will also be provided documentation on the NCBI web site.
+ .
+ Tool options may change in the next release. Version 1 tool options
+ will remain supported wherever possible in order to preserve
+ operation of any existing scripts.
+
+Package: sra-toolkit-libs0
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: Libraries for the SRA Toolkit
+ This package provides all libraries and modules for executing the
+ NCBI SRA toolkit's programs.  This currently includes:
+ .
+  libkdb                # physical layer reading library
+  libkfg                # configuration library
+  libkfs                # file system library
+  libklib               # support library
+  libkproc              # process synchronization library
+  libkq                 # cross-thread queue library
+  libksproc             # single-threaded emulation library
+  libksrch              # search algorithm library
+  libkxfs               # XML to filesystem library
+  libkxml               # XML container support library
+  libload               # loader tool utility library
+  libsra-schema         # weak-linked sra schema
+  libsradb              # API for accessing sra
+  libsrapath            # weak-link stubs for srapath
+  libsrareader          # reader library
+  libvdb                # virtual layer reading library
+  libwkdb               # physical layer update library
+  libwsradb             # update API for SRA
+  libwvdb               # virtual layer update library
+
+Package: sra-toolkit-libs-dev
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: Development files for the NCBI SRA Toolkit's libraries
+ This package provides development support files for the
+ NCBI SRA Toolkit's libraries.

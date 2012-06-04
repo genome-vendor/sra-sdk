@@ -1,0 +1,26 @@
+#!/usr/bin/make -f
+%:
+	dh $@
+
+OUTDIR=$(CURDIR)/debian/tmp
+
+override_dh_auto_configure:
+	export OUTDIR=$(OUTDIR) ; make OUTDIR=$(OUTDIR) out ; make release dynamic
+
+override_dh_auto_build:
+	export LD_LIBRARY_PATH="$$LD_LIBRARY_PATH:$(OUTDIR)/lib"; export OUTDIR=$(OUTDIR) ; make
+
+override_dh_auto_test:
+
+override_dh_prep:
+	dh_prep -X debian/tmp
+
+override_dh_install:
+	rmdir debian/tmp/bin??/ncbi
+	cp libs/kfg/config.linux.kfg `ls -d debian/tmp/lib??/ncbi`config.kfg
+	dh_install
+
+# Temporary correction as long as libsra-schema is weak-linked.
+override_dh_link:
+	mv $(CURDIR)/debian/sra-toolkit-libs-dev/usr/lib/libsra-schema.so $(CURDIR)/debian/sra-toolkit-libs0/usr/lib/
+	dh_link

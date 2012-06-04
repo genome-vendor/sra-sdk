@@ -1,0 +1,2 @@
+# Temporarily needed as long as libsra-schema is weak-linked. 
+sra-toolkit-libs0: non-dev-pkg-with-shlib-symlink usr/lib/libsra-schema.so.1.0.4 usr/lib/libsra-schema.so

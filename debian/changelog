@@ -1,0 +1,32 @@
+sra-sdk (2.1.10-1) testing; urgency=low
+
+  * Imported 2.1.10 upstream sources.
+  * Sucked in Quantal's 2.1.7a-1 debian configuration.
+
+ -- Nathaniel Nutter <nnutter@genome.wustl.edu>  Mon, 04 Jun 2012 17:29:40 -0500
+
+sra-sdk (2.1.7a-1) unstable; urgency=low
+
+  [ Charles Plessy ]
+  61e22aa New upstream release (Closes: #627861).
+  1b09fd5 Normalised debian/copyright file with config-edit.
+  a93e7b5 Wildcard characters to match 64 or 32 according to the architecture.
+  3d66d80 New upstream source location in debian/watch.
+  74e5234 Mark the use of git-buildpackage by debian/gbp.conf.
+  0074d68 Simplified Homepage URL in debian/control.
+  5cd8039 Use a target that allows dynamic linking (debian/rules).
+  9815817 Do not install empty /usr/bin/ncbi directory (debian/rules).
+  fb42792 Updated debian/sra-toolkit-libs0.symbols.
+  866f773 Install config.kfg and vdb-copy.kfg in /etc/ncbi.
+
+  [ Andreas Tille ]
+  9e6e831 Suggest patches for build system to build on non i386&amd64
+    architectures as well as BSD and Hurd
+
+ -- Charles Plessy <plessy@debian.org>  Tue, 10 Jan 2012 09:06:14 +0900
+
+sra-sdk (2.0.1-1) unstable; urgency=low
+
+  * Initial release (Closes: #610603).
+
+ -- Charles Plessy <plessy@debian.org>  Tue, 24 May 2011 14:48:10 +0900
