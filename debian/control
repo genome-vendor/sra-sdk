@@ -4,7 +4,7 @@ Priority: optional
 Maintainer: Debian Med Packaging Team <debian-med-packaging@lists.alioth.debian.org>
 Uploaders: Charles Plessy <plessy@debian.org>, Andreas Tille <tille@debian.org>
 DM-Upload-Allowed: yes
-Build-Depends: debhelper (>= 8),
+Build-Depends: debhelper (>= 7),
  libbz2-dev,
  zlib1g-dev,
  libxml2-dev
