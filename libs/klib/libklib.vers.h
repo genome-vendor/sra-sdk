@@ -1,0 +1,1 @@
+#define LIBKLIB_VERS 0x01020005

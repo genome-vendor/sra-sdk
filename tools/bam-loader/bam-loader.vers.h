@@ -1,0 +1,1 @@
+#define BAM_LOADER_VERS 0x01000000

@@ -1,0 +1,116 @@
+# ===========================================================================
+#
+#                            PUBLIC DOMAIN NOTICE
+#               National Center for Biotechnology Information
+#
+#  This software/database is a "United States Government Work" under the
+#  terms of the United States Copyright Act.  It was written as part of
+#  the author's official duties as a United States Government employee and
+#  thus cannot be copyrighted.  This software/database is freely available
+#  to the public for use. The National Library of Medicine and the U.S.
+#  Government have not placed any restriction on its use or reproduction.
+#
+#  Although all reasonable efforts have been taken to ensure the accuracy
+#  and reliability of the software and data, the NLM and the U.S.
+#  Government do not and cannot warrant the performance or results that
+#  may be obtained by using this software or data. The NLM and the U.S.
+#  Government disclaim all warranties, express or implied, including
+#  warranties of performance, merchantability or fitness for any particular
+#  purpose.
+#
+#  Please cite the author in any work or product based on this material.
+#
+# ===========================================================================
+
+
+# determine OS
+UNAME = $(shell uname -s)
+
+ifeq (Darwin, $(UNAME))
+	OS = mac
+endif
+ifeq (Linux, $(UNAME))
+	OS = linux
+endif
+ifeq (SunOS, $(UNAME))
+	OS = sun
+endif
+ifeq (xCYGWIN, $(findstring xCYGWIN,x$(UNAME)))
+	OS = win
+endif
+ifeq (xMINGW, $(findstring xMINGW,x$(UNAME)))
+	OS = win
+endif
+
+# OS flavor is normally OS
+OSFLAV = $(OS)
+
+# determine ARCH
+ifeq (mac,$(OS))
+	ARCH = $(shell $(TOP)/build/mac.arch.sh)
+else
+	MARCH = $(shell uname -m)
+
+	ifeq (i386, $(MARCH))
+		ARCH = i386
+	endif
+	ifeq (i486, $(MARCH))
+		ARCH = i386
+	endif
+	ifeq (i586, $(MARCH))
+		ARCH = i386
+	endif
+	ifeq (i686, $(MARCH))
+		ifeq (WOW64x, $(findstring WOW64x,$(UNAME)x))
+			# 64-bit capable Cygwin. Analyze the version of cl to set the corect architecture
+			CL = $(shell cl.exe 2>&1 >/dev/null)
+			ifeq (for x64, $(findstring for x64, $(CL)))
+				ARCH = x86_64
+			else
+				ARCH = i386
+			endif			
+		else
+			ARCH = i386
+		endif	
+	endif
+	ifeq (x86_64, $(MARCH))
+		ARCH = x86_64
+	endif
+	ifeq (sun4u,$(MARCH))
+		ARCH = sparc32
+	endif
+endif
+
+# determine BITS
+ifeq (x86_64, $(ARCH))
+	BITS = 64
+else
+	BITS = 32
+endif
+
+# first pass through defines SRCDIR
+ifndef SRCDIR
+
+# set SRCDIR from MODULE
+ifdef MODULE
+	SRCDIR=$(TOP)/$(MODULE)
+else
+	SRCDIR=$(TOP)
+endif
+
+# set OUTDIR
+ifndef OUTDIR
+	OUTDIR = $(shell test -f $(TOP)/build/OUTDIR.$(OS) && cat $(TOP)/build/OUTDIR.$(OS) || echo $(TOP))
+	ifeq (,$(OUTDIR))
+		OUTDIR = $(TOP)
+	endif
+	ifeq (.,$(OUTDIR))
+		OUTDIR = $(TOP)
+	endif
+endif
+
+# set COMP and BUILD
+COMP = $(shell test -f $(TOP)/build/COMP.$(OS) && cat $(TOP)/build/COMP.$(OS) || echo gcc)
+BUILD = $(shell test -f $(TOP)/build/BUILD.$(OS) && cat $(TOP)/build/BUILD.$(OS) || echo dbg)
+
+endif
