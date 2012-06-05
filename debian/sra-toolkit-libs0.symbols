@@ -33,6 +33,7 @@ libalign-access.so.1 sra-toolkit-libs0 #MINVER#
  AlignAccessRefSeqEnumeratorRelease@Base 2.1.7a
  BAMAlignmentAddRef@Base 2.1.7a
  BAMAlignmentGetAlignmentDetail@Base 2.1.7a
+ BAMAlignmentGetCGData@Base 2.1.10-1
  BAMAlignmentGetCSKey@Base 2.1.7a
  BAMAlignmentGetCSSequence@Base 2.1.7a
  BAMAlignmentGetCigar@Base 2.1.7a
@@ -54,6 +55,8 @@ libalign-access.so.1 sra-toolkit-libs0 #MINVER#
  BAMAlignmentGetRefSeqId@Base 2.1.7a
  BAMAlignmentGetSequence2@Base 2.1.7a
  BAMAlignmentGetSequence@Base 2.1.7a
+ BAMAlignmentGetTI@Base 2.1.10-1
+ BAMAlignmentHasCGData@Base 2.1.10-1
  BAMAlignmentHasColorSpace@Base 2.1.7a
  BAMAlignmentIsMapped@Base 2.1.7a
  BAMAlignmentOptDataForEach@Base 2.1.7a
@@ -72,10 +75,13 @@ libalign-access.so.1 sra-toolkit-libs0 #MINVER#
  BAMFileIsIndexed@Base 2.1.7a
  BAMFileMake@Base 2.1.7a
  BAMFileMakeWithDir@Base 2.1.7a
+ BAMFileMakeWithHeader@Base 2.1.10-1
  BAMFileMakeWithKFile@Base 2.1.7a
- BAMFileMakeWithKPath@Base 2.1.7a
+#MISSING: 2.1.10-1# BAMFileMakeWithKPath@Base 2.1.7a
+ BAMFileMakeWithVPath@Base 2.1.10-1
  BAMFileOpenIndex@Base 2.1.7a
- BAMFileOpenIndexWithKPath@Base 2.1.7a
+#MISSING: 2.1.10-1# BAMFileOpenIndexWithKPath@Base 2.1.7a
+ BAMFileOpenIndexWithVPath@Base 2.1.10-1
  BAMFileRead@Base 2.1.7a
  BAMFileRelease@Base 2.1.7a
  BAMFileRewind@Base 2.1.7a
@@ -84,6 +90,43 @@ libalign-access.so.1 sra-toolkit-libs0 #MINVER#
  BAMFileVMakeWithDir@Base 2.1.7a
  BAMValidate@Base 2.1.7a
 libalign-reader.so.1 sra-toolkit-libs0 #MINVER#
+ AlignIteratorRecordDestroy@Base 2.1.10-1
+ AlignIteratorRecordPopulate@Base 2.1.10-1
+ AlignIteratorRecordSize@Base 2.1.10-1
+ AlignMgrAddRef@Base 2.1.10-1
+ AlignMgrMakeAlignmentIterator@Base 2.1.10-1
+ AlignMgrMakePlacementSetIterator@Base 2.1.10-1
+ AlignMgrMakeRead@Base 2.1.10-1
+ AlignMgrMakeReferenceIterator@Base 2.1.10-1
+ AlignMgrRelease@Base 2.1.10-1
+ AlignmentIteratorAddRef@Base 2.1.10-1
+ AlignmentIteratorBasesDeleted@Base 2.1.10-1
+ AlignmentIteratorBasesInserted@Base 2.1.10-1
+ AlignmentIteratorNext@Base 2.1.10-1
+ AlignmentIteratorPosition@Base 2.1.10-1
+ AlignmentIteratorRelease@Base 2.1.10-1
+ AlignmentIteratorState@Base 2.1.10-1
+ DNAReverseCompliment@Base 2.1.10-1
+ PlacementIteratorAddRef@Base 2.1.10-1
+ PlacementIteratorNextAvailPos@Base 2.1.10-1
+ PlacementIteratorNextIdAt@Base 2.1.10-1
+ PlacementIteratorNextRecordAt@Base 2.1.10-1
+ PlacementIteratorRefObj@Base 2.1.10-1
+ PlacementIteratorRefWindow@Base 2.1.10-1
+ PlacementIteratorRelease@Base 2.1.10-1
+ PlacementIterator_cols@Base 2.1.10-1
+ PlacementRecordCast@Base 2.1.10-1
+ PlacementRecordWhack@Base 2.1.10-1
+ PlacementSetIteratorAddPlacementIterator@Base 2.1.10-1
+ PlacementSetIteratorAddRef@Base 2.1.10-1
+ PlacementSetIteratorNextAvailPos@Base 2.1.10-1
+ PlacementSetIteratorNextIdAt@Base 2.1.10-1
+ PlacementSetIteratorNextRecordAt@Base 2.1.10-1
+ PlacementSetIteratorNextReference@Base 2.1.10-1
+ PlacementSetIteratorRelease@Base 2.1.10-1
+ RefIterRecordDestroy@Base 2.1.10-1
+ RefIterRecordPopulate@Base 2.1.10-1
+ RefIterRecordSize@Base 2.1.10-1
  RefSeqMgr_Exists@Base 2.1.7a
  RefSeqMgr_ForEachVolume@Base 2.1.7a
  RefSeqMgr_GetSeq@Base 2.1.7a
@@ -95,6 +138,40 @@ libalign-reader.so.1 sra-toolkit-libs0 #MINVER#
  RefSeq_Read@Base 2.1.7a
  RefSeq_Release@Base 2.1.7a
  RefSeq_SeqLength@Base 2.1.7a
+ ReferenceIteratorAddPlacementIterator@Base 2.1.10-1
+ ReferenceIteratorAddPlacements@Base 2.1.10-1
+ ReferenceIteratorAddRef@Base 2.1.10-1
+ ReferenceIteratorBasesDeleted@Base 2.1.10-1
+ ReferenceIteratorBasesInserted@Base 2.1.10-1
+ ReferenceIteratorNextPlacement@Base 2.1.10-1
+ ReferenceIteratorNextPos@Base 2.1.10-1
+ ReferenceIteratorNextReference@Base 2.1.10-1
+ ReferenceIteratorPosition@Base 2.1.10-1
+ ReferenceIteratorRelease@Base 2.1.10-1
+ ReferenceIteratorState@Base 2.1.10-1
+ ReferenceList_AddRef@Base 2.1.10-1
+ ReferenceList_Count@Base 2.1.10-1
+ ReferenceList_Find@Base 2.1.10-1
+ ReferenceList_Get@Base 2.1.10-1
+ ReferenceList_MakeCursor@Base 2.1.10-1
+ ReferenceList_MakeDatabase@Base 2.1.10-1
+ ReferenceList_MakePath@Base 2.1.10-1
+ ReferenceList_MakeTable@Base 2.1.10-1
+ ReferenceList_Release@Base 2.1.10-1
+ ReferenceList_cols@Base 2.1.10-1
+ ReferenceObj_AddRef@Base 2.1.10-1
+ ReferenceObj_Bin@Base 2.1.10-1
+ ReferenceObj_Circular@Base 2.1.10-1
+ ReferenceObj_External@Base 2.1.10-1
+ ReferenceObj_IdRange@Base 2.1.10-1
+ ReferenceObj_Idx@Base 2.1.10-1
+ ReferenceObj_MakePlacementIterator@Base 2.1.10-1
+ ReferenceObj_Name@Base 2.1.10-1
+ ReferenceObj_Read@Base 2.1.10-1
+ ReferenceObj_Release@Base 2.1.10-1
+ ReferenceObj_SeqId@Base 2.1.10-1
+ ReferenceObj_SeqLength@Base 2.1.10-1
+ ReferenceSeq_ReOffset@Base 2.1.10-1
  TableReaderRefSeq_Circular@Base 2.1.7a
  TableReaderRefSeq_MD5@Base 2.1.7a
  TableReaderRefSeq_MakePath@Base 2.1.7a
@@ -105,6 +182,9 @@ libalign-reader.so.1 sra-toolkit-libs0 #MINVER#
  TableReaderRefSeq_Whack@Base 2.1.7a
  TableReader_IdRange@Base 2.1.7a
  TableReader_Make@Base 2.1.7a
+ TableReader_MakeCursor@Base 2.1.10-1
+ TableReader_OpenIndex@Base 2.1.10-1
+ TableReader_PageIdRange@Base 2.1.10-1
  TableReader_ReadRow@Base 2.1.7a
  TableReader_Whack@Base 2.1.7a
 libkdb.so.1 sra-toolkit-libs0 #MINVER#
@@ -205,6 +285,8 @@ libkdb.so.1 sra-toolkit-libs0 #MINVER#
  KDatabaseAttach@Base 2.0.1
  KDatabaseConsistencyCheck@Base 2.1.7a
  KDatabaseExists@Base 2.0.1
+ KDatabaseGetPath@Base 2.1.10-1
+ KDatabaseIsAlias@Base 2.1.10-1
  KDatabaseListDB@Base 2.0.1
  KDatabaseListIdx@Base 2.0.1
  KDatabaseListTbl@Base 2.0.1
@@ -293,6 +375,8 @@ libkdb.so.1 sra-toolkit-libs0 #MINVER#
  KTableAttach@Base 2.0.1
  KTableConsistencyCheck@Base 2.0.1
  KTableExists@Base 2.0.1
+ KTableGetPath@Base 2.1.10-1
+ KTableIsAlias@Base 2.1.10-1
  KTableListCol@Base 2.0.1
  KTableListIdx@Base 2.0.1
  KTableLocked@Base 2.0.1
@@ -326,10 +410,12 @@ libkdb.so.1 sra-toolkit-libs0 #MINVER#
  KU64IndexWhack_v3@Base 2.0.1
 libkfg.so.1 sra-toolkit-libs0 #MINVER#
  KConfigAddRef@Base 2.0.1
+ KConfigAppendToLoadPath@Base 2.1.10-1
  KConfigGetLoadPath@Base 2.1.7a
  KConfigListIncluded@Base 2.1.7a
  KConfigLoadFile@Base 2.0.1
  KConfigMake@Base 2.0.1
+ KConfigMakeLocal@Base 2.1.10-1
  KConfigNodeAddRef@Base 2.0.1
  KConfigNodeAppend@Base 2.0.1
  KConfigNodeDropAll@Base 2.0.1
@@ -353,12 +439,53 @@ libkfg.so.1 sra-toolkit-libs0 #MINVER#
  KConfigRelease@Base 2.0.1
  KConfigVOpenNodeRead@Base 2.0.1
  KConfigVOpenNodeUpdate@Base 2.0.1
+ KFGScan_set_debug@Base 2.1.10-1
+ KFGScan_yylex@Base 2.1.10-1
+ KFGScan_yylex_destroy@Base 2.1.10-1
+ KFGScan_yylex_init@Base 2.1.10-1
+ KFG_error@Base 2.1.10-1
+ KFG_parse@Base 2.1.10-1
+ ReportKfg@Base 2.1.10-1
+ yy_create_buffer@Base 2.1.10-1
+ yy_delete_buffer@Base 2.1.10-1
+ yy_flush_buffer@Base 2.1.10-1
+ yy_scan_buffer@Base 2.1.10-1
+ yy_scan_bytes@Base 2.1.10-1
+ yy_scan_string@Base 2.1.10-1
+ yy_switch_to_buffer@Base 2.1.10-1
+ yyalloc@Base 2.1.10-1
+ yyfree@Base 2.1.10-1
+ yyget_column@Base 2.1.10-1
+ yyget_debug@Base 2.1.10-1
+ yyget_extra@Base 2.1.10-1
+ yyget_in@Base 2.1.10-1
+ yyget_leng@Base 2.1.10-1
+ yyget_lineno@Base 2.1.10-1
+ yyget_lval@Base 2.1.10-1
+ yyget_out@Base 2.1.10-1
+ yyget_text@Base 2.1.10-1
+ yylex@Base 2.1.10-1
+ yylex_destroy@Base 2.1.10-1
+ yylex_init@Base 2.1.10-1
+ yylex_init_extra@Base 2.1.10-1
+ yypop_buffer_state@Base 2.1.10-1
+ yypush_buffer_state@Base 2.1.10-1
+ yyrealloc@Base 2.1.10-1
+ yyrestart@Base 2.1.10-1
+ yyset_column@Base 2.1.10-1
+ yyset_debug@Base 2.1.10-1
+ yyset_extra@Base 2.1.10-1
+ yyset_in@Base 2.1.10-1
+ yyset_lineno@Base 2.1.10-1
+ yyset_lval@Base 2.1.10-1
+ yyset_out@Base 2.1.10-1
 libkfs.so.1 sra-toolkit-libs0 #MINVER#
  KArcDirGetTOC@Base 2.0.1
  KArcDirPersistHeader@Base 2.0.1
  KArcParseKDir@Base 2.0.1
  KArcParseSRA@Base 2.0.1
  KArcParseSRAUnbounded@Base 2.0.1
+ KArcParseSRAUnbounded_silent@Base 2.1.10-1
  KArcParseSRA_silent@Base 2.0.1
  KArcParseTAR@Base 2.0.1
  KArcParseTAR_silent@Base 2.0.1
@@ -414,15 +541,18 @@ libkfs.so.1 sra-toolkit-libs0 #MINVER#
  KDirectoryNativeDir@Base 2.0.1
  KDirectoryOpenArcDirRead@Base 2.0.1
  KDirectoryOpenArcDirRead_silent@Base 2.0.1
+ KDirectoryOpenArcDirRead_silent_preopened@Base 2.1.10-1
  KDirectoryOpenDirRead@Base 2.0.1
  KDirectoryOpenDirUpdate@Base 2.0.1
  KDirectoryOpenFileRead@Base 2.0.1
  KDirectoryOpenFileWrite@Base 2.0.1
  KDirectoryOpenSraArchiveRead@Base 2.0.1
  KDirectoryOpenSraArchiveReadUnbounded@Base 2.0.1
+ KDirectoryOpenSraArchiveReadUnbounded_silent_preopened@Base 2.1.10-1
  KDirectoryOpenSraArchiveRead_silent@Base 2.0.1
  KDirectoryOpenTarArchiveRead@Base 2.0.1
  KDirectoryOpenTarArchiveRead_silent@Base 2.0.1
+ KDirectoryOpenTarArchiveRead_silent_preopened@Base 2.1.10-1
  KDirectoryOpenTocFileRead@Base 2.0.1
  KDirectoryPathType@Base 2.0.1
  KDirectoryRelease@Base 2.0.1
@@ -450,9 +580,11 @@ libkfs.so.1 sra-toolkit-libs0 #MINVER#
  KDirectoryVOpenFileWrite@Base 2.0.1
  KDirectoryVOpenSraArchiveRead@Base 2.0.1
  KDirectoryVOpenSraArchiveReadUnbounded@Base 2.0.1
+ KDirectoryVOpenSraArchiveReadUnbounded_silent_preopened@Base 2.1.10-1
  KDirectoryVOpenSraArchiveRead_silent@Base 2.0.1
  KDirectoryVOpenTarArchiveRead@Base 2.0.1
  KDirectoryVOpenTarArchiveRead_silent@Base 2.0.1
+ KDirectoryVOpenTarArchiveRead_silent_preopened@Base 2.1.10-1
  KDirectoryVPathType@Base 2.0.1
  KDirectoryVRemove@Base 2.0.1
  KDirectoryVResolveAlias@Base 2.0.1
@@ -469,6 +601,7 @@ libkfs.so.1 sra-toolkit-libs0 #MINVER#
  KDlsetAddRef@Base 2.0.1
  KDlsetFirstSymbol@Base 2.0.1
  KDlsetLastSymbol@Base 2.0.1
+ KDlsetList@Base 2.1.10-1
  KDlsetRelease@Base 2.0.1
  KDlsetSymbol@Base 2.0.1
  KDyldAddRef@Base 2.0.1
@@ -488,6 +621,7 @@ libkfs.so.1 sra-toolkit-libs0 #MINVER#
  KFileDestroy@Base 2.0.1
  KFileGetSysFile@Base 2.0.1
  KFileInit@Base 2.0.1
+ KFileIsSRA@Base 2.1.10-1
  KFileMakeBzip2ForRead@Base 2.0.1
  KFileMakeBzip2ForWrite@Base 2.0.1
  KFileMakeCRC32Read@Base 2.0.1
@@ -503,6 +637,7 @@ libkfs.so.1 sra-toolkit-libs0 #MINVER#
  KFileMakeNewMD5Read@Base 2.0.1
  KFileMakeNullRead@Base 2.0.1
  KFileMakeNullUpdate@Base 2.0.1
+ KFileMakeReadHead@Base 2.1.10-1
  KFileMakeStdErr@Base 2.0.1
  KFileMakeStdIn@Base 2.0.1
  KFileMakeStdOut@Base 2.0.1
@@ -512,11 +647,13 @@ libkfs.so.1 sra-toolkit-libs0 #MINVER#
  KFileMakeTeeUpdate@Base 2.0.1
  KFileRandomAccess@Base 2.0.1
  KFileRead@Base 2.0.1
+ KFileReadAll@Base 2.1.10-1
  KFileRelease@Base 2.0.1
  KFileSetSize@Base 2.0.1
  KFileSize@Base 2.0.1
  KFileType@Base 2.0.1
  KFileWrite@Base 2.0.1
+ KFileWriteAll@Base 2.1.10-1
  KMD5FileBeginTransaction@Base 2.0.1
  KMD5FileCommit@Base 2.0.1
  KMD5FileMakeAppend@Base 2.0.1
@@ -562,10 +699,10 @@ libkfs.so.1 sra-toolkit-libs0 #MINVER#
  KMemBankSetSize@Base 2.0.1
  KMemBankSize@Base 2.0.1
  KMemBankWrite@Base 2.0.1
- KPOptionCmp@Base 2.1.7a
- KPOptionMake@Base 2.1.7a
- KPOptionSort@Base 2.1.7a
- KPOptionWhack@Base 2.1.7a
+#MISSING: 2.1.10-1# KPOptionCmp@Base 2.1.7a
+#MISSING: 2.1.10-1# KPOptionMake@Base 2.1.7a
+#MISSING: 2.1.10-1# KPOptionSort@Base 2.1.7a
+#MISSING: 2.1.10-1# KPOptionWhack@Base 2.1.7a
  KPageAccessRead@Base 2.0.1
  KPageAccessUpdate@Base 2.0.1
  KPageAddRef@Base 2.0.1
@@ -582,22 +719,22 @@ libkfs.so.1 sra-toolkit-libs0 #MINVER#
  KPageFileSize@Base 2.0.1
  KPageId@Base 2.0.1
  KPageRelease@Base 2.0.1
- KPathAddRef@Base 2.1.7a
- KPathDestroy@Base 2.1.7a
- KPathGetCWD@Base 2.1.7a
- KPathMake@Base 2.1.7a
- KPathMakeCurrentPath@Base 2.1.7a
- KPathMakeFmt@Base 2.1.7a
- KPathMakeRelative@Base 2.1.7a
- KPathMakeSysPath@Base 2.1.7a
- KPathMakeVFmt@Base 2.1.7a
- KPathOption@Base 2.1.7a
- KPathReadFragment@Base 2.1.7a
- KPathReadPath@Base 2.1.7a
- KPathReadQuery@Base 2.1.7a
- KPathRelease@Base 2.1.7a
- KPathTransformPathHier@Base 2.1.7a
- KPathTransformSysPath@Base 2.1.7a
+#MISSING: 2.1.10-1# KPathAddRef@Base 2.1.7a
+#MISSING: 2.1.10-1# KPathDestroy@Base 2.1.7a
+#MISSING: 2.1.10-1# KPathGetCWD@Base 2.1.7a
+#MISSING: 2.1.10-1# KPathMake@Base 2.1.7a
+#MISSING: 2.1.10-1# KPathMakeCurrentPath@Base 2.1.7a
+#MISSING: 2.1.10-1# KPathMakeFmt@Base 2.1.7a
+#MISSING: 2.1.10-1# KPathMakeRelative@Base 2.1.7a
+#MISSING: 2.1.10-1# KPathMakeSysPath@Base 2.1.7a
+#MISSING: 2.1.10-1# KPathMakeVFmt@Base 2.1.7a
+#MISSING: 2.1.10-1# KPathOption@Base 2.1.7a
+#MISSING: 2.1.10-1# KPathReadFragment@Base 2.1.7a
+#MISSING: 2.1.10-1# KPathReadPath@Base 2.1.7a
+#MISSING: 2.1.10-1# KPathReadQuery@Base 2.1.7a
+#MISSING: 2.1.10-1# KPathRelease@Base 2.1.7a
+#MISSING: 2.1.10-1# KPathTransformPathHier@Base 2.1.7a
+#MISSING: 2.1.10-1# KPathTransformSysPath@Base 2.1.7a
  KSymAddrAddRef@Base 2.0.1
  KSymAddrAsFunc@Base 2.0.1
  KSymAddrAsObj@Base 2.0.1
@@ -663,6 +800,8 @@ libkfs.so.1 sra-toolkit-libs0 #MINVER#
  KTocVCreateSoftLink@Base 2.0.1
  KTocVCreateZombieFile@Base 2.0.1
  PersistFilesIndex@Base 2.0.1
+ ReportCWD@Base 2.1.10-1
+ ReportRedirect@Base 2.1.10-1
  SraHeaderGetFileOffset@Base 2.0.1
  SraHeaderMake@Base 2.0.1
  SraHeaderSize@Base 2.0.1
@@ -720,11 +859,65 @@ libklib.so.1 sra-toolkit-libs0 #MINVER#
  GetRCTargetIdxText@Base 2.0.1
  GetRCTargetText@Base 2.0.1
  GetUnreadRCInfo@Base 2.1.7a
+ Judy1ByCount@Base 2.1.10-1
+ Judy1Count@Base 2.1.10-1
+ Judy1First@Base 2.1.10-1
+ Judy1FirstEmpty@Base 2.1.10-1
+ Judy1FreeArray@Base 2.1.10-1
+ Judy1Last@Base 2.1.10-1
+ Judy1LastEmpty@Base 2.1.10-1
+ Judy1MallocSizes@Base 2.1.10-1
+ Judy1MemActive@Base 2.1.10-1
+ Judy1MemUsed@Base 2.1.10-1
+ Judy1Next@Base 2.1.10-1
+ Judy1NextEmpty@Base 2.1.10-1
+ Judy1Prev@Base 2.1.10-1
+ Judy1PrevEmpty@Base 2.1.10-1
+ Judy1Set@Base 2.1.10-1
+ Judy1SetArray@Base 2.1.10-1
+ Judy1Test@Base 2.1.10-1
+ Judy1Unset@Base 2.1.10-1
+ JudyFree@Base 2.1.10-1
+ JudyFreeVirtual@Base 2.1.10-1
+ JudyHSDel@Base 2.1.10-1
+ JudyHSFreeArray@Base 2.1.10-1
+ JudyHSGet@Base 2.1.10-1
+ JudyHSIns@Base 2.1.10-1
+ JudyLByCount@Base 2.1.10-1
+ JudyLCount@Base 2.1.10-1
+ JudyLDel@Base 2.1.10-1
+ JudyLFirst@Base 2.1.10-1
+ JudyLFirstEmpty@Base 2.1.10-1
+ JudyLFreeArray@Base 2.1.10-1
+ JudyLGet@Base 2.1.10-1
+ JudyLIns@Base 2.1.10-1
+ JudyLInsArray@Base 2.1.10-1
+ JudyLLast@Base 2.1.10-1
+ JudyLLastEmpty@Base 2.1.10-1
+ JudyLMallocSizes@Base 2.1.10-1
+ JudyLMemActive@Base 2.1.10-1
+ JudyLMemUsed@Base 2.1.10-1
+ JudyLNext@Base 2.1.10-1
+ JudyLNextEmpty@Base 2.1.10-1
+ JudyLPrev@Base 2.1.10-1
+ JudyLPrevEmpty@Base 2.1.10-1
+ JudyMalloc@Base 2.1.10-1
+ JudyMallocVirtual@Base 2.1.10-1
+ JudySLDel@Base 2.1.10-1
+ JudySLFirst@Base 2.1.10-1
+ JudySLFreeArray@Base 2.1.10-1
+ JudySLGet@Base 2.1.10-1
+ JudySLIns@Base 2.1.10-1
+ JudySLLast@Base 2.1.10-1
+ JudySLNext@Base 2.1.10-1
+ JudySLPrev@Base 2.1.10-1
  KDataBufferCast@Base 2.0.1
  KDataBufferCheckIntegrity@Base 2.0.1
  KDataBufferMake@Base 2.0.1
  KDataBufferMakeWritable@Base 2.0.1
+ KDataBufferMemorySize@Base 2.1.10-1
  KDataBufferResize@Base 2.0.1
+ KDataBufferShrink@Base 2.1.10-1
  KDataBufferSub@Base 2.0.1
  KDataBufferWhack@Base 2.0.1
  KDataBufferWritable@Base 2.0.1
@@ -855,6 +1048,42 @@ libklib.so.1 sra-toolkit-libs0 #MINVER#
  KTokenToVersion@Base 2.0.1
  KTokenToWideString@Base 2.0.1
  KTokenizerNext@Base 2.0.1
+ KVectorAddRef@Base 2.1.10-1
+ KVectorGet@Base 2.1.10-1
+ KVectorGetBool@Base 2.1.10-1
+ KVectorGetF32@Base 2.1.10-1
+ KVectorGetF64@Base 2.1.10-1
+ KVectorGetI16@Base 2.1.10-1
+ KVectorGetI32@Base 2.1.10-1
+ KVectorGetI64@Base 2.1.10-1
+ KVectorGetI8@Base 2.1.10-1
+ KVectorGetPtr@Base 2.1.10-1
+ KVectorGetU16@Base 2.1.10-1
+ KVectorGetU32@Base 2.1.10-1
+ KVectorGetU64@Base 2.1.10-1
+ KVectorGetU8@Base 2.1.10-1
+ KVectorMake@Base 2.1.10-1
+ KVectorRelease@Base 2.1.10-1
+ KVectorSet@Base 2.1.10-1
+ KVectorSetBool@Base 2.1.10-1
+ KVectorSetF32@Base 2.1.10-1
+ KVectorSetF64@Base 2.1.10-1
+ KVectorSetI16@Base 2.1.10-1
+ KVectorSetI32@Base 2.1.10-1
+ KVectorSetI64@Base 2.1.10-1
+ KVectorSetI8@Base 2.1.10-1
+ KVectorSetPtr@Base 2.1.10-1
+ KVectorSetU16@Base 2.1.10-1
+ KVectorSetU32@Base 2.1.10-1
+ KVectorSetU64@Base 2.1.10-1
+ KVectorSetU8@Base 2.1.10-1
+ KVectorUnset@Base 2.1.10-1
+ KVectorVisit@Base 2.1.10-1
+ KVectorVisitBool@Base 2.1.10-1
+ KVectorVisitF64@Base 2.1.10-1
+ KVectorVisitI64@Base 2.1.10-1
+ KVectorVisitPtr@Base 2.1.10-1
+ KVectorVisitU64@Base 2.1.10-1
  KWrtFmt_error_code@Base 2.1.7a
  KWrtFmt_rc_t@Base 2.0.1
  KWrtInit@Base 2.0.1
@@ -916,6 +1145,14 @@ libklib.so.1 sra-toolkit-libs0 #MINVER#
  RCObjectStrings@Base 2.0.1
  RCStateStrings@Base 2.0.1
  RCTargetStrings@Base 2.0.1
+ ReportBuildDate@Base 2.1.10-1
+ ReportFinalize@Base 2.1.10-1
+ ReportInit@Base 2.1.10-1
+ ReportInitConfig@Base 2.1.10-1
+ ReportInitKFS@Base 2.1.10-1
+ ReportInitVDB@Base 2.1.10-1
+ ReportResetObject@Base 2.1.10-1
+ ReportSilence@Base 2.1.10-1
  SHA1StateAppend@Base 2.1.0-1
  SHA1StateFinish@Base 2.1.0-1
  SHA1StateInit@Base 2.1.0-1
@@ -1017,11 +1254,145 @@ libklib.so.1 sra-toolkit-libs0 #MINVER#
  iso8859_string_measure@Base 2.0.1
  iso8859_string_size@Base 2.0.1
  iso8859_utf32@Base 2.0.1
+ j__1_BranchBJPPopToWords@Base 2.1.10-1
+ j__1_Leaf2PopToWords@Base 2.1.10-1
+ j__1_Leaf3PopToWords@Base 2.1.10-1
+ j__1_Leaf4PopToWords@Base 2.1.10-1
+ j__1_Leaf5PopToWords@Base 2.1.10-1
+ j__1_Leaf6PopToWords@Base 2.1.10-1
+ j__1_Leaf7PopToWords@Base 2.1.10-1
+ j__1_LeafWPopToWords@Base 2.1.10-1
+ j__L_BranchBJPPopToWords@Base 2.1.10-1
+ j__L_Leaf1Offset@Base 2.1.10-1
+ j__L_Leaf1PopToWords@Base 2.1.10-1
+ j__L_Leaf2Offset@Base 2.1.10-1
+ j__L_Leaf2PopToWords@Base 2.1.10-1
+ j__L_Leaf3Offset@Base 2.1.10-1
+ j__L_Leaf3PopToWords@Base 2.1.10-1
+ j__L_Leaf4Offset@Base 2.1.10-1
+ j__L_Leaf4PopToWords@Base 2.1.10-1
+ j__L_Leaf5Offset@Base 2.1.10-1
+ j__L_Leaf5PopToWords@Base 2.1.10-1
+ j__L_Leaf6Offset@Base 2.1.10-1
+ j__L_Leaf6PopToWords@Base 2.1.10-1
+ j__L_Leaf7Offset@Base 2.1.10-1
+ j__L_Leaf7PopToWords@Base 2.1.10-1
+ j__L_LeafVPopToWords@Base 2.1.10-1
+ j__L_LeafWOffset@Base 2.1.10-1
+ j__L_LeafWPopToWords@Base 2.1.10-1
+ j__u1MaxWords@Base 2.1.10-1
+ j__uLMaxWords@Base 2.1.10-1
+ j__udy1AllocJ1PM@Base 2.1.10-1
+ j__udy1AllocJBB@Base 2.1.10-1
+ j__udy1AllocJBBJP@Base 2.1.10-1
+ j__udy1AllocJBL@Base 2.1.10-1
+ j__udy1AllocJBU@Base 2.1.10-1
+ j__udy1AllocJLB1@Base 2.1.10-1
+ j__udy1AllocJLL2@Base 2.1.10-1
+ j__udy1AllocJLL3@Base 2.1.10-1
+ j__udy1AllocJLL4@Base 2.1.10-1
+ j__udy1AllocJLL5@Base 2.1.10-1
+ j__udy1AllocJLL6@Base 2.1.10-1
+ j__udy1AllocJLL7@Base 2.1.10-1
+ j__udy1AllocJLW@Base 2.1.10-1
+ j__udy1BranchBToBranchL@Base 2.1.10-1
+ j__udy1Cascade2@Base 2.1.10-1
+ j__udy1Cascade3@Base 2.1.10-1
+ j__udy1Cascade4@Base 2.1.10-1
+ j__udy1Cascade5@Base 2.1.10-1
+ j__udy1Cascade6@Base 2.1.10-1
+ j__udy1Cascade7@Base 2.1.10-1
+ j__udy1CascadeL@Base 2.1.10-1
+ j__udy1CreateBranchB@Base 2.1.10-1
+ j__udy1CreateBranchL@Base 2.1.10-1
+ j__udy1CreateBranchU@Base 2.1.10-1
+ j__udy1FreeJ1PM@Base 2.1.10-1
+ j__udy1FreeJBB@Base 2.1.10-1
+ j__udy1FreeJBBJP@Base 2.1.10-1
+ j__udy1FreeJBL@Base 2.1.10-1
+ j__udy1FreeJBU@Base 2.1.10-1
+ j__udy1FreeJLB1@Base 2.1.10-1
+ j__udy1FreeJLL2@Base 2.1.10-1
+ j__udy1FreeJLL3@Base 2.1.10-1
+ j__udy1FreeJLL4@Base 2.1.10-1
+ j__udy1FreeJLL5@Base 2.1.10-1
+ j__udy1FreeJLL6@Base 2.1.10-1
+ j__udy1FreeJLL7@Base 2.1.10-1
+ j__udy1FreeJLW@Base 2.1.10-1
+ j__udy1FreeSM@Base 2.1.10-1
+ j__udy1InsertBranch@Base 2.1.10-1
+ j__udy1JPPop1@Base 2.1.10-1
+ j__udy1Leaf1ToLeaf2@Base 2.1.10-1
+ j__udy1Leaf2ToLeaf3@Base 2.1.10-1
+ j__udy1Leaf3ToLeaf4@Base 2.1.10-1
+ j__udy1Leaf4ToLeaf5@Base 2.1.10-1
+ j__udy1Leaf5ToLeaf6@Base 2.1.10-1
+ j__udy1Leaf6ToLeaf7@Base 2.1.10-1
+ j__udy1Leaf7ToLeafW@Base 2.1.10-1
+ j__udy1Test@Base 2.1.10-1
+ j__udyLAllocJBB@Base 2.1.10-1
+ j__udyLAllocJBBJP@Base 2.1.10-1
+ j__udyLAllocJBL@Base 2.1.10-1
+ j__udyLAllocJBU@Base 2.1.10-1
+ j__udyLAllocJLB1@Base 2.1.10-1
+ j__udyLAllocJLL1@Base 2.1.10-1
+ j__udyLAllocJLL2@Base 2.1.10-1
+ j__udyLAllocJLL3@Base 2.1.10-1
+ j__udyLAllocJLL4@Base 2.1.10-1
+ j__udyLAllocJLL5@Base 2.1.10-1
+ j__udyLAllocJLL6@Base 2.1.10-1
+ j__udyLAllocJLL7@Base 2.1.10-1
+ j__udyLAllocJLPM@Base 2.1.10-1
+ j__udyLAllocJLW@Base 2.1.10-1
+ j__udyLAllocJV@Base 2.1.10-1
+ j__udyLBranchBToBranchL@Base 2.1.10-1
+ j__udyLCascade1@Base 2.1.10-1
+ j__udyLCascade2@Base 2.1.10-1
+ j__udyLCascade3@Base 2.1.10-1
+ j__udyLCascade4@Base 2.1.10-1
+ j__udyLCascade5@Base 2.1.10-1
+ j__udyLCascade6@Base 2.1.10-1
+ j__udyLCascade7@Base 2.1.10-1
+ j__udyLCascadeL@Base 2.1.10-1
+ j__udyLCreateBranchB@Base 2.1.10-1
+ j__udyLCreateBranchL@Base 2.1.10-1
+ j__udyLCreateBranchU@Base 2.1.10-1
+ j__udyLFreeJBB@Base 2.1.10-1
+ j__udyLFreeJBBJP@Base 2.1.10-1
+ j__udyLFreeJBL@Base 2.1.10-1
+ j__udyLFreeJBU@Base 2.1.10-1
+ j__udyLFreeJLB1@Base 2.1.10-1
+ j__udyLFreeJLL1@Base 2.1.10-1
+ j__udyLFreeJLL2@Base 2.1.10-1
+ j__udyLFreeJLL3@Base 2.1.10-1
+ j__udyLFreeJLL4@Base 2.1.10-1
+ j__udyLFreeJLL5@Base 2.1.10-1
+ j__udyLFreeJLL6@Base 2.1.10-1
+ j__udyLFreeJLL7@Base 2.1.10-1
+ j__udyLFreeJLPM@Base 2.1.10-1
+ j__udyLFreeJLW@Base 2.1.10-1
+ j__udyLFreeJV@Base 2.1.10-1
+ j__udyLFreeSM@Base 2.1.10-1
+ j__udyLGet@Base 2.1.10-1
+ j__udyLInsertBranch@Base 2.1.10-1
+ j__udyLJPPop1@Base 2.1.10-1
+ j__udyLLeaf1ToLeaf2@Base 2.1.10-1
+ j__udyLLeaf2ToLeaf3@Base 2.1.10-1
+ j__udyLLeaf3ToLeaf4@Base 2.1.10-1
+ j__udyLLeaf4ToLeaf5@Base 2.1.10-1
+ j__udyLLeaf5ToLeaf6@Base 2.1.10-1
+ j__udyLLeaf6ToLeaf7@Base 2.1.10-1
+ j__udyLLeaf7ToLeafW@Base 2.1.10-1
+ j__udyLLeafB1ToLeaf1@Base 2.1.10-1
  kbsearch@Base 2.0.1
  kfprintf@Base 2.1.0-1
 #MISSING: 2.1.0-1# knprintf@Base 2.0.1
  kprintf@Base 2.1.0-1
  ksort@Base 2.0.1
+ old_kfprintf@Base 2.1.10-1
+ old_string_printf@Base 2.1.10-1
+ old_string_vprintf@Base 2.1.10-1
+ old_vkfprintf@Base 2.1.10-1
  pLogErr@Base 2.0.1
  pLogLibErr@Base 2.0.1
  pLogLibMsg@Base 2.0.1
@@ -1047,8 +1418,12 @@ libklib.so.1 sra-toolkit-libs0 #MINVER#
  string_rchr@Base 2.0.1
  string_size@Base 2.0.1
  string_vprintf@Base 2.0.1
+ structured_printf@Base 2.1.10-1
+ structured_sprintf@Base 2.1.10-1
  tolower_copy@Base 2.0.1
  toupper_copy@Base 2.0.1
+ unpack_8_from_1_arr@Base 2.1.10-1
+ unpack_8_from_2_arr@Base 2.1.10-1
  utf16_cvt_string_copy@Base 2.0.1
  utf16_cvt_string_len@Base 2.0.1
  utf16_cvt_string_measure@Base 2.0.1
@@ -1114,6 +1489,7 @@ libkproc.so.1 sra-toolkit-libs0 #MINVER#
  KRWLockUnlock@Base 2.0.1
  KSemaphoreAddRef@Base 2.0.1
  KSemaphoreAlloc@Base 2.0.1
+ KSemaphoreCancel@Base 2.1.10-1
  KSemaphoreCount@Base 2.0.1
  KSemaphoreFree@Base 2.0.1
  KSemaphoreMake@Base 2.0.1
@@ -1138,6 +1514,64 @@ libkq.so.1 sra-toolkit-libs0 #MINVER#
  KQueueRelease@Base 2.0.1
  KQueueSeal@Base 2.0.1
  KQueueSealed@Base 2.0.1
+libkrypto.so.1 sra-toolkit-libs0 #MINVER#
+ AES_decrypt@Base 2.1.10-1
+ AES_encrypt@Base 2.1.10-1
+ AES_set_decrypt_key@Base 2.1.10-1
+ AES_set_encrypt_key@Base 2.1.10-1
+ KAESCipherAlloc@Base 2.1.10-1
+ KAESCipherDecrypt@Base 2.1.10-1
+ KAESCipherEncrypt@Base 2.1.10-1
+ KAESCipherInit@Base 2.1.10-1
+ KAESCipherKeySize@Base 2.1.10-1
+ KAESCipherSetDecryptKey@Base 2.1.10-1
+ KAESCipherSetEncryptKey@Base 2.1.10-1
+ KBlockCipherAddRef@Base 2.1.10-1
+ KBlockCipherAlloc@Base 2.1.10-1
+ KBlockCipherBlockSize@Base 2.1.10-1
+ KBlockCipherClassName@Base 2.1.10-1
+ KBlockCipherDecrypt@Base 2.1.10-1
+ KBlockCipherDestroy@Base 2.1.10-1
+ KBlockCipherEncrypt@Base 2.1.10-1
+ KBlockCipherInit@Base 2.1.10-1
+ KBlockCipherKeySize@Base 2.1.10-1
+ KBlockCipherRelease@Base 2.1.10-1
+ KBlockCipherSetDecryptKey@Base 2.1.10-1
+ KBlockCipherSetEncryptKey@Base 2.1.10-1
+ KCipherAddref@Base 2.1.10-1
+ KCipherAlloc@Base 2.1.10-1
+ KCipherBlockSize@Base 2.1.10-1
+ KCipherClassName@Base 2.1.10-1
+ KCipherDecrypt@Base 2.1.10-1
+ KCipherDecryptCBC@Base 2.1.10-1
+ KCipherDecryptECB@Base 2.1.10-1
+ KCipherEncrypt@Base 2.1.10-1
+ KCipherEncryptCBC@Base 2.1.10-1
+ KCipherEncryptECB@Base 2.1.10-1
+ KCipherInit@Base 2.1.10-1
+ KCipherManagerAddRef@Base 2.1.10-1
+ KCipherManagerDestroy@Base 2.1.10-1
+ KCipherManagerMake@Base 2.1.10-1
+ KCipherManagerMakeCipher@Base 2.1.10-1
+ KCipherManagerRelease@Base 2.1.10-1
+ KCipherRelease@Base 2.1.10-1
+ KCipherSetDecryptIVec@Base 2.1.10-1
+ KCipherSetDecryptKey@Base 2.1.10-1
+ KCipherSetEncryptIVec@Base 2.1.10-1
+ KCipherSetEncryptKey@Base 2.1.10-1
+ KEncFileGetRawFile@Base 2.1.10-1
+ KEncFileMakeRead@Base 2.1.10-1
+ KEncFileMakeUpdate@Base 2.1.10-1
+ KEncFileMakeWrite@Base 2.1.10-1
+ KEncFileSetRawFile@Base 2.1.10-1
+ KEncFileValidate@Base 2.1.10-1
+ KFileIsEnc@Base 2.1.10-1
+ KFileIsWGAEnc@Base 2.1.10-1
+ KFileMakeWGAEncRead@Base 2.1.10-1
+ KKeyInitHex@Base 2.1.10-1
+ KKeyInitRead@Base 2.1.10-1
+ KKeyInitUpdate@Base 2.1.10-1
+ WGAEncValidate@Base 2.1.10-1
 libksproc.so.1 sra-toolkit-libs0 #MINVER#
  KBarrierAddRef@Base 2.0.1
  KBarrierMake@Base 2.0.1
@@ -1257,6 +1691,7 @@ libksrch.so.1 sra-toolkit-libs0 #MINVER#
  push_out@Base 2.0.1
 libkxfs.so.1 sra-toolkit-libs0 #MINVER#
  KDirectoryOpenXTocDirRead@Base 2.0.1
+ KDirectoryVOpenXTocDirRead@Base 2.1.10-1
  XTocEntryPathType@Base 2.0.1
  XTocEntryResolvePath@Base 2.0.1
  XTocListingMake@Base 2.0.1
@@ -1330,6 +1765,7 @@ libsradb.so.3 sra-toolkit-libs0 #MINVER#
  SRAColumnWhack@Base 2.1.0-1
  SRAMgrAddRef@Base 2.0.1
  SRAMgrAttach@Base 2.0.1
+ SRAMgrConfigReload@Base 2.1.10-1
  SRAMgrFlushRepPath@Base 2.0.1
  SRAMgrFlushRun@Base 2.0.1
  SRAMgrFlushVolPath@Base 2.0.1
@@ -1348,6 +1784,7 @@ libsradb.so.3 sra-toolkit-libs0 #MINVER#
  SRAMgrRelease@Base 2.0.1
  SRAMgrRunBGTasks@Base 2.0.1
  SRAMgrSever@Base 2.0.1
+ SRAMgrSingleFileArchiveExt@Base 2.1.10-1
  SRAMgrUseSRAPath@Base 2.0.1
  SRAMgrUseSchemaRead@Base 2.0.1
  SRAMgrVGetTableModDate@Base 2.0.1
@@ -1362,6 +1799,7 @@ libsradb.so.3 sra-toolkit-libs0 #MINVER#
  SRAPathAddRef@Base 2.0.1
  SRAPathAddRepPath@Base 2.0.1
  SRAPathAddVolPath@Base 2.0.1
+ SRAPathClean@Base 2.1.10-1
  SRAPathClear@Base 2.0.1
  SRAPathFind@Base 2.0.1
  SRAPathFindWithRepLen@Base 2.0.1
@@ -1384,7 +1822,7 @@ libsradb.so.3 sra-toolkit-libs0 #MINVER#
  SRATableGetSpotId@Base 2.0.1
  SRATableGetVTableRead@Base 2.0.1
  SRATableListCol@Base 2.0.1
- SRATableLoadMetadata@Base 2.0.1
+#MISSING: 2.1.10-1# SRATableLoadMetadata@Base 2.0.1
  SRATableLocked@Base 2.0.1
  SRATableMakeSingleFileArchive@Base 2.0.1
  SRATableMaxMetaRevision@Base 2.0.1
@@ -1519,6 +1957,7 @@ libvdb.so.2 sra-toolkit-libs0 #MINVER#
  PageMapCompareStatic@Base 2.0.1
  PageMapDeserialize@Base 2.0.1
  PageMapFastRowCount@Base 2.0.1
+ PageMapFindRow@Base 2.1.10-1
  PageMapFixedRowLength@Base 2.0.1
  PageMapGetIdxRowInfo@Base 2.0.1
  PageMapHasRows@Base 2.0.1
@@ -1530,6 +1969,9 @@ libvdb.so.2 sra-toolkit-libs0 #MINVER#
  PageMapNewSingle@Base 2.0.1
  PageMapRelease@Base 2.0.1
  PageMapSerialize@Base 2.0.1
+ ReportResetDatabase@Base 2.1.10-1
+ ReportResetTable@Base 2.1.10-1
+ ReportSetVDBManager@Base 2.1.10-1
  SColumnCmp@Base 2.0.1
  SColumnDefDump@Base 2.0.1
  SColumnDump@Base 2.0.1
@@ -1658,6 +2100,9 @@ libvdb.so.2 sra-toolkit-libs0 #MINVER#
  STypesetMark@Base 2.0.1
  SchemaEnvInit@Base 2.0.1
  StringDump@Base 2.0.1
+ UIDatabaseLOGError@Base 2.1.10-1
+ UIError@Base 2.1.10-1
+ UITableLOGError@Base 2.1.10-1
  VBlobAppend@Base 2.0.1
  VBlobAppendRow@Base 2.0.1
  VBlobBufferSplit@Base 2.0.1
@@ -1754,12 +2199,22 @@ libvdb.so.2 sra-toolkit-libs0 #MINVER#
  VCursorVAddColumn@Base 2.0.1
  VCursorVGetColumnIdx@Base 2.0.1
  VCursorWhack@Base 2.1.7a
+ VDBDependenciesCircular@Base 2.1.10-1
+ VDBDependenciesCount@Base 2.1.10-1
+ VDBDependenciesLocal@Base 2.1.10-1
+ VDBDependenciesName@Base 2.1.10-1
+ VDBDependenciesPath@Base 2.1.10-1
+ VDBDependenciesRelease@Base 2.1.10-1
+ VDBDependenciesSeqId@Base 2.1.10-1
+ VDBDependenciesType@Base 2.1.10-1
  VDBManagerAddLoadLibraryPath@Base 2.0.1
  VDBManagerAddRef@Base 2.0.1
  VDBManagerAddSchemaIncludePath@Base 2.0.1
  VDBManagerAttach@Base 2.0.1
  VDBManagerConfigPaths@Base 2.0.1
+ VDBManagerGetObjVersion@Base 2.1.10-1
  VDBManagerGetUserData@Base 2.0.1
+ VDBManagerListExternalSchemaModules@Base 2.1.10-1
  VDBManagerMakeMem@Base 2.0.1
  VDBManagerMakeRead@Base 2.0.1
  VDBManagerMakeSchema@Base 2.0.1
@@ -1781,7 +2236,9 @@ libvdb.so.2 sra-toolkit-libs0 #MINVER#
  VDatabaseAddRef@Base 2.0.1
  VDatabaseAttach@Base 2.0.1
  VDatabaseGetUserData@Base 2.0.1
+ VDatabaseIsAlias@Base 2.1.10-1
  VDatabaseListDB@Base 2.0.1
+ VDatabaseListDependencies@Base 2.1.10-1
  VDatabaseListTbl@Base 2.0.1
  VDatabaseLoadSchema@Base 2.0.1
  VDatabaseLocked@Base 2.0.1
@@ -1818,6 +2275,7 @@ libvdb.so.2 sra-toolkit-libs0 #MINVER#
  VLinkerFindUntyped@Base 2.0.1
  VLinkerInitFactories@Base 2.0.1
  VLinkerInitFactoriesRead@Base 2.0.1
+ VLinkerListExternalSchemaModules@Base 2.1.10-1
  VLinkerMake@Base 2.0.1
  VLinkerMakeIntrinsic@Base 2.0.1
  VLinkerOpen@Base 2.0.1
@@ -2026,6 +2484,42 @@ libvdb.so.2 sra-toolkit-libs0 #MINVER#
  vdb_select@Base 2.0.1
  vdb_split@Base 2.0.1
  vdb_transpose@Base 2.1.7a
+libvfs.so.1 sra-toolkit-libs0 #MINVER#
+ VFSManagerAddRef@Base 2.1.10-1
+ VFSManagerCreateFile@Base 2.1.10-1
+ VFSManagerDestroy@Base 2.1.10-1
+ VFSManagerGetCPath@Base 2.1.10-1
+ VFSManagerGetCWD@Base 2.1.10-1
+ VFSManagerGetConfigPWFd@Base 2.1.10-1
+ VFSManagerGetConfigPWFile@Base 2.1.10-1
+ VFSManagerGetKryptoPassword@Base 2.1.10-1
+ VFSManagerMake@Base 2.1.10-1
+ VFSManagerOpenDirectoryRead@Base 2.1.10-1
+ VFSManagerOpenFileRead@Base 2.1.10-1
+ VFSManagerOpenFileWrite@Base 2.1.10-1
+ VFSManagerRelease@Base 2.1.10-1
+ VFSManagerRemove@Base 2.1.10-1
+ VFSManagerUpdateKryptoPassword@Base 2.1.10-1
+ VPOptionCmp@Base 2.1.10-1
+ VPOptionMake@Base 2.1.10-1
+ VPOptionSort@Base 2.1.10-1
+ VPOptionWhack@Base 2.1.10-1
+ VPathAddRef@Base 2.1.10-1
+ VPathDestroy@Base 2.1.10-1
+ VPathGetCWD@Base 2.1.10-1
+ VPathMake@Base 2.1.10-1
+ VPathMakeCurrentPath@Base 2.1.10-1
+ VPathMakeFmt@Base 2.1.10-1
+ VPathMakeRelative@Base 2.1.10-1
+ VPathMakeSysPath@Base 2.1.10-1
+ VPathMakeVFmt@Base 2.1.10-1
+ VPathOption@Base 2.1.10-1
+ VPathReadFragment@Base 2.1.10-1
+ VPathReadPath@Base 2.1.10-1
+ VPathReadQuery@Base 2.1.10-1
+ VPathRelease@Base 2.1.10-1
+ VPathTransformPathHier@Base 2.1.10-1
+ VPathTransformSysPath@Base 2.1.10-1
 libwkdb.so.1 sra-toolkit-libs0 #MINVER#
  KBTreeAddRef@Base 2.0.1
  KBTreeDropBacking@Base 2.0.1
@@ -2212,6 +2706,8 @@ libwkdb.so.1 sra-toolkit-libs0 #MINVER#
  KDatabaseDropIndex@Base 2.0.1
  KDatabaseDropTable@Base 2.0.1
  KDatabaseExists@Base 2.0.1
+ KDatabaseGetPath@Base 2.1.10-1
+ KDatabaseIsAlias@Base 2.1.10-1
  KDatabaseListDB@Base 2.0.1
  KDatabaseListIdx@Base 2.0.1
  KDatabaseListTbl@Base 2.0.1
@@ -2352,6 +2848,8 @@ libwkdb.so.1 sra-toolkit-libs0 #MINVER#
  KTableDropColumn@Base 2.0.1
  KTableDropIndex@Base 2.0.1
  KTableExists@Base 2.0.1
+ KTableGetPath@Base 2.1.10-1
+ KTableIsAlias@Base 2.1.10-1
  KTableListCol@Base 2.0.1
  KTableListIdx@Base 2.0.1
  KTableLock@Base 2.0.1
@@ -2424,6 +2922,7 @@ libwsradb.so.3 sra-toolkit-libs0 #MINVER#
  SRAColumnWhack@Base 2.1.0-1
  SRAMgrAddRef@Base 2.0.1
  SRAMgrAttach@Base 2.0.1
+ SRAMgrConfigReload@Base 2.1.10-1
  SRAMgrCreateTable@Base 2.0.1
  SRAMgrDropTable@Base 2.0.1
  SRAMgrFlushRepPath@Base 2.0.1
@@ -2444,6 +2943,7 @@ libwsradb.so.3 sra-toolkit-libs0 #MINVER#
  SRAMgrRunBGTasks@Base 2.0.1
  SRAMgrSetMD5Mode@Base 2.0.1
  SRAMgrSever@Base 2.0.1
+ SRAMgrSingleFileArchiveExt@Base 2.1.10-1
  SRAMgrUnlock@Base 2.0.1
  SRAMgrUseSRAPath@Base 2.0.1
  SRAMgrVCreateTable@Base 2.0.1
@@ -2462,6 +2962,7 @@ libwsradb.so.3 sra-toolkit-libs0 #MINVER#
  SRAPathAddRef@Base 2.0.1
  SRAPathAddRepPath@Base 2.0.1
  SRAPathAddVolPath@Base 2.0.1
+ SRAPathClean@Base 2.1.10-1
  SRAPathClear@Base 2.0.1
  SRAPathFind@Base 2.0.1
  SRAPathFindWithRepLen@Base 2.0.1
@@ -2486,7 +2987,7 @@ libwsradb.so.3 sra-toolkit-libs0 #MINVER#
  SRATableGetSpotId@Base 2.0.1
  SRATableGetVTableRead@Base 2.0.1
  SRATableListCol@Base 2.0.1
- SRATableLoadMetadata@Base 2.0.1
+#MISSING: 2.1.10-1# SRATableLoadMetadata@Base 2.0.1
  SRATableLocked@Base 2.0.1
  SRATableMakeSingleFileArchive@Base 2.0.1
  SRATableMaxMetaRevision@Base 2.0.1
@@ -2556,6 +3057,7 @@ libwvdb.so.2 sra-toolkit-libs0 #MINVER#
  PageMapCompareStatic@Base 2.0.1
  PageMapDeserialize@Base 2.0.1
  PageMapFastRowCount@Base 2.0.1
+ PageMapFindRow@Base 2.1.10-1
  PageMapFixedRowLength@Base 2.0.1
  PageMapGetIdxRowInfo@Base 2.0.1
  PageMapHasRows@Base 2.0.1
@@ -2567,6 +3069,9 @@ libwvdb.so.2 sra-toolkit-libs0 #MINVER#
  PageMapNewSingle@Base 2.0.1
  PageMapRelease@Base 2.0.1
  PageMapSerialize@Base 2.0.1
+ ReportResetDatabase@Base 2.1.10-1
+ ReportResetTable@Base 2.1.10-1
+ ReportSetVDBManager@Base 2.1.10-1
  SColumnCmp@Base 2.0.1
  SColumnDefDump@Base 2.0.1
  SColumnDump@Base 2.0.1
@@ -2695,6 +3200,9 @@ libwvdb.so.2 sra-toolkit-libs0 #MINVER#
  STypesetMark@Base 2.0.1
  SchemaEnvInit@Base 2.0.1
  StringDump@Base 2.0.1
+ UIDatabaseLOGError@Base 2.1.10-1
+ UIError@Base 2.1.10-1
+ UITableLOGError@Base 2.1.10-1
  VBlobAppend@Base 2.0.1
  VBlobAppendRow@Base 2.0.1
  VBlobBufferSplit@Base 2.0.1
@@ -2798,6 +3306,14 @@ libwvdb.so.2 sra-toolkit-libs0 #MINVER#
  VCursorVGetColumnIdx@Base 2.0.1
  VCursorWhack@Base 2.1.7a
  VCursorWrite@Base 2.0.1
+ VDBDependenciesCircular@Base 2.1.10-1
+ VDBDependenciesCount@Base 2.1.10-1
+ VDBDependenciesLocal@Base 2.1.10-1
+ VDBDependenciesName@Base 2.1.10-1
+ VDBDependenciesPath@Base 2.1.10-1
+ VDBDependenciesRelease@Base 2.1.10-1
+ VDBDependenciesSeqId@Base 2.1.10-1
+ VDBDependenciesType@Base 2.1.10-1
  VDBManagerAddLoadLibraryPath@Base 2.0.1
  VDBManagerAddRef@Base 2.0.1
  VDBManagerAddSchemaIncludePath@Base 2.0.1
@@ -2806,7 +3322,9 @@ libwvdb.so.2 sra-toolkit-libs0 #MINVER#
  VDBManagerCreateDB@Base 2.0.1
  VDBManagerCreateTable@Base 2.0.1
  VDBManagerDrop@Base 2.0.1
+ VDBManagerGetObjVersion@Base 2.1.10-1
  VDBManagerGetUserData@Base 2.0.1
+ VDBManagerListExternalSchemaModules@Base 2.1.10-1
  VDBManagerLock@Base 2.0.1
  VDBManagerMakeMem@Base 2.0.1
  VDBManagerMakeSchema@Base 2.0.1
@@ -2845,7 +3363,9 @@ libwvdb.so.2 sra-toolkit-libs0 #MINVER#
  VDatabaseDropDB@Base 2.0.1
  VDatabaseDropTable@Base 2.0.1
  VDatabaseGetUserData@Base 2.0.1
+ VDatabaseIsAlias@Base 2.1.10-1
  VDatabaseListDB@Base 2.0.1
+ VDatabaseListDependencies@Base 2.1.10-1
  VDatabaseListTbl@Base 2.0.1
  VDatabaseLoadSchema@Base 2.0.1
  VDatabaseLock@Base 2.0.1
@@ -2899,6 +3419,7 @@ libwvdb.so.2 sra-toolkit-libs0 #MINVER#
  VLinkerFindUntyped@Base 2.0.1
  VLinkerInitFactories@Base 2.0.1
  VLinkerInitFactoriesRead@Base 2.0.1
+ VLinkerListExternalSchemaModules@Base 2.1.10-1
  VLinkerMake@Base 2.0.1
  VLinkerMakeIntrinsic@Base 2.0.1
  VLinkerOpen@Base 2.0.1
