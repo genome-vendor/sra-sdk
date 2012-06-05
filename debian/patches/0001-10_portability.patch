@@ -1,8 +1,19 @@
---- sra-sdk.orig/build/Makefile.gcc
-+++ sra-sdk/build/Makefile.gcc
-@@ -46,12 +46,6 @@
- # tool options
- WARN = -Wall # -Wconversion
+From: Nathan Nutter <nnutter@genome.wustl.edu>
+Date: Tue, 5 Jun 2012 13:18:18 -0500
+Subject: 10_portability
+
+---
+ build/Makefile.gcc   |    6 ------
+ build/Makefile.shell |   16 +++++++++++-----
+ 2 files changed, 11 insertions(+), 11 deletions(-)
+
+diff --git a/build/Makefile.gcc b/build/Makefile.gcc
+index 3db6bf8..63de882 100644
+--- a/build/Makefile.gcc
++++ b/build/Makefile.gcc
+@@ -49,12 +49,6 @@ ifeq (linux,$(OS))
+     NO_ARRAY_BOUNDS_WARNING = -Wno-array-bounds
+ endif
  
 -ifeq (64,$(BITS))
 -	CARCH = -m64
@@ -13,8 +24,10 @@
  ifeq (prof, $(BUILD))
  	PROF = -pg
  endif
---- sra-sdk.orig/build/Makefile.shell
-+++ sra-sdk/build/Makefile.shell
+diff --git a/build/Makefile.shell b/build/Makefile.shell
+index 98f5a16..245ea4e 100644
+--- a/build/Makefile.shell
++++ b/build/Makefile.shell
 @@ -26,6 +26,7 @@
  # determine OS
  UNAME = $(shell uname -s)
@@ -23,7 +36,7 @@
  ifeq (Darwin, $(UNAME))
  	OS = mac
  endif
-@@ -41,11 +42,16 @@
+@@ -41,11 +42,16 @@ endif
  ifeq (xMINGW, $(findstring xMINGW,x$(UNAME)))
  	OS = win
  endif
@@ -36,11 +49,11 @@
  OSFLAV = $(OS)
  
  # determine ARCH
-+ARCH=''
++ARCH = ''
  ifeq (mac,$(OS))
  	ARCH = $(shell $(TOP)/build/mac.arch.sh)
  else
-@@ -70,13 +76,13 @@
+@@ -80,13 +86,13 @@ else
  		ARCH = sparc32
  	endif
  endif
@@ -59,3 +72,4 @@
  
  # first pass through defines SRCDIR
  ifndef SRCDIR
+-- 
