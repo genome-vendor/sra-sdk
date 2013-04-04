@@ -1,3 +1,11 @@
+sra-sdk (2.3.1-1~beta1) testing; urgency=low
+
+  * Beta 1 release of 2.3.1-1.
+  * Imported 2.3.1 upstream sources.
+  * Removed old Makefile patch and created new patch to remove ext/libs.
+
+ -- Nathaniel Nutter <nnutter@genome.wustl.edu>  Thu, 04 Apr 2013 14:30:12 -0500
+
 sra-sdk (2.1.10-1) testing; urgency=low
 
   * Imported 2.1.10 upstream sources.
