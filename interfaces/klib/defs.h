@@ -33,10 +33,11 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
+#else
+#include <stdbool.h>
 #endif
 
 /*--------------------------------------------------------------------------
@@ -112,7 +113,7 @@ typedef uint32_t ver_t;
 
 /*--------------------------------------------------------------------------
  * KCreateMode
- *  values are defined in <kfs/directory.h>
+ *  values are defined in <kfs/defs.h>
  */
 typedef uint32_t KCreateMode;
 

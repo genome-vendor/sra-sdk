@@ -61,6 +61,11 @@ extern "C" {
 #define OPTION_EXCLUDED_COLUMNS  "exclude"
 #define OPTION_BOOLEAN           "boolean"
 #define OPTION_OBJVER            "obj_version"
+#define OPTION_OBJTYPE           "obj_type"
+#define OPTION_NUMELEM           "numelem"
+#define OPTION_NUMELEMSUM        "numelemsum"
+#define OPTION_SHOW_BLOBBING     "blobbing"
+#define OPTION_ENUM_PHYS         "phys"
 
 #define ALIAS_ROW_ID_ON         "I"
 #define ALIAS_LINE_FEED         "l"
@@ -85,6 +90,9 @@ extern "C" {
 #define ALIAS_EXCLUDED_COLUMNS  "x"
 #define ALIAS_BOOLEAN           "b"
 #define ALIAS_OBJVER            "j"
+#define ALIAS_OBJTYPE           "y"
+#define ALIAS_NUMELEM           "u"
+#define ALIAS_NUMELEMSUM        "U"
 
 typedef enum dump_format_t
 {
@@ -130,6 +138,11 @@ typedef struct dump_context
     bool without_sra_types;
     bool dont_check_accession;
     bool objver_requested;
+    bool objtype_requested;
+    bool print_num_elem;
+    bool sum_num_elem;
+    bool show_blobbing;
+    bool enum_phys;
 } dump_context;
 typedef dump_context* p_dump_context;
 

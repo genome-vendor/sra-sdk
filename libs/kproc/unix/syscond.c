@@ -29,6 +29,7 @@
 
 #include <kproc/extern.h>
 #include <os-native.h>
+#include <kproc/timeout.h>
 #include <kproc/cond.h>
 #include <klib/out.h>
 #include <klib/rc.h>
@@ -165,7 +166,7 @@ LIB_EXPORT rc_t CC KConditionRelease ( const KCondition *cself )
     KCondition *self = ( KCondition* ) cself;
     if ( cself != NULL )
     {
-        if ( atomic32_dec_and_test ( & self -> refcount ) )
+        if ( atomic32_add ( & self -> refcount, -1 ) <= 1 )
             return KConditionWhack ( self );
     }
     return 0;

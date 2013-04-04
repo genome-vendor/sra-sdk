@@ -27,12 +27,17 @@
 #ifndef NCBI_NK_UNIT_TEST__SUITE_HPP
 #define NCBI_NK_UNIT_TEST__SUITE_HPP
 
+// turn on INT64_C, UINT64_C etc.
+#define __STDC_CONSTANT_MACROS
+#include <klib/defs.h>
+
 #include <string>
 #include <vector>
 #include <cassert>
 #include <iostream>
 
-#include <klib/rc.h>
+// it's generally a bad idea to make the test suite rely upon code under test
+#define ALLOW_TESTING_CODE_TO_RELY_UPON_CODE_BEING_TESTED 0
 
 ////////////////////////////////////////////////////////////////////////////////
 // these macros are available outside of test cases' code
@@ -53,6 +58,10 @@
 #define GET_TEST_SUITE ncbi::NK::GetTestSuite
 
 ////////////////////////////////////////////////////////////////////////////////
+
+#if ALLOW_TESTING_CODE_TO_RELY_UPON_CODE_BEING_TESTED
+struct Args;
+#endif
 
 namespace ncbi { namespace NK { 
 
@@ -81,9 +90,14 @@ extern void _REPORT_CRITICAL_ERROR_(const std::string& msg, const char* file, in
 
 template<class T> const T abs(const T& a) { return a >= 0 ? a : -a; }
 
+class TestCase;
+
 class TestEnv {
 public:
-    TestEnv(int argc, char* argv[]);
+	typedef rc_t ArgsHandler(int argc, char* argv[]);
+
+    TestEnv(int argc, char* argv[], ArgsHandler *argsHandler = NULL);
+    ~TestEnv(void);
 
     static void set_handlers(void);
 
@@ -91,18 +105,36 @@ public:
     static LogLevel::E verbosity;
     bool catch_system_errors;
 
-    static int RunProcessTestCase(void(*)(), int);
+    static int RunProcessTestCase(TestCase&, void(TestCase::*)(), int);
     static unsigned int Sleep(unsigned int seconds);
+    
+    static const int TEST_CASE_TIMED_OUT=14;
+    static const int TEST_CASE_FAILED=255;
 
-    static const int TEST_CASE_TIMED_OUT;
-    static const int TEST_CASE_FAILED;
+#if ALLOW_TESTING_CODE_TO_RELY_UPON_CODE_BEING_TESTED
+    static struct Args* GetArgs() { return args; }
+#endif
+
+    static rc_t UsageSummary(const char* progname);
+#if ALLOW_TESTING_CODE_TO_RELY_UPON_CODE_BEING_TESTED
+    static rc_t Usage(const Args* args);
+#else
+    static rc_t Usage(const char *progname);
+#endif
 
 private:
     static void TermHandler();
 
     static void SigHandler(int sig);
 
-    void process_args(int argc, char* argv[]);
+    rc_t process_args(int argc, char* argv[], ArgsHandler* argsHandler);
+
+    int argc2;
+    char** argv2;
+
+#if ALLOW_TESTING_CODE_TO_RELY_UPON_CODE_BEING_TESTED
+    static struct Args* args;
+#endif
 };
 
 class TestCase {
@@ -114,12 +146,14 @@ public:
     const std::string& GetName(void) const { return _name; }
 
 protected:
+    void ErrorCounterAdd(ncbi::NK::counter_t ec) { _ec += ec; }
+
     void report_error(const char* msg, const char* file, int line, bool is_msg = false, bool isCritical = false);
 
     void report_passed(const char* msg, const char* file, int line);
 
-    template<class T1, class T2>
-    void report_error2(const char* e1, const char* e2, T1 t1, T2 t2,
+    template<class T1>
+    void report_error2(const char* e1, const char* e2, T1 t1, T1 t2,
         const char* file, int line, const char* eq, const char* ne,
         bool isCritical = false)
     {
@@ -139,6 +173,22 @@ protected:
         if (isCritical)
         { throw ncbi::NK::execution_aborted(); }
     }
+    // pointers reported as ints (otherwise << may crash if given an invalid pointer)
+    template<class T1>
+    void report_error2(const char* e1, const char* e2, const T1* t1, const T1* t2,
+        const char* file, int line, const char* eq, const char* ne,
+        bool isCritical = false)
+    {
+        report_error2(e1, e2, (uint64_t)t1, (uint64_t)t2,file, line, eq, ne,isCritical);
+    }
+    template<class T1>
+    void report_error2(const char* e1, const char* e2, T1* t1, T1* t2,
+        const char* file, int line, const char* eq, const char* ne,
+        bool isCritical = false)
+    {
+        report_error2(e1, e2, (uint64_t)t1, (uint64_t)t2,file, line, eq, ne,isCritical);
+    }
+
 
     template<class T1, class T2>
     void report_passed2(const char* e1, const char* e2,
@@ -315,11 +365,11 @@ protected:
     {
         if (e1 == 0)
         {
-            report_passed2(e1str, "NULL", e1, 0, file, line, "==", "!=");
+            report_passed2(e1str, "NULL", e1, (const T*)0, file, line, "==", "!=");
         }
         else
         {
-            report_error2 (e1str, "NULL", e1, 0, file, line, "==", "!=", critical);
+            report_error2 (e1str, "NULL", e1, (const T*)0, file, line, "==", "!=", critical);
         }
     }
 #define CHECK_NULL(e1)   AssertNull((e1), #e1, __FILE__,__LINE__, false)
@@ -330,11 +380,11 @@ protected:
     {
         if (e1 != 0)
         {
-            report_passed2(e1str, "NULL", e1, 0, file, line, "!=", "==");
+            report_passed2(e1str, "NULL", e1, (const T*)0, file, line, "!=", "==");
         }
         else
         {
-            report_error2 (e1str, "NULL", e1, 0, file, line, "!=", "==", critical);
+            report_error2 (e1str, "NULL", e1, (const T*)0, file, line, "!=", "==", critical);
         }
     }
 #define CHECK_NOT_NULL(e1)   AssertNotNull((e1), #e1, __FILE__,__LINE__, false)
@@ -379,8 +429,7 @@ private:
     T _cases;
 };
 
-static ncbi::NK::TestRunner* GetTestSuite(void)
-{ static ncbi::NK::TestRunner t; return &t; }
+extern ncbi::NK::TestRunner* GetTestSuite();
 
 template<class TFixture>
 ncbi::NK::counter_t Main(int argc, char* argv[],
@@ -399,6 +448,11 @@ ncbi::NK::counter_t Main(int argc, char* argv[],
         LOG(ncbi::NK::LogLevel::e_test_suite,
             "Leaving test suite \"" << suite_name << "\"\n";)
     } 
+    catch (std::exception& ex) 
+    { 
+        LOG(ncbi::NK::LogLevel::e_nothing, std::string("*** Exception caught: ") + ex.what());
+        ++ec; 
+    }
     catch (...) 
     { 
         ++ec; 

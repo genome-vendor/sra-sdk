@@ -43,18 +43,17 @@ include $(TOP)/build/Makefile.env
 #-------------------------------------------------------------------------------
 # outer targets
 #
-vers-includes: $(addsuffix .vers.h,$(ALL_LIBS))
-
-all std: makedirs vers-includes
+all std: vers-includes
 	@ $(MAKE_CMD) $(TARGDIR)/std
 
-$(INT_LIBS): makedirs vers-includes
+$(INT_LIBS): vers-includes
 	@ $(MAKE_CMD) $(ILIBDIR)/$@
 
-$(EXT_LIBS): makedirs vers-includes
+$(EXT_LIBS): vers-includes
 	@ $(MAKE_CMD) $(LIBDIR)/$@
 
 .PHONY: all std $(ALL_LIBS) $(ALL_DEFS)
+
 
 #-------------------------------------------------------------------------------
 # std
@@ -64,6 +63,13 @@ $(TARGDIR)/std: \
 	$(addprefix $(LIBDIR)/,$(EXT_LIBS))
 
 .PHONY: $(TARGDIR)/std
+
+#-------------------------------------------------------------------------------
+# vers-includes
+#
+$(TARGDIR)/vers-includes: $(addsuffix .vers.h,$(EXT_LIBS))
+
+.PHONY: $(TARGDIR)/vers-includes
 
 #-------------------------------------------------------------------------------
 # clean

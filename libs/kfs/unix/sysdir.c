@@ -46,6 +46,8 @@ struct KSysDirListing;
 #include <klib/klib-priv.h>
 #include <sysalloc.h>
 
+#include "os-native.h"
+
 #ifndef __USE_UNIX98
 #define __USE_UNIX98 1
 #endif
@@ -475,7 +477,8 @@ rc_t KSysDirMakePath ( const KSysDir *self, enum RCContext ctx, bool canon,
             return RC ( rcFS, rcDirectory, ctx, rcPath, rcExcessive );
     }
 
-    if ( buffer [ bsize + psize ] == '/' )
+    /* remove trailing slashes; keep the leading slash */
+    while ( bsize + psize > 1 && buffer [ bsize + psize - 1] == '/' )
         buffer [ bsize + -- psize ] = 0;
 
     if ( psize > 0 && ( canon || self -> root != 0 ) )
@@ -1179,6 +1182,7 @@ rc_t KSysDirRemoveEntry ( char *path, size_t path_max, bool force )
 
         while ( rmdir ( path ) != 0 ) switch ( errno )
         {
+        case EEXIST:
         case ENOTEMPTY:
             if ( force )
             {
@@ -1699,39 +1703,47 @@ rc_t KSysDirCreateParents ( const KSysDir *self,
     return rc;
 }
 
-/* KSysDirCreateAlias
+/* CreateAlias
  *  creates a path alias according to create mode
- *
- *  "targ" [ IN ] - NUL terminated string in directory-native
- *  character set denoting target object
- *
- *  "alias" [ IN ] - NUL terminated string in directory-native
- *  character set denoting target alias
+ *  such that "alias" => "targ"
  *
  *  "access" [ IN ] - standard Unix directory access mode
  *  used when "mode" has kcmParents set and alias path does
  *  not exist.
  *
  *  "mode" [ IN ] - a creation mode ( see explanation above ).
+ *
+ *  "targ" [ IN ] - NUL terminated string in directory-native
+ *  character set denoting target object, i.e. the object which
+ *  is designated by symlink "alias".
+ *
+ *  "alias" [ IN ] - NUL terminated string in directory-native
+ *  character set denoting target alias, i.e. the symlink that
+ *  designates a target "targ".
  */
 static
 rc_t KSysDirCreateAlias ( KSysDir *self,
     uint32_t access, KCreateMode mode,
     const char *targ, const char *alias )
 {
-    char ftarg [ PATH_MAX ];
-    rc_t rc = KSysDirMakePath ( self, rcCreating, true, ftarg, sizeof ftarg, targ, NULL );
+    /* create full path to symlink */
+    char falias [ PATH_MAX ];
+    rc_t rc = KSysDirMakePath ( self, rcCreating, true, falias, sizeof falias, alias, NULL );
     if ( rc == 0 )
     {
-        char falias [ PATH_MAX ];
-        rc = KSysDirMakePath ( self, rcCreating, true, falias, sizeof falias, alias, NULL );
+        /* the full path to target RELATIVE TO self */
+        char ftarg [ PATH_MAX ];
+        rc = KSysDirMakePath ( self, rcCreating, true, ftarg, sizeof ftarg, targ, NULL );
         if ( rc == 0 )
         {
-            /* if "alias" is relative or "self" is chroot'd,
-               "falias" must be made relative */
-            if ( alias [ 0 ] != '/' || self -> root != 0 )
+            /* if "targ" is relative or "self" is chroot'd,
+               "ftarg" must be made relative */
+            if ( targ [ 0 ] != '/' || self -> root != 0 )
             {
-                rc = KSysDirRelativePath ( self, rcCreating, falias, ftarg, sizeof ftarg /*strlen ( ftarg )*/ );
+                /* take path to alias as root.
+                   generate a path RELATIVE TO alias */
+                rc = KSysDirRelativePath ( self, rcCreating, falias,
+                    ftarg, sizeof ftarg /*strlen ( ftarg )*/ );
                 if ( rc != 0 )
                     return rc;
             }
@@ -1746,9 +1758,12 @@ rc_t KSysDirCreateAlias ( KSysDir *self,
                    create-only, force creation by removing old */
                 if ( ( mode & kcmValueMask ) != kcmCreate )
                 {
+                    /* refuse to drop if not an alias */
                     if ( ( KSysDirFullPathType ( falias ) & kptAlias ) == 0 )
                         return RC ( rcFS, rcDirectory, rcCreating, rcPath, rcIncorrect );
-                    rc = KSysDirRemoveEntry ( falias, sizeof falias, 0 );
+
+                    /* drop existing alias */
+                    rc = KSysDirRemoveEntry ( falias, sizeof falias, false );
                     if ( rc == 0 )
                         break;
                 }
@@ -1839,7 +1854,7 @@ rc_t KSysDirOpenFileRead ( const KSysDir *self,
             return RC ( rcFS, rcDirectory, rcOpening, rcNoObj, rcUnknown );
         }
 
-        rc = KSysFileMake ( ( KSysFile** ) f, fd, true, false );
+        rc = KSysFileMake ( ( KSysFile** ) f, fd, full, true, false );
         if ( rc != 0 )
             close ( fd );
     }
@@ -1889,7 +1904,7 @@ rc_t KSysDirOpenFileWrite ( KSysDir *self,
             return RC ( rcFS, rcDirectory, rcOpening, rcNoObj, rcUnknown );
         }
 
-        rc = KSysFileMake ( ( KSysFile** ) f, fd, update, 1 );
+        rc = KSysFileMake ( ( KSysFile** ) f, fd, full, update, 1 );
         if ( rc != 0 )
             close ( fd );
     }
@@ -1942,6 +1957,8 @@ rc_t KSysDirCreateFile ( KSysDir *self, KFile **f, bool update,
                    wherever there is read or write on file */
                 uint32_t dir_access = access |
                     ( ( access & 0444 ) >> 2 ) | ( ( access & 0222 ) >> 1 );
+                /* NEW 2/15/2013 - also force read */
+                dir_access |= ( dir_access & 0111 ) << 2;
                 KSysDirCreateParents ( self, full, dir_access, true );
 
                 /* try again */
@@ -1998,11 +2015,16 @@ rc_t KSysDirCreateFile ( KSysDir *self, KFile **f, bool update,
                 rc = RC ( rcFS, rcDirectory, rcCreating, rcNoObj, rcUnknown );
                 break;
             }
-            PLOGERR (klogErr, (klogErr, rc, "failed to create '$(F)'", "F=%s", full));
+            
+            /* disabled 12/12/2012 : it prints an error message, if vdb tries to open
+               the same reference-object twice via http. The lock-file for the 2nd try
+               does already exist. This is not an error, just a condition. */
+
+            /* PLOGERR (klogErr, (klogErr, rc, "failed to create '$(F)'", "F=%s", full)); */
             return rc;
         }
 
-        rc = KSysFileMake ( ( KSysFile** ) f, fd, update, true );
+        rc = KSysFileMake ( ( KSysFile** ) f, fd, full, update, true );
         if ( rc != 0 )
             close ( fd );
     }
@@ -2121,10 +2143,15 @@ rc_t KSysDirOpenDirRead ( const KSysDir *self,
         size_t path_size = strlen ( full );
         while ( path_size > 1 && full [ path_size - 1 ] == '/' )
             full [ -- path_size ] = 0;
-
-        if ( ( KSysDirFullPathType ( full ) & ( kptAlias - 1 ) ) != kptDir )
-            return RC ( rcFS, rcDirectory, rcOpening, rcPath, rcIncorrect );
-
+            
+        {
+            int t = KSysDirFullPathType ( full ) & ( kptAlias - 1 );
+            if ( t == kptNotFound )
+                return RC ( rcFS, rcDirectory, rcOpening, rcPath, rcNotFound );
+            if ( t != kptDir )
+                return RC ( rcFS, rcDirectory, rcOpening, rcPath, rcIncorrect );
+        }
+        
         sub = KSysDirMake ( path_size );
         if ( sub == NULL )
             rc = RC ( rcFS, rcDirectory, rcOpening, rcMemory, rcExhausted );

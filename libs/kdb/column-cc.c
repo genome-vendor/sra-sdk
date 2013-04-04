@@ -199,7 +199,12 @@ rc_t CC KColumnConsistencyCheck(const KColumn *self,
     uint32_t level, CCReportInfoBlock *nfo, CCReportFunc report, void *ctx )
 {
     rc_t rc = 0;
-    
+
+    bool indexOnly = level & CC_INDEX_ONLY;
+    if (indexOnly) {
+        level &= ~CC_INDEX_ONLY;
+    }
+
     if (KDirectoryPathType(self->dir, "md5") != kptNotFound)
         rc = level == 0 ? KColumnCheckMD5(self, nfo, report, ctx) : 0;
     else {

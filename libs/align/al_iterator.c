@@ -35,11 +35,19 @@
 #include <align/iterator.h>
 #include <align/manager.h>
 #include <vdb/cursor.h>
+#include <sysalloc.h>
+
+#include "debug.h"
 
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
+
+#define COL_READ "READ"
+#define COL_HAS_MISMATCH "HAS_MISMATCH"
+#define COL_HAS_REF_OFFSET "HAS_REF_OFFSET"
+#define COL_REF_OFFSET "REF_OFFSET"
 
 typedef struct pos_offset
 {
@@ -65,8 +73,8 @@ struct AlignmentIterator
     uint32_t pos_ofs_idx;   /* current index into pos_ofs[] */
     uint32_t pos_ofs_cnt;   /* how many pos_ofs-values are there */
 
-    uint32_t abs_ref_start; /* absolute reference-related start-position   */
-    uint32_t rel_ref_pos;   /* relative reference-related position ( relative to start of sequence )  */
+    int32_t abs_ref_start;  /* absolute reference-related start-position   */
+    int32_t rel_ref_pos;    /* relative reference-related position ( relative to start of sequence )  */
     uint32_t seq_pos;       /* position on the sequence, as the reference sees it */
     uint32_t skip;          /* how many bases to skip if we are in DELETE */
     uint32_t flags;         /* flags it, when we are in INSERT/DELETE */
@@ -141,7 +149,7 @@ LIB_EXPORT rc_t CC AlignIteratorRecordPopulate ( void *obj,
     uint8_t * ptr = ( void* ) iter;
     ptr += ( sizeof *iter );
 
-    rc = get_idx_and_read( curs, "CLIPPED_HAS_MISMATCH", placement->id, &base, &data_len );
+    rc = get_idx_and_read( curs, COL_HAS_MISMATCH, placement->id, &base, &data_len );
     if ( rc == 0 )
     {
         /* copy HAS_MISMATCH into place, point the header-value to it, advance */
@@ -152,27 +160,32 @@ LIB_EXPORT rc_t CC AlignIteratorRecordPopulate ( void *obj,
 
     if ( rc == 0 )
     {
-        rc = get_idx_and_read( curs, "CLIPPED_READ", placement->id, &base, &data_len );
+        rc = get_idx_and_read( curs, COL_READ, placement->id, &base, &data_len );
         /* copy READ into place, point the header-value to it, advance */
-        memcpy( ptr, base, data_len );
-        iter->read = ( INSDC_4na_bin * )ptr;
-        iter->read_len = data_len;
-        iter->abs_ref_start = placement->pos;
-        iter->ref_len = placement->len;
-        ptr += data_len;
-        iter->pos_ofs = (pos_offset *)ptr;
-        iter->ref_window_start = ref_window_start;
-        iter->ref_window_len = ref_window_len;
-        iter->free_on_whack = false;
+        if ( rc == 0 )
+        {
+            memcpy( ptr, base, data_len );
+            iter->read = ( INSDC_4na_bin * )ptr;
+            iter->read_len = data_len;
+            iter->abs_ref_start = placement->pos;
+            iter->ref_len = placement->len;
+            iter->rel_ref_pos = 0;
+            iter->seq_pos = 0;
+            ptr += data_len;
+            iter->pos_ofs = (pos_offset *)ptr;
+            iter->ref_window_start = ref_window_start;
+            iter->ref_window_len = ref_window_len;
+            iter->free_on_whack = false;
+        }
     }
 
     if ( rc == 0 )
     {
-        rc = get_idx_and_read( curs, "CLIPPED_HAS_REF_OFFSET", placement->id, &base_has_ref_offset, &data_len );
+        rc = get_idx_and_read( curs, COL_HAS_REF_OFFSET, placement->id, &base_has_ref_offset, &data_len );
     }
     if ( rc == 0 )
     {
-        rc = get_idx_and_read( curs, "CLIPPED_REF_OFFSET", placement->id, &base_ref_offset, &ref_offset_len );
+        rc = get_idx_and_read( curs, COL_REF_OFFSET, placement->id, &base_ref_offset, &ref_offset_len );
     }
     if ( rc == 0 )
     {
@@ -183,7 +196,8 @@ LIB_EXPORT rc_t CC AlignIteratorRecordPopulate ( void *obj,
     }
     if ( rc == 0 )
     {
-        al_iter_adjust_next( iter );
+        if ( iter->pos_ofs_idx == 0 )
+            al_iter_adjust_next( iter );
         KRefcountInit( &iter->refcount, 1, "AlignmentIterator", "Make", "align" );
         data_len = 0;
         while( ( iter->abs_ref_start + iter->rel_ref_pos ) < ref_window_start && rc == 0 )
@@ -206,23 +220,22 @@ LIB_EXPORT rc_t CC AlignIteratorRecordPopulate ( void *obj,
 }
 
 
-LIB_EXPORT size_t CC AlignIteratorRecordSize ( struct VCursor const *curs, int64_t row_id, void *data )
+LIB_EXPORT rc_t CC AlignIteratorRecordSize ( struct VCursor const *curs, int64_t row_id, size_t *size, void *data )
 {
-    size_t res = 0;
     uint32_t ref_offset_len, read_len;
 
-    rc_t rc = get_idx_and_read( curs, "CLIPPED_REF_OFFSET", row_id, NULL, &ref_offset_len );
+    rc_t rc = get_idx_and_read( curs, COL_REF_OFFSET, row_id, NULL, &ref_offset_len );
     if ( rc == 0 )
-        rc = get_idx_and_read( curs, "CLIPPED_READ", row_id, NULL, &read_len );
+        rc = get_idx_and_read( curs, COL_READ, row_id, NULL, &read_len );
 
     if ( rc == 0 )
     {
         AlignmentIterator * ali = NULL;
         size_t po_size = ( ( sizeof *(ali->pos_ofs) ) * ( ref_offset_len ) );
-        res = ( ( sizeof *ali ) + ( read_len * 2 ) + po_size );
+        *size = ( ( sizeof *ali ) + ( read_len * 2 ) + po_size );
     }
 
-    return res;
+    return rc;
 }
 
 
@@ -284,7 +297,8 @@ LIB_EXPORT rc_t CC AlignMgrMakeAlignmentIterator ( struct AlignMgr const *self,
                 ali->free_on_whack = true;
 
                 rc = compute_posofs( ali, has_ref_offset, ref_offset, ref_offset_len );
-                al_iter_adjust_next( ali );
+                if ( ali->pos_ofs_idx == 0 )
+                    al_iter_adjust_next( ali );
 
                 if ( rc == 0 )
                 {
@@ -350,7 +364,7 @@ LIB_EXPORT rc_t CC AlignmentIteratorNext ( AlignmentIterator *self )
         self->rel_ref_pos++;
 
         if ( self->rel_ref_pos >= self->ref_len )
-            rc = RC( rcAlign, rcIterator, rcPositioning, rcItem, rcDone );
+            rc = SILENT_RC( rcAlign, rcIterator, rcPositioning, rcItem, rcDone );
         else
         {
             if ( self->skip > 0 )
@@ -377,28 +391,18 @@ LIB_EXPORT rc_t CC AlignmentIteratorNext ( AlignmentIterator *self )
 LIB_EXPORT int32_t CC AlignmentIteratorState ( const AlignmentIterator *self,
                                                INSDC_coord_zero *seq_pos )
 {
-    uint32_t res = 0;
-    if ( self == NULL )
-    {
-        res = align_iter_invalid;
-    }
-    else
+    uint32_t res = align_iter_invalid;
+    if ( self != NULL )
     {
         INSDC_coord_zero pos = self->seq_pos;
-
-        if ( pos >= self->read_len )
-            res = align_iter_invalid;
-        else
+        if ( pos < self->read_len )
         {
-            res |= ( self->read[ pos ] & 0xFF );
+            res = ( self->read[ pos ] & 0x0F );
 
             if ( self->rel_ref_pos < 1 )
                 res |= align_iter_first;
-/*
+
             if ( self->rel_ref_pos == ( self->ref_len - 1 ) )
-                res |= align_iter_last;
-*/
-            if ( pos == ( self->read_len - 1 ) )
                 res |= align_iter_last;
 
             if ( !self->has_mismatch[ pos ] )
@@ -464,41 +468,72 @@ static rc_t compute_posofs(  AlignmentIterator * self,
     const bool * has_ref_offset, const int32_t * ref_offset, uint32_t ref_offset_len )
 {
     rc_t rc = 0;
-    int32_t shift = 0;
-    uint32_t seq_position;
-    uint32_t src = 0;
-    uint32_t dst = 0;
 
     self->pos_ofs_idx = 0;
     self->pos_ofs_cnt = ref_offset_len;
-    for ( seq_position = 0; seq_position < self->read_len && rc == 0; ++seq_position )
+    if ( ref_offset_len > 0 )
     {
-        if ( has_ref_offset[ seq_position ] )
+        int32_t shift = 0;
+        uint32_t seq_position;
+        uint32_t src = 0;
+        uint32_t dst = 0;
+
+        if ( has_ref_offset[ 0 ] && ( ref_offset[ 0 ] < 0 ) )
         {
-            /* we do have to process a reference-offset ! */
-            if ( src < ref_offset_len )
+            shift = ref_offset[ src++ ];
+            self->seq_pos = -( shift );
+            self->pos_ofs_cnt--;
+        }
+
+        seq_position = self->seq_pos;
+        while( seq_position < self->read_len && rc == 0 )
+        {
+            if ( has_ref_offset[ seq_position ] )
             {
-                /* we do have a ref-offset value available... */
-                int32_t ro = ref_offset[ src++ ];
-                if ( ro == 0 )
+                /* we do have to process a reference-offset ! */
+                if ( src < ref_offset_len )
                 {
-                    /* zero-values in REF_OFFSET are an error ! */
-                    rc = RC( rcAlign, rcIterator, rcConstructing, rcItem, rcNull );
+                    /* we do have a ref-offset value available... */
+                    int32_t ro = ref_offset[ src++ ];
+                    if ( ro == 0 )
+                    {
+                        /* zero-values in REF_OFFSET are an error ! */
+                        rc = RC( rcAlign, rcIterator, rcConstructing, rcItem, rcNull );
+                    }
+                    else
+                    {
+                        /* ref-offset is positive: DELETE against the reference */
+                        self->pos_ofs[ dst ].pos = ( seq_position + shift - 1 );
+                        self->pos_ofs[ dst++ ].offset = ro;
+                        shift += ro;
+
+                        /* !!! CHANGE on May 04 2012 !!!
+                           the unused bits in has_ref_offset after an insert ( negative ro )
+                           are used now to hint the position of a "B"-cigar-string-case
+                           for cSRA-files created Complete-Genomic-Submissions
+                           that means we have to jump forward with seq_position in this case!
+                        */
+                        if ( ro < 0 )
+                        {
+                            seq_position -= ( ro + 1 );
+                        }
+                    }
                 }
                 else
                 {
-                    /* ref-offset is positive: DELETE against the reference */
-                    self->pos_ofs[ dst ].pos = ( seq_position + shift - 1 );
-                    self->pos_ofs[ dst++ ].offset = ro;
-                    shift += ro;
+                    /* if has_ref_offset has more flags than ref_offset has values... */
+                    rc = RC( rcAlign, rcIterator, rcConstructing, rcItem, rcTooBig );
                 }
             }
-            else
-            {
-                /* if has_ref_offset has more flags than ref_offset has values... */
-                rc = RC( rcAlign, rcIterator, rcConstructing, rcItem, rcTooBig );
-            }
+            ++seq_position;
         }
+
+/*      OUTMSG(( "pos_ofs:" ));
+        for ( src = 0; src < self->pos_ofs_cnt; ++src )
+        {
+            OUTMSG(( "[%u/%u]", self->pos_ofs[ src ].pos, self->pos_ofs[ src ].offset ));
+        }
+        OUTMSG(( "\n" )); */
     }
     return rc;
 }

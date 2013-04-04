@@ -56,6 +56,7 @@ shift 2
 
 OBJS="$1"
 LIBS="$2"
+shift 2
 
 # decode MODE
 STATIC=$(expr $MODE % 2)

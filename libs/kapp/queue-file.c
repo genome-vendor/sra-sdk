@@ -31,6 +31,7 @@ typedef struct KQueueFile KQueueFile;
 #include <kapp/queue-file.h>
 #include <kfs/file.h>
 #include <kfs/impl.h>
+#include <kproc/timeout.h>
 #include <kproc/thread.h>
 #include <kproc/queue.h>
 #include <klib/log.h>
@@ -44,15 +45,15 @@ typedef struct KQueueFile KQueueFile;
 
 #if _DEBUGGING && 0
 #define DEFAULT_BLOCK_SIZE 4 * 1024
-#define TIMEOUT_MS ( 15 * 60 * 1000 )
 #define QFMSG( msg, ... ) \
     KOutMsg ( msg, __VA_ARGS__ )
 #else
 #define DEFAULT_BLOCK_SIZE 64 * 1024
-#define TIMEOUT_MS ( 15 * 60 * 1000 )
 #define QFMSG( msg, ... ) \
     ( void ) 0
 #endif
+
+#define DEFAULT_TIMEOUT_MS 150
 
 /*--------------------------------------------------------------------------
  * KQueueFileBuffer
@@ -107,6 +108,9 @@ struct KQueueFile
 
     /* captured upon open */
     rc_t rc_from_size_on_open;
+
+    /* timeout when queue is not responding */
+    uint32_t timeout_ms;
 };
 
 /* Whack
@@ -150,8 +154,8 @@ rc_t KQueueFileFlush ( KQueueFile *self, KQueueFileBuffer *b )
 
     /* timeout is in mS */
     timeout_t tm;
-    QFMSG ( "%s: initializing timeout for %,umS\n", __func__, TIMEOUT_MS );
-    TimeoutInit ( & tm, TIMEOUT_MS );
+    QFMSG ( "%s: initializing timeout for %,umS\n", __func__, self->timeout_ms);
+    TimeoutInit ( & tm, self->timeout_ms );
 
     /* push buffer */
     QFMSG ( "%s: pushing buffer...\n", __func__ );
@@ -332,8 +336,8 @@ rc_t CC KQueueFileRunRead ( const KThread *t, void *data )
 
 PushAgain:
         /* timeout is in mS */
-        QFMSG ( "BG: %s: initializing timeout for %,umS\n", __func__, TIMEOUT_MS );
-        TimeoutInit ( & tm, TIMEOUT_MS );
+        QFMSG ( "BG: %s: initializing timeout for %,umS\n", __func__, self->timeout_ms );
+        TimeoutInit ( & tm, self->timeout_ms );
 
         /* push buffer */
         QFMSG ( "BG: %s: pushing buffer...\n", __func__ );
@@ -347,7 +351,7 @@ PushAgain:
                 rc = 0;
                 QFMSG ( "BG: %s: clearing rc\n", __func__ );
 
-            } else if( GetRCTarget(rc) == rcTimeout && GetRCState(rc) == rcExhausted ) {
+            } else if( GetRCObject(rc) == rcTimeout && GetRCState(rc) == rcExhausted ) {
                 goto PushAgain;
             }
             QFMSG ( "BG: %s: dousing buffer\n", __func__ );
@@ -410,8 +414,8 @@ rc_t CC KQueueFileRead ( const KQueueFile *cself, uint64_t pos,
 
         /* timeout is in mS */
         timeout_t tm;
-        QFMSG ( "%s: initializing timeout for %,umS\n", __func__, TIMEOUT_MS );
-        TimeoutInit ( & tm, TIMEOUT_MS );
+        QFMSG ( "%s: initializing timeout for %,umS\n", __func__, self->timeout_ms );
+        TimeoutInit ( & tm, self->timeout_ms );
 
         /* pop buffer */
         QFMSG ( "%s: popping buffer...\n", __func__ );
@@ -424,6 +428,8 @@ rc_t CC KQueueFileRead ( const KQueueFile *cself, uint64_t pos,
             {
                 QFMSG ( "%s: BG thread has exited with end-of-input\n", __func__ );
                 return 0;
+            } else if( GetRCObject(rc) == rcTimeout && GetRCState(rc) == rcExhausted ) {
+                continue; /* timeout is not a problem, try again */
             }
 
             QFMSG ( "%s: read failed with rc = %R\n", __func__, rc );
@@ -484,7 +490,7 @@ rc_t CC KQueueFileRunWrite ( const KThread *t, void *data )
 
         /* timeout is in mS */
         timeout_t tm;
-        TimeoutInit ( & tm, TIMEOUT_MS );
+        TimeoutInit ( & tm, self->timeout_ms );
 
         /* pop buffer */
         rc = KQueuePop ( self -> q, ( void** ) & b, & tm );
@@ -493,6 +499,11 @@ rc_t CC KQueueFileRunWrite ( const KThread *t, void *data )
             /* see if the fg thread is done */
             if ( GetRCState ( rc ) == rcDone && GetRCObject ( rc ) == rcData )
                 rc = 0;
+            else if( GetRCObject(rc) == rcTimeout && GetRCState(rc) == rcExhausted ) {
+                rc = 0;
+                continue;
+            }
+
             break;
         }
 
@@ -569,6 +580,10 @@ rc_t CC KQueueFileWrite ( KQueueFile *self, uint64_t pos,
                  pos == b -> pos + self -> bsize )
             {
                 rc = KQueueFileFlush ( self, b );
+                if ( rc != 0 )
+                {   /* the background thread is probably gone */
+                    break;
+                }
             }
         }
 
@@ -695,7 +710,7 @@ static KFile_vt_v1 KQueueFileWrite_vt_v1 =
  *  to tune reading for source data, e.g. 64K blocks for gzip.
  */
 LIB_EXPORT rc_t CC KQueueFileMakeRead ( const KFile **qfp, uint64_t pos,
-    const KFile *src, size_t queue_bytes, size_t block_size )
+    const KFile *src, size_t queue_bytes, size_t block_size, uint32_t timeout_ms )
 {
     rc_t rc;
 
@@ -719,7 +734,7 @@ LIB_EXPORT rc_t CC KQueueFileMakeRead ( const KFile **qfp, uint64_t pos,
                 rc = RC ( rcApp, rcFile, rcConstructing, rcMemory, rcExhausted );
             else
             {
-                rc = KFileInit ( & qf -> dad, ( const KFile_vt* ) & KQueueFileRead_vt_v1, true, false );
+                rc = KFileInit ( & qf -> dad, ( const KFile_vt* ) & KQueueFileRead_vt_v1, "KQueueFile", "no-name", true, false );
                 if ( rc == 0 )
                 {
                     qf -> f = ( KFile* ) src;
@@ -751,6 +766,9 @@ LIB_EXPORT rc_t CC KQueueFileMakeRead ( const KFile **qfp, uint64_t pos,
                             /* requested buffer size */
                             qf -> b = NULL;
                             qf -> bsize = block_size;
+
+                            /* timeout */
+                            qf -> timeout_ms = timeout_ms == 0 ? DEFAULT_TIMEOUT_MS : timeout_ms;
 
                             /* finally, start the background thread */
                             rc = KThreadMake ( & qf -> t, KQueueFileRunRead, qf );
@@ -817,7 +835,7 @@ LIB_EXPORT rc_t CC KQueueFileMakeRead ( const KFile **qfp, uint64_t pos,
  *  to tune writing for source data, e.g. 64K blocks for gzip.
  */
 LIB_EXPORT rc_t CC KQueueFileMakeWrite ( KFile **qfp,
-    KFile *dst, size_t queue_bytes, size_t block_size )
+    KFile *dst, size_t queue_bytes, size_t block_size, uint32_t timeout_ms )
 {
     rc_t rc;
 
@@ -841,7 +859,7 @@ LIB_EXPORT rc_t CC KQueueFileMakeWrite ( KFile **qfp,
                 rc = RC ( rcApp, rcFile, rcConstructing, rcMemory, rcExhausted );
             else
             {
-                rc = KFileInit ( & qf -> dad, ( const KFile_vt* ) & KQueueFileWrite_vt_v1, false, true );
+                rc = KFileInit ( & qf -> dad, ( const KFile_vt* ) & KQueueFileWrite_vt_v1, "KQueueFile", "no-name", false, true );
                 if ( rc == 0 )
                 {
                     qf -> f = dst;
@@ -873,6 +891,9 @@ LIB_EXPORT rc_t CC KQueueFileMakeWrite ( KFile **qfp,
                             /* requested buffer size */
                             qf -> b = NULL;
                             qf -> bsize = block_size;
+
+                            /* timeout */
+                            qf -> timeout_ms = timeout_ms == 0 ? DEFAULT_TIMEOUT_MS : timeout_ms;
 
                             /* finally, start the background thread */
                             rc = KThreadMake ( & qf -> t, KQueueFileRunWrite, qf );

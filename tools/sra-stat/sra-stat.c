@@ -27,15 +27,15 @@
 #include "sra-stat.vers.h"
 
 #include <kapp/main.h>
-/* #include <kapp/log-xml.h> XMLLogger_Encode */
 
 #include <sra/wsradb.h>
 #include <sra/sradb-priv.h>
 #include <sra/types.h>
 
+#include <vdb/dependencies.h> /* VDBDependencies */
 #include <vdb/database.h> /* VDatabaseRelease */
 #include <vdb/table.h> /* VTableRelease */
-#include <vdb/dependencies.h> /* VDBDependencies */
+#include <vdb/cursor.h> /* VCursor */
 
 #include <kdb/database.h> /* KDatabase */
 #include <kdb/table.h>
@@ -46,6 +46,7 @@
 #include <kfs/directory.h>
 #include <kfs/file.h>
 
+#include <klib/sort.h> /* ksort */
 #include <klib/checksum.h>
 #include <klib/container.h>
 #include <klib/namelist.h>
@@ -55,11 +56,15 @@
 #include <klib/debug.h> /* DBGMSG */
 #include <klib/rc.h>
 
+#include <os-native.h> /* strtok_r on Windows */
+
 #include <assert.h>
 #include <math.h> /* sqrt */
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+#include <stdio.h> /* stderr */
 
 #define DISP_RC(rc, msg) (void)((rc == 0) ? 0 : LOGERR(klogInt, rc, msg))
 
@@ -69,7 +74,7 @@
 
 #define DISP_RC_Read(rc, name, spot, msg) (void)((rc == 0) ? 0 : \
     PLOGERR(klogInt, (klogInt, rc, "column $(name), spot $(spot): $(msg)", \
-        "name=%s,spot=%lu,msg=%s", name, msg)))
+        "name=%s,spot=%lu,msg=%s", name, spot, msg)))
 
 #define RELEASE(type, obj) do { rc_t rc2 = type##Release(obj); \
     if (rc2 && !rc) { rc = rc2; } obj = NULL; } while (false)
@@ -121,7 +126,7 @@ rc_t CC XMLLogger_Encode(const char* src,
                     break;
             }
             if( (*num_writ + bytes) > dst_sz ) {
-                rc = RC(rcApp, rcLog, rcEncoding, rcBuffer, rcInsufficient);
+                rc = RC(rcExe, rcLog, rcEncoding, rcBuffer, rcInsufficient);
             } else {
                 memcpy(dst, p, bytes);
                 *num_writ = *num_writ + bytes;
@@ -226,39 +231,232 @@ typedef struct Statistics2 {
 static
 void Statistics2Init(Statistics2* self, double sum, spotid_t count) {
     assert(self);
+
     if (count) {
         self->average = sum / count;
     }
 }
+
 static void Statistics2Add(Statistics2* self, double value) {
     double diff = 0;
+
     assert(self);
+
     ++self->n;
+
     diff = value - self->average;
     self->diff_sq_sum += diff * diff;
 }
+
 static
 void Statistics2Print(const Statistics2* selfs,
-    uint32_t nreads, const char* indent)
+    uint32_t nreads, const char* indent,
+
+     /* the same as in <Statistics: just to make <Statistics> and <Statistics2>
+        look the same */
+    uint64_t spot_count)
 {
     int i = 0;
+
     if (nreads) {
         assert(selfs && indent);
     }
-    OUTMSG(("%s<Statistics2>\n", indent));
+
+    OUTMSG(("%s<Statistics2 nreads=\"%u\" nspots=\"%lu\">\n",
+        indent, nreads, spot_count));
+
     for (i = 0; i < nreads; ++i) {
-        double avr = 0, dev = 0;
+        double dev = 0;
         const Statistics2* stats = selfs + i;
-        avr = stats->average;
-        if (stats->n) {
+        double avr = stats->average;
+        if (stats->n > 0) {
             dev = sqrt(stats->diff_sq_sum / stats->n);
         }
-        OUTMSG(("%s  <Read index=\"%d\" average=\"%f\" stdev=\"%f\"/>\n",
-            indent, i, avr, dev));
+
+        OUTMSG(("%s  "
+            "<Read index=\"%d\" count=\"%ld\" average=\"%f\" stdev=\"%f\"/>\n",
+            indent, i, stats->n, avr, dev));
     }
+
     OUTMSG(("%s</Statistics2>\n", indent));
 }
-typedef struct SraStatsTotal {
+
+typedef struct {
+    uint64_t cnt[5];
+    bool CS_NATIVE;
+    const SRAColumn *col;
+    bool finalized;
+} Bases;
+static
+void BasesInit(Bases *self, const SRATable *tbl)
+{
+    rc_t rc = 0;
+    const char name[] = "CS_NATIVE";
+    const SRAColumn *col = NULL;
+    const void *base = NULL;
+    bitsz_t boff = ~0;
+    bitsz_t row_bits = ~0;
+
+    assert(self);
+    memset(self, 0, sizeof *self);
+    self->CS_NATIVE = true;
+
+    rc = SRATableOpenColumnRead(tbl, &col, name, NULL);
+    if (rc != 0) {
+        PLOGERR(klogInt, (klogErr, rc,
+            "while SRATableOpenColumnRead($(name))", "name=%s", name));
+    }
+
+    if (rc == 0) {
+        rc = SRAColumnRead(col, 1, &base, &boff, &row_bits);
+        if (rc != 0) {
+            PLOGERR(klogInt, (klogErr, rc,
+                "while SRAColumnRead($(name))", "name=%s", name));
+        }
+        if (boff != 0 || row_bits != 8) {
+            rc = RC(rcExe, rcColumn, rcReading, rcData, rcInvalid);
+            PLOGERR(klogInt, (klogErr, rc,
+                "invalid boff or row_bits while SRAColumnRead($(name))",
+                "name=%s", name));
+        }
+    }
+
+    if (rc == 0) {
+        self->CS_NATIVE = *((bool*)base);
+    }
+
+    RELEASE(SRAColumn, col);
+
+    {
+        const char *name = self->CS_NATIVE ? "CSREAD" : "READ";
+        const char *datatype
+            = self->CS_NATIVE ? "INSDC:x2cs:bin" : "INSDC:x2na:bin";
+        rc = SRATableOpenColumnRead(tbl, &self->col, name, datatype);
+        if (rc != 0) {
+            PLOGERR(klogInt, (klogErr, rc,
+                "while SRATableOpenColumnRead($(name), $(type))",
+                "name=%s,type=%s", name, datatype));
+        }
+    }
+}
+
+static
+void BasesFinalize(Bases *self)
+{
+    assert(self);
+
+    if (self->col == NULL) {
+        LOGMSG(klogInfo, "Bases statistics will not be printed : "
+            "READ column was not opened during BasesFinalize()");
+        return;
+    }
+
+    self->finalized = true;
+}
+
+static
+rc_t BasesRelease(Bases *self)
+{
+    rc_t rc = 0;
+
+    assert(self);
+
+    RELEASE(SRAColumn, self->col);
+
+    return rc;
+}
+
+static
+void BasesAdd(Bases *self, spotid_t spotid)
+{
+    rc_t rc = 0;
+    const void *base = NULL;
+    bitsz_t boff = ~0;
+    bitsz_t row_bits = ~0;
+    bitsz_t i = ~0;
+    const unsigned char *bases = NULL;
+
+    assert(self);
+
+    if (self->col == NULL) {
+        return;
+    }
+
+    rc = SRAColumnRead(self->col, spotid, &base, &boff, &row_bits);
+    if (rc != 0) {
+        PLOGERR(klogInt, (klogErr, rc,
+            "while SRAColumnRead(READ, $(type))",
+            "type=%s", self->CS_NATIVE ? "CS_NATIVE" : "not CS_NATIVE"));
+        BasesRelease(self);
+        return;
+    }
+
+    if ((row_bits % 8) != 0) {
+        rc = RC(rcExe, rcColumn, rcReading, rcData, rcInvalid);
+        PLOGERR(klogInt, (klogErr, rc, "Invalid row_bits '$(row_bits) "
+            "while SRAColumnRead(READ, $(type), spotid=$(spotid))",
+            "row_bits=%lu,type=%s,spotid=%lu",
+            row_bits, self->CS_NATIVE ? "CS_NATIVE" : "not CS_NATIVE", spotid));
+        BasesRelease(self);
+        return;
+    }
+
+    row_bits /= 8;
+    bases = base;
+    for (i = 0; i < row_bits; ++i) {
+        unsigned char base = bases[i];
+        if (base > 4) {
+            rc = RC(rcExe, rcColumn, rcReading, rcData, rcInvalid);
+            PLOGERR(klogInt, (klogErr, rc,
+                "Invalid READ column value '$(base) "
+                "while SRAColumnRead($(type), spotid=$(spotid), index=$(i))",
+                "base=%d,type=%s,spotid=%lu,index=%lu",
+                base, self->CS_NATIVE ? "CS_NATIVE" : "not CS_NATIVE",
+                spotid, i));
+            BasesRelease(self);
+            return;
+        }
+        ++self->cnt[base];
+    }
+}
+
+static
+void BasesPrint(const Bases *self,
+    uint64_t base_count, const char* indent)
+{
+    const char tag[] = "Bases";
+    const char *name = NULL;
+    int i = ~0;
+
+    assert(self);
+
+    if (!self->finalized) {
+        LOGMSG(klogInfo, "Bases statistics will not be printed : "
+            "Bases object was not finalized during BasesPrint()");
+        return;
+    }
+
+    if (self->cnt[0] + self->cnt[1] + self->cnt[2] +
+        self->cnt[3] + self->cnt[4] != base_count)
+    {
+        rc_t rc = RC(rcExe, rcNumeral, rcComparing, rcData, rcInvalid);
+        LOGERR(klogErr, rc,
+            "BASE_COUNT MISMATCH DURING BASES COUNT CALCULATION");
+        return;
+    }
+
+    name = self->CS_NATIVE ? "0123." : "ACGTN";
+
+    OUTMSG(("%s<%s cs_native=\"%s\" count=\"%lu\">\n",
+        indent, tag, self->CS_NATIVE ? "true" : "false", base_count));
+    for (i = 0; i < 5; ++i) {
+        OUTMSG(("%s  <Base value=\"%c\" count=\"%lu\"/>\n",
+            indent, name[i], self->cnt[i]));
+    }
+    OUTMSG(("%s</%s>\n", indent, tag));
+}
+
+typedef struct {
     uint64_t spot_count;
     uint64_t spot_count_mates;
     uint64_t BIO_BASE_COUNT; /* bio_len */
@@ -274,6 +472,8 @@ typedef struct SraStatsTotal {
     uint32_t nreads; /* if (nreads == 0) then (nreads is variable) */
     Statistics * stats ; /* nreads elements */
     Statistics2* stats2; /* nreads elements */
+
+    Bases bases_count;
 } SraStatsTotal;
 static
 rc_t SraStatsTotalMakeStatistics(SraStatsTotal* self, uint32_t nreads)
@@ -305,7 +505,7 @@ rc_t SraStatsTotalMakeStatistics(SraStatsTotal* self, uint32_t nreads)
 
 static
 void SraStatsTotalStatistics2Init(SraStatsTotal* self,
-    int nreads, uint64_t* sums, spotid_t count)
+    int nreads, uint64_t* sums, uint64_t* count)
 {
     int i = 0;
     assert(self);
@@ -316,9 +516,10 @@ void SraStatsTotalStatistics2Init(SraStatsTotal* self,
         uint64_t sum = sums[i];
         Statistics2* stats = self->stats2 + i;
         assert(stats);
-        Statistics2Init(stats, sum, count);
+        Statistics2Init(stats, sum, count[i]);
     }
 }
+
 static rc_t SraStatsTotalFree(SraStatsTotal* self) {
     assert(self);
 
@@ -328,64 +529,90 @@ static rc_t SraStatsTotalFree(SraStatsTotal* self) {
     free(self->stats2);
     self->stats2 = NULL;
 
+    BasesRelease(&self->bases_count);
+
     self->nreads = 0;
 
     return 0;
 }
+
 static void StatisticsAdd(Statistics* self, double value) {
     double a_1 = 0;
+
     /* http://en.wikipedia.org/wiki/Stdev#Rapid_calculation_methods */
+
     assert(self);
+
     a_1 = self->a;
+
     if (self->n++ == 0) {
         self->prev_val = value;
     }
     else if (self->prev_val != value) {
         self->variable = true;
     }
+
     self->a += (value - a_1) / self->n;
     self->q += ((double)value - a_1) * ((double)value - self->a);
 }
+
 static double StatisticsAverage(const Statistics* self) {
     assert(self);
+
     return self->a;
 }
+
 static double StatisticsStdev(const Statistics* self) {
     assert(self);
+
     if (self->n == 0) {
         return 0;
     }
+
     return sqrt(self->q / self->n);
 }
+
 static
 void SraStatsTotalAdd(SraStatsTotal* self,
     uint32_t* values, uint32_t nreads)
 {
-    int i = 0;
+    int i = ~0;
+
     assert(self && values);
+
     if (self->nreads != nreads) {
         self->variable_nreads = true;
     }
+
     if (self->variable_nreads) {
         return;
     }
+
     for (i = 0; i < nreads; ++i) {
         uint32_t value = values[i];
-        Statistics* stats = self->stats + i;
-        assert(stats);
-        StatisticsAdd(stats, value);
+        if (value > 0) {
+            Statistics* stats = self->stats + i;
+            assert(stats);
+
+            StatisticsAdd(stats, value);
+        }
     }
 }
 
 static
 void SraStatsTotalAdd2(SraStatsTotal* self, uint32_t* values) {
     int i = 0;
+
     assert(self && values);
+
     for (i = 0; i < self->nreads; ++i) {
         uint32_t value = values[i];
-        Statistics2* stats = self->stats2 + i;
-        assert(stats);
-        Statistics2Add(stats, value);
+        if (value > 0) {
+            Statistics2* stats = self->stats2 + i;
+            assert(stats);
+
+            Statistics2Add(stats, value);
+        }
     }
 }
 
@@ -402,20 +629,24 @@ void print_double_or_int(const char* name, double val, bool variable) {
         OUTMSG((" %s=\"%d\"", name, (int)rnd));
     }
 }
+
 static
 void StatisticsPrint(const Statistics* selfs,
     uint32_t nreads, const char* indent)
 {
-    int i = 0;
+    int i = ~0;
+
     if (nreads) {
         assert(selfs && indent);
     }
+
     for (i = 0; i < nreads; ++i) {
-        double avr = 0, dev = 0;
         const Statistics* stats = selfs + i;
-        avr = StatisticsAverage(stats);
-        dev = StatisticsStdev(stats);
+        double avr = StatisticsAverage(stats);
+        double dev = StatisticsStdev(stats);
+
         OUTMSG(("%s  <Read index=\"%d\"", indent, i));
+        OUTMSG((" count=\"%ld\"", stats->n, i));
         print_double_or_int("average", avr, stats->variable);
         print_double_or_int("stdev"  , dev, stats->variable);
         OUTMSG(("/>\n"));
@@ -425,24 +656,45 @@ static rc_t StatisticsDiff(const Statistics* ss,
     const Statistics2* ss2, uint32_t nreads)
 {
     rc_t rc = 0;
-    int i = 0;
+
+    int i = ~0;
+
     assert(ss && ss2);
+
     for (i = 0; i < nreads; ++i) {
-        double d = 0, d2 = 0, diff = 0;
         const Statistics * s  = ss  + i;
         const Statistics2* s2 = ss2 + i;
-        d  = StatisticsStdev(s);
-        d2 = sqrt(s2->diff_sq_sum / s2->n);
-        diff = d - d2;
+
+        double d  = StatisticsStdev(s);
+        double d2 = sqrt(s2->diff_sq_sum / s2->n);
+
+        double diff = d - d2;
         if (diff < 0) {
             diff = -diff;
         }
-        if (diff > 1e-8) {
+
+        if (diff > 1e-6) {
               /* RC(rcExe, rcTest, rcExecuting, rcTest, rcFailed); */
             rc = RC(rcExe, rcNumeral, rcComparing, rcData, rcInvalid);
             DISP_RC(rc, "While comparing calculated standard deviations");
         }
+
+        if (s->n != s2->n) {
+            rc = RC(rcExe, rcNumeral, rcComparing, rcData, rcInvalid);
+            DISP_RC(rc, "While comparing read statistics counts");
+        }
+
+        diff = StatisticsAverage(s) - s2->average;
+        if (diff < 0) {
+            diff = -diff;
+        }
+        if (diff > 1e-10) {
+              /* RC(rcExe, rcTest, rcExecuting, rcTest, rcFailed); */
+            rc = RC(rcExe, rcNumeral, rcComparing, rcData, rcInvalid);
+            DISP_RC(rc, "While comparing calculated average");
+        }
     }
+
     return rc;
 }
 
@@ -460,12 +712,14 @@ rc_t SraStatsTotalPrintStatistics(const SraStatsTotal* self,
         OUTMSG(("variable\"/>\n"));
     }
     else {
-        OUTMSG(("%d\">\n", self->nreads));
+        OUTMSG(("%u\"", self->nreads));
+        OUTMSG((" nspots=\"%lu\">\n", self->spot_count));
         StatisticsPrint(self->stats, self->nreads, indent);
         OUTMSG(("%s</Statistics>\n", indent));
 
         if (test) {
-            Statistics2Print(self->stats2, self->nreads, indent);
+            Statistics2Print(self->stats2, self->nreads, indent,
+                self->spot_count);
             rc = StatisticsDiff(self->stats, self->stats2, self->nreads);
         }
     }
@@ -532,6 +786,36 @@ typedef struct ArcInfo_struct {
         char md5[32 + 1];
     } i[2];
 } ArcInfo;
+typedef struct Quality {
+    uint32_t value;
+    uint64_t count;
+} Quality;
+typedef struct QualityStats {
+    Quality* QUALITY;
+    size_t allocated;
+    size_t used;
+} QualityStats;
+typedef enum EMetaState {
+    eMSNotFound,
+    eMSFound
+} EMetaState;
+typedef struct Count {
+    EMetaState state;
+    uint64_t value;
+} Count;
+typedef struct Counts {
+    char* tableName;
+    EMetaState tableState;
+    EMetaState metaState;
+    Count BASE_COUNT;
+    Count SPOT_COUNT;
+} Counts;
+typedef struct TableCounts {
+    EMetaState state;
+    Counts* count;
+    size_t allocated;
+    size_t used;
+} TableCounts;
 typedef struct Ctx {
     const BSTree* tr;
     const MetaDataStats* meta;
@@ -541,6 +825,8 @@ typedef struct Ctx {
     srastat_parms* pb;
     SraStatsTotal* total;
     const VDatabase* db;
+    QualityStats quality;
+    TableCounts tables;
 } Ctx;
 
 typedef rc_t (CC * RG_callback)(const BAM_HEADER_RG* rg, const void* data);
@@ -606,6 +892,436 @@ rc_t CC tree_RG_callback(const BAM_HEADER_RG* rg, const void* data)
     }
 
     return rc;
+}
+
+static
+int CC QualityCmp(const void* s1, const void* s2, void *data) {
+    const Quality* q1 = s1;
+    const Quality* q2 = s2;
+    assert(q1 && q2);
+    return q1->value < q2->value ? -1 : q1->value == q2->value ? 0 : 1;
+}
+
+static
+int CC CountsCmp(const void* v1, const void* v2, void *data) {
+    const Counts* e1 = v1;
+    const Counts* e2 = v2;
+    assert(e1 && e2 && e1->tableName && e2->tableName);
+    return strcmp(e1->tableName, e2->tableName);
+}
+
+static
+rc_t QualityParse(Quality* self, const KMDataNode* node, const char* name)
+{
+    rc_t rc = 0;
+    const char start[] = "PHRED_";
+    int i = strlen(start);
+
+    assert(self && name);
+
+    if (strlen(name) <= strlen(start)) {
+        rc = RC(rcExe, rcXmlDoc, rcParsing, rcName, rcInvalid);
+        PLOGERR(klogInt, (klogErr, rc,
+            "Bad node name: STATS/QUALITY/$(name)", "name=%s", name));
+        return rc;
+    }
+
+    self->value = 0;
+    for (; i < strlen(name); ++i) {
+        if (name[i] < '0' || name[i] > '9') {
+            rc_t rc = RC(rcExe, rcXmlDoc, rcParsing, rcName, rcInvalid);
+            PLOGERR(klogInt, (klogErr, rc,
+                "Bad node name: STATS/QUALITY/$(name)", "name=%s", name));
+            return rc;
+        }
+        self->value = self->value * 10 + name[i] - '0';
+    }
+
+    rc = KMDataNodeReadAsU64(node, &self->count);
+    if (rc != 0) {
+        PLOGERR(klogInt, (klogErr, rc,
+            "while reading the value of STATS/QUALITY/$(name)",
+            "name=%s", name));
+    }
+
+    return rc;
+}
+
+static
+rc_t QualityStatsRead1(QualityStats* self,
+    const KMDataNode* parent, const char* name)
+{
+    const KMDataNode* node = NULL;
+
+    rc_t rc = KMDataNodeOpenNodeRead(parent, &node, name);
+    DISP_RC2(rc, name, "while calling KMDataNodeOpenNodeRead");
+
+    if (rc == 0) {
+        size_t size = 64;
+        assert(self);
+        if (self->allocated == 0) {
+            assert(self->QUALITY == NULL && self->used == 0);
+            self->QUALITY = malloc(size * sizeof *self->QUALITY);
+            if (self->QUALITY == NULL) {
+                return
+                    RC(rcExe, rcStorage, rcAllocating, rcMemory, rcExhausted);
+            }
+            self->allocated = size;
+        }
+        else if (self->used >= self->allocated) {
+            Quality* tmp = NULL;
+            size = self->allocated * 2;
+            tmp = realloc(self->QUALITY, size * sizeof *self->QUALITY);
+            if (tmp == NULL) {
+                return
+                    RC(rcExe, rcStorage, rcAllocating, rcMemory, rcExhausted);
+            }
+            self->QUALITY = tmp;
+            self->allocated = size;
+        }
+    }
+
+    if (rc == 0) {
+        assert((self->used < self->allocated) && self->QUALITY);
+        rc = QualityParse(&self->QUALITY[self->used], node, name);
+        if (rc == 0)
+        {   ++self->used; }
+    }
+
+    RELEASE(KMDataNode, node);
+
+    return rc;
+}
+
+static
+rc_t QualityStatsRead(QualityStats* self, const KMetadata* meta)
+{
+    rc_t rc = 0;
+    const char name[] = "STATS/QUALITY";
+    const KMDataNode* node = NULL;
+
+    assert(self && meta);
+
+    memset(self, 0, sizeof *self);
+
+    rc = KMetadataOpenNodeRead(meta, &node, name);
+
+    if (rc != 0) {
+        if (GetRCState(rc) == rcNotFound) {
+            DBGMSG(DBG_APP,DBG_COND_1, ("%s: not found\n", name));
+            return 0;
+        }
+        DISP_RC2(rc, name, "while calling KMetadataOpenNodeRead");
+    }
+
+    if (rc == 0 && node) {
+        KNamelist* names = NULL;
+        rc = KMDataNodeListChild(node, &names);
+        DISP_RC2(rc, name, "while calling KMDataNodeListChild");
+        if (rc == 0) {
+            uint32_t count = 0;
+            rc = KNamelistCount(names, &count);
+            DISP_RC2(rc, name, "while calling KNamelistCount");
+            if (rc == 0) {
+                uint32_t i = ~0;
+                for (i = 0; i < count && rc == 0; ++i) {
+                    const char* child = NULL;
+                    rc = KNamelistGet(names, i, &child);
+                    if (rc != 0) {
+                       PLOGERR(klogInt, (klogInt, rc,
+                            "while calling STATS/QUALITY::KNamelistGet($(idx))",
+                            "idx=%i", i));
+                    }
+                    else
+                    {   rc = QualityStatsRead1(self, node, child); }
+                }
+            }
+        }
+        RELEASE(KNamelist, names);
+    }
+    RELEASE(KMDataNode, node);
+    return 0;
+}
+
+static
+void QualityStatsSort(QualityStats* self)
+{
+    assert(self);
+    ksort(self->QUALITY, self->used, sizeof *self->QUALITY, QualityCmp, NULL);
+}
+
+static
+void TableCountsSort(TableCounts* self)
+{
+    assert(self);
+    ksort(self->count, self->used, sizeof *self->count, CountsCmp, NULL);
+}
+static
+rc_t QualityStatsPrint(const QualityStats* self, const char* indent)
+{
+    size_t i = ~0;
+    const char tag[] = "QualityCount";
+    assert(self && indent);
+
+    if (self->allocated == 0)
+    {   return 0; }
+
+    OUTMSG(("%s<%s>\n", indent, tag));
+    for (i = 0; i < self->used; ++i) {
+        Quality* q = &self->QUALITY[i];
+        OUTMSG(("  %s<Quality value=\"%lu\" count=\"%lu\"/>\n",
+            indent, q->value, q->count));
+    }
+    OUTMSG(("%s</%s>\n", indent, tag));
+
+    return 0;
+}
+
+static
+void QualityStatsRelease(QualityStats* self)
+{
+    assert(self);
+    free(self->QUALITY);
+    memset(self, 0, sizeof *self);
+}
+
+static
+rc_t CountRead(Count* self, const char* name, const KMDataNode* parent)
+{
+    rc_t rc = 0;
+
+    const KMDataNode* node = NULL;
+
+    assert(self && parent && name);
+
+    memset(self, 0, sizeof *self);
+
+    rc = KMDataNodeOpenNodeRead(parent, &node, name);
+    if (rc != 0) {
+        if (GetRCState(rc) == rcNotFound) {
+            DBGMSG(DBG_APP,DBG_COND_1, ("%s: not found\n", name));
+            rc = 0;
+        }
+        DISP_RC2(rc, name, "while calling KMetadataOpenNodeRead");
+    }
+    else {
+        rc = KMDataNodeReadAsU64(node, &self->value);
+        DISP_RC2(rc, name, "while calling KMDataNodeReadAsU64");
+        if (rc == 0)
+        {   self->state = eMSFound; }
+    }
+
+    RELEASE(KMDataNode, node);
+
+    return rc;
+}
+
+static
+rc_t TableCountsRead1(TableCounts* self,
+    const VDatabase* db, const char* tableName)
+{
+    const VTable* tbl = NULL;
+    const KMetadata* meta = NULL;
+    const char name[] = "STATS/TABLE";
+    const KMDataNode* node = NULL;
+    rc_t rc = VDatabaseOpenTableRead(db, &tbl, tableName);
+    DISP_RC2(rc, tableName, "while calling VDatabaseOpenTableRead");
+
+    if (rc == 0) {
+        size_t size = 8;
+        assert(self);
+        if (self->allocated == 0) {
+            assert(self->count == NULL && self->used == 0);
+            self->count = malloc(size * sizeof *self->count);
+            if (self->count == NULL) {
+                return
+                    RC(rcExe, rcStorage, rcAllocating, rcMemory, rcExhausted);
+            }
+            self->allocated = size;
+        }
+        else if (self->used >= self->allocated) {
+            Counts* tmp = NULL;
+            size = self->allocated * 2;
+            tmp = realloc(self->count, size * sizeof *self->count);
+            if (tmp == NULL) {
+                return
+                    RC(rcExe, rcStorage, rcAllocating, rcMemory, rcExhausted);
+            }
+            self->count = tmp;
+            self->allocated = size;
+        }
+    }
+    if (rc == 0) {
+        assert(self->used < self->allocated && self->count);
+    }
+    if (rc == 0) {
+        rc = VTableOpenMetadataRead(tbl, &meta);
+        DISP_RC2(rc, name, "while calling VTableOpenMetadataRead");
+    }
+    if (rc == 0) {
+        rc = KMetadataOpenNodeRead(meta, &node, name);
+        if (rc != 0) {
+            if (GetRCState(rc) == rcNotFound) {
+                DBGMSG(DBG_APP,DBG_COND_1, ("%s: not found\n", name));
+                rc = 0;
+            }
+            DISP_RC2(rc, name, "while calling KMetadataOpenNodeRead");
+        }
+        else
+        {   assert(node); }
+    }
+
+    if (rc == 0 && node != NULL) {
+        Counts* c = NULL;
+        assert((self->used < self->allocated) && (self->count != NULL));
+        c = &self->count[self->used];
+        memset(c, 0, sizeof *c);
+        c->tableName = strdup(tableName);
+        if (c->tableName == NULL)
+        {   return RC(rcExe, rcStorage, rcAllocating, rcMemory, rcExhausted); }
+        c->tableState = eMSFound;
+        c->metaState = eMSFound;
+        rc = CountRead(&c->BASE_COUNT, "BASE_COUNT", node);
+
+        {
+            rc_t rc2 = CountRead(&c->SPOT_COUNT, "SPOT_COUNT", node);
+            if (rc2 != 0 && rc == 0)
+            {   rc = rc2; }
+        }
+
+        if (rc == 0)
+        {   ++self->used; }
+    }
+
+    RELEASE(KMDataNode, node);
+    RELEASE(KMetadata, meta);
+    RELEASE(VTable, tbl);
+
+    return rc;
+}
+
+static
+rc_t TableCountsRead(TableCounts* self, const VDatabase* db)
+{
+    rc_t rc = 0;
+    KNamelist* names = NULL;
+
+    assert(self);
+
+    memset(self, 0, sizeof *self);
+
+    if (db == NULL)
+    {   return 0; }
+
+    rc = VDatabaseListTbl(db, &names);
+    DISP_RC(rc, "while calling VDatabaseListTbl");
+    if (rc == 0) {
+        uint32_t count = 0;
+        rc = KNamelistCount(names, &count);
+        DISP_RC(rc, "while calling VDatabaseListTbl::KNamelistCount");
+        if (rc == 0) {
+            uint32_t i = ~0;
+            for (i = 0; i < count && rc == 0; ++i) {
+                const char* table = NULL;
+                rc = KNamelistGet(names, i, &table);
+                if (rc != 0) {
+                   PLOGERR(klogInt, (klogInt, rc,
+                        "while calling VDatabaseListTbl::KNamelistGet($(idx))",
+                        "idx=%i", i));
+                }
+                else
+                {   rc = TableCountsRead1(self, db, table); }
+            }
+        }
+    }
+
+    RELEASE(KNamelist, names);
+
+    return rc;
+}
+
+static
+rc_t CountPrint(const Count* self, const char* indent, const char* tag)
+{
+    assert(self && indent && tag);
+    switch (self->state) {
+        case eMSNotFound:
+            OUTMSG(("  %s<%s state=\"not found\"/>\n", indent, tag));
+            break;
+        case eMSFound:
+            OUTMSG(("  %s<%s count=\"%lu\"/>\n", indent, tag, self->value));
+            break;
+        default:
+            assert(0);
+            OUTMSG(("  %s<%s state=\"UNEXPECTED\"/>\n", indent, tag));
+            break;
+    }
+    return 0;
+}
+
+static
+rc_t TableCountsPrint(const TableCounts* self, const char* indent)
+{
+    rc_t rc = 0;
+    const char tag[] = "Databases";
+
+    assert(self && indent);
+
+    if (self->allocated == 0)
+    {   return 0; }
+
+    OUTMSG(("%s<%s>\n", indent, tag));
+    {
+        size_t i = ~0;
+        const char tag[] = "Database";
+        OUTMSG(("  %s<%s>\n", indent, tag));
+        for (i = 0; i < self->used; ++i) {
+            const char tag[] = "Statistics";
+            const Counts* p = &self->count[i];
+            OUTMSG(("    %s<Table name=\"%s\">\n", indent, p->tableName));
+            switch (p->metaState) {
+            case eMSNotFound:
+                OUTMSG(("      %s<%s source=\"meta\" state=\"not found\"/>\n",
+                    indent, tag));
+                break;
+            case eMSFound: {
+                char buf[512];
+                OUTMSG(("      %s<%s source=\"meta\">\n", indent, tag));
+                rc = string_printf(buf, sizeof buf, NULL, "      %s", indent);
+                if (rc == 0) {
+                    CountPrint(&p->SPOT_COUNT, buf, "Rows");
+                    CountPrint(&p->BASE_COUNT, buf, "Elements");
+                }
+                OUTMSG(("      %s</%s>\n", indent, tag));
+                break;
+              }
+            default:
+                assert(0);
+                OUTMSG(("      %s<%s source=\"meta\" state=\"UNEXPECTED\"/>\n",
+                    indent, tag));
+                break;
+            }
+            OUTMSG(("    %s</Table>\n", indent));
+        }
+        OUTMSG(("  %s</%s>\n", indent, tag));
+    }
+    OUTMSG(("%s</%s>\n", indent, tag));
+
+    return rc;
+}
+
+static
+void TableCountsRelease(TableCounts* self)
+{
+    size_t i = ~0;
+    assert(self);
+    for (i = 0; i < self->used; ++i) {
+        assert(self->count);
+        free(self->count[i].tableName);
+        self->count[i].tableName = NULL;
+    }
+    free(self->count);
+    memset(self, 0, sizeof *self);
 }
 
 static
@@ -729,7 +1445,7 @@ void SraStatsMetaDestroy(SraStatsMeta* self)
 }
 
 static
-rc_t CC visitor(const KDirectory* dir,
+rc_t CC fileSizeVisitor(const KDirectory* dir,
     uint32_t type, const char* name, void* data)
 {
     rc_t rc = 0;
@@ -755,7 +1471,7 @@ rc_t CC visitor(const KDirectory* dir,
         }
         case kptDir: 
             DBGMSG(DBG_APP, DBG_COND_1, ("Dir '%s'\n", name));
-            rc = KDirectoryVisit(dir, false, visitor, sizes, name);
+            rc = KDirectoryVisit(dir, false, fileSizeVisitor, sizes, name);
             DISP_RC2(rc, name, "while calling KDirectoryVisit");
             break;
         default:
@@ -768,7 +1484,8 @@ rc_t CC visitor(const KDirectory* dir,
 }
 
 static
-rc_t get_arc_info(const SRAMgr* mgr, const char* path, const SRATable* tbl, ArcInfo* arc_info)
+rc_t get_arc_info(const SRAMgr* mgr, const char* path,
+    const SRATable* tbl, ArcInfo* arc_info)
 {
     rc_t rc = 0;
     memset(arc_info, 0, sizeof(*arc_info));
@@ -851,7 +1568,7 @@ rc_t get_size(const SRATable* tbl, SraSizeStats* sizes)
     memset(sizes, 0, sizeof *sizes);
 
     if (rc == 0) {
-        rc = KDirectoryVisit(dir, false, visitor, sizes, NULL);
+        rc = KDirectoryVisit(dir, false, fileSizeVisitor, sizes, NULL);
         DISP_RC(rc, "while calling KDirectoryVisit");
     }
 
@@ -1041,7 +1758,7 @@ rc_t readStatsMetaNode(const KMDataNode* parent, const char* parentName,
 
     assert(parent && parentName && name && result);
 
-    rc = KMDataNodeOpenNodeRead (parent, &node, name);
+    rc = KMDataNodeOpenNodeRead(parent, &node, name);
     if (rc != 0)
     {
         if (GetRCState(rc) == rcNotFound && optional)
@@ -1057,12 +1774,18 @@ rc_t readStatsMetaNode(const KMDataNode* parent, const char* parentName,
     }
     else {
         rc = KMDataNodeReadAsU64(node, result);
+        if (GetRCObject(rc) == rcTransfer && GetRCState(rc) == rcIncomplete) {
+            *result = 0;
+            rc = 0;
+        }
         if ( rc != 0 && quick )
         {
             PLOGERR(klogInt, (klogInt, rc, "while reading $(parent)/$(child)",
                 "parent=%s,child=%s", parentName, name));
         }
     }
+
+    RELEASE(KMDataNode, node);
 
     return rc;
 }
@@ -1375,8 +2098,9 @@ rc_t process_align_info(const char* indent, const Ctx* ctx)
 
     return rc;
 }
+
 static
-rc_t print_results(Ctx* ctx)
+rc_t print_results(const Ctx* ctx)
 {
     rc_t rc = 0;
     bool mismatch = false;
@@ -1570,13 +2294,16 @@ rc_t print_results(Ctx* ctx)
             }
             OUTMSG(("    </Meta>\n  </Table>\n"));
         }
+        if (rc == 0 && !ctx->pb->quick) {
+            BasesPrint(&ctx->total->bases_count, ctx->total->BASE_COUNT, "  ");
+        }
         if (rc == 0 && !ctx->pb->skip_alignment) {
             rc = process_align_info("  ", ctx);
         }
         if (rc == 0 && ctx->pb->statistics) {
             rc = SraStatsTotalPrintStatistics(ctx->total, "  ", ctx->pb->test);
         }
-        if( ctx->pb->print_arcinfo ) {
+        if (rc == 0 && ctx->pb->print_arcinfo) {
             const ArcInfo* a = ctx->arc_info;
             uint32_t i;
             char b[1024];
@@ -1585,7 +2312,8 @@ rc_t print_results(Ctx* ctx)
 
             if( tm == NULL ) {
                 rc = RC(rcExe, rcData, rcReading, rcParam, rcInvalid);
-            } else {
+            }
+            else {
                 size_t k = strftime(b, sizeof(b), "%Y-%m-%dT%H:%M:%S", tm);
                 OUTMSG(("  <Archive timestamp=\"%.*s\"", k, b));
                 for(i = 0; i < sizeof(a->i) / sizeof(a->i[0]); i++) {
@@ -1595,6 +2323,10 @@ rc_t print_results(Ctx* ctx)
                 OUTMSG((" />\n"));
             }
         }
+        if (rc == 0)
+        {   rc = QualityStatsPrint(&ctx->quality, "  "); }
+        if (rc == 0)
+        {   rc = TableCountsPrint(&ctx->tables, "  "); }
         OUTMSG(("</Run>\n"));
     }
     if (mismatch && ctx->pb->start == 0 && ctx->pb->stop == 0) {
@@ -1647,7 +2379,9 @@ rc_t sra_stat(srastat_parms* pb, const SRATable* tbl,
     /* filled with dREAD_LEN[i] for (spotid == start);
        used to check fixedReadLength */
     uint64_t g_totalREAD_LEN[MAX_NREADS];
+    uint64_t g_nonZeroLenReads[MAX_NREADS];
     memset(g_totalREAD_LEN, 0, sizeof g_totalREAD_LEN);
+    memset(g_nonZeroLenReads, 0, sizeof g_nonZeroLenReads);
 
     assert(pb && tbl && tr && total);
 
@@ -1700,6 +2434,9 @@ rc_t sra_stat(srastat_parms* pb, const SRATable* tbl,
                 pb->hasSPOT_GROUP = 0;
                 rc = SRATableMaxSpotId(tbl, &spotid);
                 DISP_RC(rc, "failed to read max spot id");
+                if (rc == 0) {
+                    BasesInit(&total->bases_count, tbl);
+                }
                 if (rc == 0) {
                     bool bad_read_filter = false;
                     bool fixedNReads = true;
@@ -1895,11 +2632,16 @@ rc_t sra_stat(srastat_parms* pb, const SRATable* tbl,
                                 ss->total_cmp_len += cmp_len;
                                 total->total_cmp_len += cmp_len;
 
+                                BasesAdd(&total->bases_count, spotid);
+
                                 if (pb->statistics) {
                                     SraStatsTotalAdd(total, dREAD_LEN, nreads);
                                 }
                                 for (bio_len = bio_count = i = bad_cnt = filt_cnt = 0; (i < nreads) && (rc == 0); i++) {
-                                    g_totalREAD_LEN[i] += dREAD_LEN[i];
+                                    if (dREAD_LEN[i] > 0) {
+                                        g_totalREAD_LEN[i] += dREAD_LEN[i];
+                                        ++g_nonZeroLenReads[i];
+                                    }
                                     if (spotid == start) {
                                         g_dREAD_LEN[i] = dREAD_LEN[i];
                                     }
@@ -1965,6 +2707,7 @@ rc_t sra_stat(srastat_parms* pb, const SRATable* tbl,
                     } /* for (spotid = start; spotid <= stop && rc == 0; ++spotid) */
 
                     if (rc == 0) {
+                        BasesFinalize(&total->bases_count);
                         pb->variableReadLength = !fixedReadLength;
 
                         /* --- g_totalREAD_LEN[i] is sum(READ_LEN[i]) for all spots --- */
@@ -1999,7 +2742,8 @@ rc_t sra_stat(srastat_parms* pb, const SRATable* tbl,
         spotid_t spotid = 0;
         double average[MAX_NREADS];
         double diff_sq[MAX_NREADS];
-        SraStatsTotalStatistics2Init(total, g_nreads, g_totalREAD_LEN, n_spots);
+        SraStatsTotalStatistics2Init(total,
+            g_nreads, g_totalREAD_LEN, g_nonZeroLenReads);
         memset(diff_sq, 0, sizeof diff_sq);
         for (i = 0; i < g_nreads; ++i) {
             average[i] = (double)g_totalREAD_LEN[i] / n_spots;
@@ -2034,6 +2778,16 @@ rc_t sra_stat(srastat_parms* pb, const SRATable* tbl,
 }
 
 static
+void CtxRelease(Ctx* ctx)
+{
+    assert(ctx);
+
+    QualityStatsRelease(&ctx->quality);
+    TableCountsRelease(&ctx->tables);
+
+    memset(ctx, 0, sizeof *ctx);
+}
+static
 rc_t run(srastat_parms* pb)
 {
     rc_t rc = 0;
@@ -2066,7 +2820,10 @@ rc_t run(srastat_parms* pb)
             const VDatabase* db = NULL;
 
             BSTree tr;
+            Ctx ctx;
+
             BSTreeInit(&tr);
+            memset(&ctx, 0, sizeof ctx);
 
             memset(&total, 0, sizeof total);
 
@@ -2103,12 +2860,20 @@ rc_t run(srastat_parms* pb)
             {   rc = get_load_info(meta, &info); }
             if (rc == 0 && !pb->quick)
             {   rc = sra_stat(pb, tbl, &tr, &total); }
-            if(rc == 0 && pb->print_arcinfo ) {
+            if (rc == 0 && pb->print_arcinfo ) {
                 rc = get_arc_info(mgr, pb->table_path, tbl, &arc_info);
             }
             if (rc == 0) {
-                Ctx ctx;
-                memset(&ctx, 0, sizeof ctx);
+                rc = QualityStatsRead(&ctx.quality, meta);
+                if (rc == 0)
+                {   QualityStatsSort(&ctx.quality); }
+            }
+            if (rc == 0) {
+                rc = TableCountsRead(&ctx.tables, db);
+                if (rc == 0)
+                {   TableCountsSort(&ctx.tables); }
+            }
+            if (rc == 0) {
                 ctx.db = db;
                 ctx.info = &info;
                 ctx.meta = &stats;
@@ -2123,7 +2888,6 @@ rc_t run(srastat_parms* pb)
             SraStatsTotalFree(&total);
             RELEASE(VDatabase, db);
             RELEASE(VTable, vtbl);
-            RELEASE(KMetadata, meta);
             RELEASE(KTable, ktbl);
             {
                 int i; 
@@ -2136,6 +2900,8 @@ rc_t run(srastat_parms* pb)
                 free(stats.spotGroup);
                 stats.spotGroup = NULL;
             }
+            CtxRelease(&ctx);
+            RELEASE(KMetadata, meta);
         }
         RELEASE(SRATable, tbl);
     }
@@ -2183,16 +2949,16 @@ ver_t CC KAppVersion ( void )
 #define ALIAS_XML   "x"
 #define ALIAS_ARCINFO NULL
 
-static const char * align_usage[] = { "[on off] print alignment info, default is on", NULL };
+static const char * align_usage[] = { "print alignment info, default is on", NULL };
 static const char * spt_d_usage[] = { "print table spot descriptor", NULL };
-static const char * membr_usage[] = { "[on off] print member stats, default is on", NULL };
+static const char * membr_usage[] = { "print member stats, default is on", NULL };
 static const char * meta_usage[] = { "print load metadata", NULL };
-static const char * start_usage[] = { "starting spot id ( default 1 )", NULL };
-static const char * stop_usage[] = { "ending spot id ( default max )", NULL };
+static const char * start_usage[] = { "starting spot id, default is 1", NULL };
+static const char * stop_usage[] = { "ending spot id, default is max", NULL };
 static const char * stats_usage[] = { "calculate READ_LEN average and standard deviation", NULL };
 static const char * quick_usage[] = { "quick mode: get statistics from metadata;", "do not scan the table", NULL };
 static const char * test_usage[] = { "test READ_LEN average and standard deviation calculation", NULL };
-static const char * xml_usage[] = { "output as XML (default is text)", NULL };
+static const char * xml_usage[] = { "output as XML, default is text", NULL };
 static const char * arcinfo_usage[] = { "output archive info, default is off", NULL };
 
 OptDef Options[] =
@@ -2245,10 +3011,10 @@ rc_t CC Usage (const Args * args)
     HelpOptionLine (ALIAS_STOP, OPTION_STOP, "row-id", stop_usage);
     HelpOptionLine (ALIAS_META, OPTION_META, NULL, meta_usage);
     HelpOptionLine (ALIAS_QUICK, OPTION_QUICK, NULL, quick_usage);
-    HelpOptionLine (ALIAS_MEMBR, OPTION_MEMBR, NULL, membr_usage);
+    HelpOptionLine (ALIAS_MEMBR, OPTION_MEMBR, "on | off", membr_usage);
     HelpOptionLine (ALIAS_ARCINFO, OPTION_ARCINFO, NULL, arcinfo_usage);
     HelpOptionLine (ALIAS_STATS, OPTION_STATS, NULL, stats_usage);
-    HelpOptionLine (ALIAS_ALIGN, OPTION_ALIGN, NULL, align_usage);
+    HelpOptionLine (ALIAS_ALIGN, OPTION_ALIGN, "on | off", align_usage);
     KOutMsg ("\n");
     HelpOptionsStandard ();
     HelpVersion (fullpath, KAppVersion());

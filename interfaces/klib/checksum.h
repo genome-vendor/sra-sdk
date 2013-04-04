@@ -106,7 +106,7 @@ struct SHA64bitState
 {
     uint64_t len;
     uint64_t H [ 8 ];
-    uint32_t cur;
+    unsigned long cur;
     uint8_t W [ 128 ];
 };
 

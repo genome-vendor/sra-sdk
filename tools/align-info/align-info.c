@@ -34,11 +34,13 @@
 #include <vdb/table.h> /* VTable */
 #include <vdb/schema.h> /* VSchema */
 #include <vdb/cursor.h> /* VCursor */
+#include <vdb/vdb-priv.h> /* VDBManagerOpenKDBManagerRead */
 
 #include <kapp/main.h>
 
 #include <kfg/config.h> /* KConfig */
 
+#include <kdb/manager.h> /* KDBManagerRelease */
 #include <kdb/namelist.h> /* KMDataNodeListChild */
 #include <kdb/meta.h> /* KMetadata */
 
@@ -139,8 +141,6 @@ rc_t CC Usage(const Args* args) {
 const char UsageDefaultName[] = "align-info";
 
 ver_t CC KAppVersion(void) { return ALIGN_INFO_VERS; }
-
-static rc_t ArgsRelease(Args* self) { return ArgsWhack(self); }
 
 static rc_t bam_header(const VDatabase* db) {
     rc_t rc = 0;
@@ -317,98 +317,129 @@ static rc_t qual_stats(const Params* prm, const VDatabase* db) {
 
 static rc_t align_info(const Params* prm) {
     rc_t rc = 0;
+
     const VDatabase* db = NULL;
     const VDBManager* mgr = NULL;
+    const KDBManager *kmgr = NULL;
     VSchema* schema = NULL;
+    bool is_db = false;
+
     if (prm == NULL)
     {   return RC(rcExe, rcQuery, rcExecuting, rcParam, rcNull); }
+
     if (rc == 0) {
         rc = VDBManagerMakeRead(&mgr, NULL);
         DISP_RC(rc, "while calling VDBManagerMakeRead");
     }
+
+    if (rc == 0) {
+        rc = VDBManagerOpenKDBManagerRead(mgr, &kmgr);
+        DISP_RC(rc, "while calling VDBManagerOpenKDBManagerRead");
+    }
+
     if (rc == 0) {
         rc = VDBManagerMakeSRASchema(mgr, &schema);
         DISP_RC(rc, "while calling VDBManagerMakeSRASchema");
     }
+
     if (rc == 0) {
 /*      const char path[] = "/panfs/pan1/trace_work/scratch/XXX000013"; */
         rc = VDBManagerOpenDBRead(mgr, &db, schema, prm->dbPath);
-        if (rc)
-	{   PLOGERR(klogErr,(klogErr, rc, "$(path)", "path=%s", prm->dbPath)); }
+        if (rc == 0) {
+            is_db = true;
+        }
+        else if (rc == SILENT_RC(rcDB, rcMgr, rcOpening, rcDatabase, rcIncorrect)) {
+            PLOGMSG(klogWarn, (klogWarn,
+                "'$(path)' is not a database", "path=%s", prm->dbPath));
+            rc = 0;
+        }
+        else {
+            PLOGERR(klogErr,
+                (klogErr, rc, "$(path)", "path=%s", prm->dbPath));
+        }
     }
-    if (rc == 0) {
-        if (prm->paramRef) {
-            const VDBDependencies* dep = NULL;
-            uint32_t count = 0;
-            int i = 0;
-            rc = VDatabaseListDependencies(db, &dep, false);
-            DISP_RC2(rc, prm->dbPath,
-                "while calling VDatabaseListDependencies");
-            if (rc == 0) {
-                rc = VDBDependenciesCount(dep, &count);
+
+    if (is_db) {
+        if (rc == 0) {
+            if (prm->paramRef) {
+                const VDBDependencies* dep = NULL;
+                uint32_t count = 0;
+                int i = 0;
+                rc = VDatabaseListDependencies(db, &dep, false);
                 DISP_RC2(rc, prm->dbPath,
-                    "while calling VDBDependenciesCount");
+                    "while calling VDatabaseListDependencies");
+                if (rc == 0) {
+                    rc = VDBDependenciesCount(dep, &count);
+                    DISP_RC2(rc, prm->dbPath,
+                        "while calling VDBDependenciesCount");
+                }
+                for (i = 0; i < count && rc == 0; ++i) {
+                    bool circular = false;
+                    const char* name = NULL;
+                    const char* path = NULL;
+                    bool local = false;
+                    const char* seqId = NULL;
+                    rc = VDBDependenciesCircular(dep, &circular, i);
+                    if (rc != 0) {
+                        DISP_RC2(rc, prm->dbPath,
+                            "while calling VDBDependenciesCircular");
+                        break;
+                    }
+                    rc = VDBDependenciesName(dep, &name, i);
+                    if (rc != 0) {
+                        DISP_RC2(rc, prm->dbPath,
+                            "while calling VDBDependenciesName");
+                        break;
+                    }
+                    rc = VDBDependenciesPath(dep, &path, i);
+                    if (rc != 0) {
+                        DISP_RC2(rc, prm->dbPath,
+                            "while calling VDBDependenciesPath");
+                        break;
+                    }
+                    rc = VDBDependenciesLocal(dep, &local, i);
+                    if (rc != 0) {
+                        DISP_RC2(rc, prm->dbPath,
+                            "while calling VDBDependenciesLocal");
+                        break;
+                    }
+                    rc = VDBDependenciesSeqId(dep, &seqId, i);
+                    if (rc != 0) {
+                        DISP_RC2(rc, prm->dbPath,
+                            "while calling VDBDependenciesSeqId");
+                        break;
+                    }
+                    OUTMSG(("%s,%s,%s,%s", seqId, name,
+                        (circular ? "true" : "false"),
+                        (local ? "local" : "remote")));
+                    if (path && path[0]) {
+                        OUTMSG((":%s", path));
+                    }
+                    OUTMSG(("\n"));
+                }
+                DESTRUCT(VDBDependencies, dep);
             }
-            for (i = 0; i < count && rc == 0; ++i) {
-                bool circular = false;
-                const char* name = NULL;
-                const char* path = NULL;
-                bool local = false;
-                const char* seqId = NULL;
-                rc = VDBDependenciesCircular(dep, &circular, i);
-                if (rc != 0) {
-                    DISP_RC2(rc, prm->dbPath,
-                        "while calling VDBDependenciesCircular");
-                    break;
-                }
-                rc = VDBDependenciesName(dep, &name, i);
-                if (rc != 0) {
-                    DISP_RC2(rc, prm->dbPath,
-                        "while calling VDBDependenciesName");
-                    break;
-                }
-                rc = VDBDependenciesPath(dep, &path, i);
-                if (rc != 0) {
-                    DISP_RC2(rc, prm->dbPath,
-                        "while calling VDBDependenciesPath");
-                    break;
-                }
-                rc = VDBDependenciesLocal(dep, &local, i);
-                if (rc != 0) {
-                    DISP_RC2(rc, prm->dbPath,
-                        "while calling VDBDependenciesLocal");
-                    break;
-                }
-                rc = VDBDependenciesSeqId(dep, &seqId, i);
-                if (rc != 0) {
-                    DISP_RC2(rc, prm->dbPath,
-                        "while calling VDBDependenciesSeqId");
-                    break;
-                }
-                OUTMSG(("%s,%s,%s,%s", seqId, name,
-                    (circular ? "true" : "false"),
-                    (local ? "local" : "remote")));
-                if (path && path[0]) {
-                    OUTMSG((":%s", path));
-                }
-                OUTMSG(("\n"));
+
+            if (prm->paramBamHeader) {
+                rc_t rc3 = bam_header(db);
+                if (rc3 != 0 && rc == 0)
+                {   rc = rc3; }
             }
-            DESTRUCT(VDBDependencies, dep);
+
+            if (prm->paramQuality) {
+                rc_t rc3 = qual_stats(prm, db);
+                if (rc3 != 0 && rc == 0)
+                {   rc = rc3; }
+            }
         }
-        if (prm->paramBamHeader) {
-            rc_t rc3 = bam_header(db);
-            if (rc3 != 0 && rc == 0)
-            {   rc = rc3; }
-        }
-        if (prm->paramQuality) {
-            rc_t rc3 = qual_stats(prm, db);
-            if (rc3 != 0 && rc == 0)
-            {   rc = rc3; }
-        }
+
     }
+
     DESTRUCT(VSchema, schema);
+    DESTRUCT(KDBManager, kmgr);
     DESTRUCT(VDBManager, mgr);
     DESTRUCT(VDatabase, db);
+
     return rc;
 }
 

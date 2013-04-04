@@ -83,20 +83,23 @@
 #include "reference-writer.h"
 #include "alignment-writer.h"
 
+#define NUM_ID_SPACES (256u)
+
+#define MMA_NUM_CHUNKS_BITS (24u)
+#define MMA_NUM_SUBCHUNKS_BITS ((32u)-(MMA_NUM_CHUNKS_BITS))
+#define MMA_SUBCHUNK_SIZE (1u << MMA_NUM_CHUNKS_BITS)
+#define MMA_SUBCHUNK_COUNT (1u << MMA_NUM_SUBCHUNKS_BITS)
+
 typedef struct {
-    KFile *backingStore;
-    uint64_t fileSize;
+    KFile *fp;
     size_t elemSize;
-    uint64_t wsize;
-#define MMA_MAP_BITS (3)
+    uint64_t fsize;
     struct mma_map_s {
-        KMMap *mm;
-        uint8_t *base;
-        uint32_t lo;
-        uint32_t hi;
-    } map[1u << MMA_MAP_BITS];
-    uint32_t used_maps;
-    uint32_t mru[1u << MMA_MAP_BITS];
+        struct mma_submap_s {
+            uint8_t *base;
+            KMMap *mmap;
+        } submap[MMA_SUBCHUNK_COUNT];
+    } map[NUM_ID_SPACES];
 } MMArray;
 
 #define FRAG_CHUNK_SIZE (128)
@@ -108,10 +111,11 @@ typedef struct {
     uint8_t  pId_ext[2];
     uint8_t  spotId_ext;
     uint8_t  alignmentCount[2]; /* 0..254; 254: saturated max; 255: special meaning "too many" */
-    uint8_t  primaryId_ext; /*** extension bits for primary ids  will be used when needed ***/
     uint8_t  unmated: 1,
              pcr_dup: 1,
-             has_a_read: 1;
+             has_a_read: 1,
+             unaligned_1: 1,
+             unaligned_2: 1;
 } ctx_value_t;
 
 #define CTX_VALUE_SET_P_ID(O,N,V) do { int64_t tv = (V); (O).primaryId[N] = (uint32_t)tv; (O).pId_ext[N] = tv >> 32; } while(0);
@@ -121,120 +125,111 @@ typedef struct {
 #define CTX_VALUE_GET_S_ID(O) ((((int64_t)(O).spotId_ext) << 32) | (O).spotId)
 
 typedef struct FragmentInfo {
-	uint32_t readlen;
-    uint32_t ti;
-	uint8_t  aligned;
+    uint64_t ti;
+    uint32_t readlen;
+    uint8_t  aligned;
     uint8_t  is_bad;
-	uint8_t  orientation;
-	uint8_t	 otherReadNo;
-	uint8_t  sglen;
+    uint8_t  orientation;
+    uint8_t  otherReadNo;
+    uint8_t  sglen;
     uint8_t  cskey;
 } FragmentInfo;
 
 typedef struct context_t {
     const KLoadProgressbar *progress[4];
-    KBTree *key2id;
+    KBTree *key2id[NUM_ID_SPACES];
+    char *key2id_names;
     MMArray *id2value;
     KMemBank *fragsBoth; /*** mate will be there soon ***/
     KMemBank *fragsOne;  /*** mate may not be found soon or even show up ***/
-    uint32_t idCount;
     int64_t spotId;
     int64_t primaryId;
     int64_t secondId;
     uint64_t alignCount;
+    
+    uint32_t idCount[NUM_ID_SPACES];
+    uint32_t key2id_hash[NUM_ID_SPACES];
 
+    unsigned key2id_max;
+    unsigned key2id_name_max;
+    unsigned key2id_name_alloc;
+    unsigned key2id_count;
+    
+    unsigned key2id_name[NUM_ID_SPACES];
+    /* this array is kept in name order */
+    /* this maps the names to key2id and idCount */
+    unsigned key2id_oid[NUM_ID_SPACES];
+    
     unsigned pass;
     bool isColorSpace;
 } context_t;
 
-static rc_t MMArrayMake(MMArray **rslt, KFile *fp, uint64_t wsize, uint32_t elemSize)
+static char const *Print_ctx_value_t(ctx_value_t const *const self)
 {
-    MMArray *self;
-    unsigned const maps = sizeof(self->map)/sizeof(self->map[0]);
-    
-    wsize = (wsize + maps - 1) / maps;
-    wsize -= wsize % elemSize;
-    
-    self = calloc(1, sizeof(*self));
-    if (self == NULL)
-        return RC(rcExe, rcMemMap, rcConstructing, rcMemory, rcExhausted);
-    else {
-        rc_t rc = KFileSize(fp, &self->fileSize);
-        
-        self->used_maps=0; 
-        if (rc == 0) {
-            KFileAddRef(self->backingStore);
-            self->elemSize = elemSize;
-            self->backingStore = fp;
-            self->wsize = wsize / elemSize;
-            
-            *rslt = self;
-            return 0;
-        }
-        free(self);
-        return rc;
-    }
+    static char buffer[4096];
+    rc_t rc = string_printf(buffer, sizeof(buffer), NULL, "pid: { %lu, %lu }, sid: %lu, fid: %u, alc: { %u, %u }, flg: %x", CTX_VALUE_GET_P_ID(*self, 0), CTX_VALUE_GET_P_ID(*self, 1), CTX_VALUE_GET_S_ID(*self), self->fragmentId, self->alignmentCount[0], self->alignmentCount[1], self->alignmentCount[2]);
+
+    if (rc)
+        return 0;
+    return buffer;
 }
 
-static rc_t MMArrayGet(MMArray *self, void **value, uint32_t element)
+static rc_t MMArrayMake(MMArray **rslt, KFile *fp, uint32_t elemSize)
 {
-    rc_t rc;
-    unsigned i;
+    MMArray *const self = calloc(1, sizeof(*self));
+
+    if (self == NULL)
+        return RC(rcExe, rcMemMap, rcConstructing, rcMemory, rcExhausted);
+    self->elemSize = (elemSize + 3) & ~(3u); /** align to 4 byte **/
+    self->fp = fp;
+    KFileAddRef(fp);
+    *rslt = self;
+    return 0;
+}
+
+#define PERF 0
+
+static rc_t MMArrayGet(MMArray *const self, void **const value, uint64_t const element)
+{
+    unsigned const bin_no = element >> 32;
+    unsigned const subbin = ((uint32_t)element) >> MMA_NUM_CHUNKS_BITS;
+    unsigned const in_bin = (uint32_t)element & (MMA_SUBCHUNK_SIZE - 1);
+
+    if (bin_no >= sizeof(self->map)/sizeof(self->map[0]))
+        return RC(rcExe, rcMemMap, rcConstructing, rcId, rcExcessive);
     
-    if (element * self->elemSize >= self->fileSize) {
-        size_t const fileSize = (element / self->wsize + 1) * self->wsize * self->elemSize;
+    if (self->map[bin_no].submap[subbin].base == NULL) {
+        size_t const chunk = MMA_SUBCHUNK_SIZE * self->elemSize;
+        size_t const fsize = self->fsize + chunk;
+        rc_t rc = KFileSetSize(self->fp, fsize);
         
-        assert(element * self->elemSize < fileSize);
-        rc = KFileSetSize(self->backingStore, fileSize);
-        if (rc) return rc;
-        self->fileSize = fileSize;
-    }
-    {
-        unsigned j;
-        for (j = 0; j < self->used_maps;j++) {
-            i = self->mru[j];
-            if (self->map[i].lo <= element && element < self->map[i].hi) {
-                goto MAINTAIN_MRU;	
-                break;
-            }
-        }
-        {
-            if(self->used_maps < sizeof(self->map) / sizeof(self->map[0])){ /*** grab a new region ***/
-#if 1
-                if(self->used_maps > 0 ){
-                    /*** first flush pages in the previous one by close/reopen***/
-                    i=self->used_maps-1;
-                    KMMapRelease(self->map[i].mm);
-                    rc = KMMapMakeRgnUpdate(&self->map[i].mm, self->backingStore,
-                                            self->map[i].lo * self->elemSize,
-                                            self->wsize * self->elemSize);
-                    if (rc) return rc;
-                    rc = KMMapAddrUpdate(self->map[i].mm, (void **)&self->map[i].base);
-                    if (rc) return rc;
-                }
+        if (rc == 0) {
+            KMMap *mmap;
+            
+            self->fsize = fsize;
+            rc = KMMapMakeRgnUpdate(&mmap, self->fp, self->fsize, chunk);
+            if (rc == 0) {
+                void *base;
+                
+                rc = KMMapAddrUpdate(mmap, &base);
+                if (rc == 0) {
+#if PERF
+                    static unsigned mapcount = 0;
+
+                    (void)PLOGMSG(klogInfo, (klogInfo, "Number of mmaps: $(cnt)", "cnt=%u", ++mapcount));
 #endif
-                /***open a fresh page ***/
-                i = self->used_maps ++;
-            } else {  /*** starting to reuse regions ****/
-                j--;
-                i = self->mru[j];
-                KMMapRelease(self->map[i].mm);
+                    self->map[bin_no].submap[subbin].mmap = mmap;
+                    self->map[bin_no].submap[subbin].base = base;
+
+                    goto GET_MAP;
+                }
+                KMMapRelease(mmap);
             }
-            self->map[i].lo = element - element % self->wsize;
-            self->map[i].hi = self->map[i].lo + self->wsize;
-            rc = KMMapMakeRgnUpdate(&self->map[i].mm, self->backingStore,
-                                    self->map[i].lo * self->elemSize, 
-                                    self->wsize * self->elemSize);
-            if (rc) return rc;
-            rc = KMMapAddrUpdate(self->map[i].mm, (void **)&self->map[i].base);
-            if (rc) return rc;
         }
-    MAINTAIN_MRU:
-        /*** maintain mru ***/
-        memmove(self->mru+1,self->mru,j*sizeof(*self->mru));
-        self->mru[0]=i;
+        return rc;
     }
-    *value = &self->map[i].base[(element - self->map[i].lo) * self->elemSize];
+GET_MAP:
+    *value = &self->map[bin_no].submap[subbin].base[(size_t)in_bin * self->elemSize];
     return 0;
 }
 
@@ -242,11 +237,283 @@ static void MMArrayWhack(MMArray *self)
 {
     unsigned i;
 
-    for (i = 0; i != sizeof(self->map)/sizeof(self->map[0]); ++i)
-        KMMapRelease(self->map[i].mm);
-
-    KFileRelease(self->backingStore);
+    for (i = 0; i != sizeof(self->map)/sizeof(self->map[0]); ++i) {
+        unsigned j;
+        
+        for (j = 0; j != sizeof(self->map[0].submap)/sizeof(self->map[0].submap[0]); ++j) {
+            if (self->map[i].submap[j].mmap)
+                KMMapRelease(self->map[i].submap[j].mmap);
+            self->map[i].submap[j].mmap = NULL;
+            self->map[i].submap[j].base = NULL;
+        }
+    }
+    KFileRelease(self->fp);
     free(self);
+}
+
+static rc_t OpenKBTree(KBTree **const rslt, unsigned n, unsigned max)
+{
+    size_t const cacheSize = (((G.cache_size - (G.cache_size / 2) - (G.cache_size / 8)) / max)
+                            + 0xFFFFF) & ~((size_t)0xFFFFF);
+    KFile *file = NULL;
+    KDirectory *dir;
+    char fname[4096];
+    rc_t rc;
+    
+    rc = KDirectoryNativeDir(&dir);
+    if (rc)
+        return rc;
+    
+    rc = string_printf(fname, sizeof(fname), NULL, "%s/key2id.%u.%u", G.tmpfs, G.pid, n); if (rc) return rc;
+    rc = KDirectoryCreateFile(dir, &file, true, 0600, kcmInit, fname);
+    KDirectoryRemove(dir, 0, fname);
+    KDirectoryRelease(dir);
+    if (rc == 0) {
+        rc = KBTreeMakeUpdate(rslt, file, cacheSize,
+                              false, kbtOpaqueKey,
+                              1, 255, sizeof ( uint32_t ),
+                              NULL
+                              );
+        KFileRelease(file);
+#if PERF
+        if (rc == 0) {
+            static unsigned treecount = 0;
+
+            (void)PLOGMSG(klogInfo, (klogInfo, "Number of trees: $(cnt)", "cnt=%u", ++treecount));
+        }
+#endif
+    }
+    return rc;
+}
+
+static rc_t GetKeyIDOld(context_t *const ctx, uint64_t *const rslt, bool *const wasInserted, char const key[], char const name[], unsigned const namelen)
+{
+    unsigned const keylen = strlen(key);
+    rc_t rc;
+    uint64_t tmpKey;
+
+    if (ctx->key2id_count == 0) {
+        rc = OpenKBTree(&ctx->key2id[0], 1, 1);
+        if (rc) return rc;
+        ctx->key2id_count = 1;
+    }
+    if (memcmp(key, name, keylen) == 0) {
+        /* qname starts with read group; no append */
+        tmpKey = ctx->idCount[0];
+        rc = KBTreeEntry(ctx->key2id[0], &tmpKey, wasInserted, name, namelen);
+    }
+    else {
+        char sbuf[4096];
+        char *buf = sbuf;
+        char *hbuf = NULL;
+        size_t bsize = sizeof(sbuf);
+        size_t actsize;
+        
+        if (keylen + namelen + 2 > bsize) {
+            hbuf = malloc(bsize = keylen + namelen + 2);
+            if (hbuf == NULL)
+                return RC(rcExe, rcName, rcAllocating, rcMemory, rcExhausted);
+            buf = hbuf;
+        }
+        rc = string_printf(buf, bsize, &actsize, "%s\t%.*s", key, (int)namelen, name);
+        
+        tmpKey = ctx->idCount[0];
+        rc = KBTreeEntry(ctx->key2id[0], &tmpKey, wasInserted, buf, actsize);
+        if (hbuf)
+            free(hbuf);
+    }
+    if (rc == 0) {
+        *rslt = tmpKey;
+        if (*wasInserted)
+            ++ctx->idCount[0];
+    }
+    return rc;
+}
+
+static unsigned HashKey(void const *key, unsigned keylen)
+{
+    /* There is nothing special about this hash. It was randomly generated. */
+    static const uint8_t T1[] = {
+         64, 186,  39, 203,  54, 211,  98,  32,  26,  23, 219,  94,  77,  60,  56, 184,
+        129, 242,  10,  91,  84, 192,  19, 197, 231, 133, 125, 244,  48, 176, 160, 164,
+         17,  41,  57, 137,  44, 196, 116, 146, 105,  40, 122,  47, 220, 226, 213, 212,
+        107, 191,  52, 144,   9, 145,  81, 101, 217, 206,  85, 134, 143,  58, 128,  20,
+        236, 102,  83, 149, 148, 180, 167, 163,  12, 239,  31,   0,  73, 152,   1,  15,
+         75, 200,   4, 165,   5,  66,  25, 111, 255,  70, 174, 151,  96, 126, 147,  34,
+        112, 161, 127, 181, 237,  78,  37,  74, 222, 123,  21, 132,  95,  51, 141,  45,
+         61, 131, 193,  68,  62, 249, 178,  33,   7, 195, 228,  82,  27,  46, 254,  90,
+        185, 240, 246, 124, 205, 182,  42,  22, 198,  69, 166,  92, 169, 136, 223, 245,
+        118,  97, 115,  80, 252, 209,  49,  79, 221,  38,  28,  35,  36, 208, 187, 248,
+        158, 201, 202, 168,   2,  18, 189, 119, 216, 214,  11,   6,  89,  16, 229, 109,
+        120,  43, 162, 106, 204,   8, 199, 235, 142, 210,  86, 153, 227, 230,  24, 100,
+        224, 113, 190, 243, 218, 215, 225, 173,  99, 238, 138,  59, 183, 154, 171, 232,
+        157, 247, 233,  67,  88,  50, 253, 251, 140, 104, 156, 170, 150, 103, 117, 110,
+        155,  72, 207, 250, 159, 194, 177, 130, 135,  87,  71, 175,  14,  55, 172, 121,
+        234,  13,  30, 241,  93, 188,  53, 114,  76,  29,  65,   3, 179, 108,  63, 139
+    };
+    unsigned h = 0x55;
+    unsigned i = keylen;
+    
+    do { h = T1[h ^ ((uint8_t)i)]; } while ((i >>= 8) != 0);
+
+    for (i = 0; i != keylen; ++i)
+        h = T1[h ^ ((uint8_t const *)key)[i]];
+
+    return h;
+}
+
+static rc_t GetKeyID(context_t *const ctx, uint64_t *const rslt, bool *const wasInserted, char const key[], char const name[], unsigned const namelen)
+{
+    if (ctx->key2id_max == 1)
+        return GetKeyIDOld(ctx, rslt, wasInserted, key, name, namelen);
+    else {
+        unsigned const keylen = strlen(key);
+        unsigned const h = HashKey(key, keylen);
+        unsigned f;
+        unsigned e = ctx->key2id_count;
+        uint64_t tmpKey;
+        
+        *rslt = 0;
+        {{
+            uint32_t const bucket_value = ctx->key2id_hash[h];
+            unsigned const n  = (uint8_t) bucket_value;
+            unsigned const i1 = (uint8_t)(bucket_value >>  8);
+            unsigned const i2 = (uint8_t)(bucket_value >> 16);
+            unsigned const i3 = (uint8_t)(bucket_value >> 24);
+            
+            if (n > 0 && strcmp(key, ctx->key2id_names + ctx->key2id_name[i1]) == 0) {
+                f = i1;
+                /*
+                ctx->key2id_hash[h] = (i3 << 24) | (i2 << 16) | (i1 << 8) | n;
+                 */
+                goto GET_ID;
+            }
+            if (n > 1 && strcmp(key, ctx->key2id_names + ctx->key2id_name[i2]) == 0) {
+                f = i2;
+                ctx->key2id_hash[h] = (i3 << 24) | (i1 << 16) | (i2 << 8) | n;
+                goto GET_ID;
+            }
+            if (n > 2 && strcmp(key, ctx->key2id_names + ctx->key2id_name[i3]) == 0) {
+                f = i3;
+                ctx->key2id_hash[h] = (i2 << 24) | (i1 << 16) | (i3 << 8) | n;
+                goto GET_ID;
+            }
+        }}
+        f = 0;
+        while (f < e) {
+            unsigned const m = (f + e) / 2;
+            unsigned const oid = ctx->key2id_oid[m];
+            int const diff = strcmp(key, ctx->key2id_names + ctx->key2id_name[oid]);
+            
+            if (diff < 0)
+                e = m;
+            else if (diff > 0)
+                f = m + 1;
+            else {
+                f = oid;
+                goto GET_ID;
+            }
+        }
+        if (ctx->key2id_count < ctx->key2id_max) {
+            unsigned const name_max = ctx->key2id_name_max + keylen + 1;
+            KBTree *tree;
+            rc_t rc = OpenKBTree(&tree, ctx->key2id_count + 1, 1); /* ctx->key2id_max); */
+            
+            if (rc) return rc;
+            
+            if (ctx->key2id_name_alloc < name_max) {
+                unsigned alloc = ctx->key2id_name_alloc;
+                void *tmp;
+                
+                if (alloc == 0)
+                    alloc = 4096;
+                while (alloc < name_max)
+                    alloc <<= 1;
+                tmp = realloc(ctx->key2id_names, alloc);
+                if (tmp == NULL)
+                    return RC(rcExe, rcName, rcAllocating, rcMemory, rcExhausted);
+                ctx->key2id_names = tmp;
+                ctx->key2id_name_alloc = alloc;
+            }
+            if (f < ctx->key2id_count) {
+                memmove(&ctx->key2id_oid[f + 1], &ctx->key2id_oid[f], (ctx->key2id_count - f) * sizeof(ctx->key2id_oid[f]));
+            }
+            ctx->key2id_oid[f] = ctx->key2id_count;
+            ++ctx->key2id_count;
+            f = ctx->key2id_oid[f];
+            ctx->key2id_name[f] = ctx->key2id_name_max;
+            ctx->key2id_name_max = name_max;
+
+            memcpy(&ctx->key2id_names[ctx->key2id_name[f]], key, keylen + 1);
+            ctx->key2id[f] = tree;
+            ctx->idCount[f] = 0;
+            if ((uint8_t)ctx->key2id_hash[h] < 3) {
+                unsigned const n = (uint8_t)ctx->key2id_hash[h] + 1;
+                
+                ctx->key2id_hash[h] = (((ctx->key2id_hash[h] & ~(0xFFu)) | f) << 8) | n;
+            }
+            else {
+                /* the hash function isn't working too well
+                 * keep the 3 mru
+                 */
+                ctx->key2id_hash[h] = (((ctx->key2id_hash[h] & ~(0xFFu)) | f) << 8) | 3;
+            }
+        GET_ID:
+            tmpKey = ctx->idCount[f];
+            rc = KBTreeEntry(ctx->key2id[f], &tmpKey, wasInserted, name, namelen);
+            if (rc == 0) {
+                *rslt = (((uint64_t)f) << 32) | tmpKey;
+                if (*wasInserted)
+                    ++ctx->idCount[f];
+                assert(tmpKey < ctx->idCount[f]);
+            }
+            return rc;
+        }
+        return RC(rcExe, rcTree, rcAllocating, rcConstraint, rcViolated);
+    }
+}
+
+static rc_t OpenMMapFile(context_t *const ctx, KDirectory *const dir)
+{
+    KFile *file = NULL;
+    char fname[4096];
+    rc_t rc = string_printf(fname, sizeof(fname), NULL, "%s/id2value.%u", G.tmpfs, G.pid);
+    
+    if (rc)
+        return rc;
+    
+    rc = KDirectoryCreateFile(dir, &file, true, 0600, kcmInit, fname);
+    KDirectoryRemove(dir, 0, fname);
+    if (rc == 0)
+        rc = MMArrayMake(&ctx->id2value, file, sizeof(ctx_value_t));
+    KFileRelease(file);
+    return rc;
+}
+
+static rc_t OpenMBankFile(context_t *const ctx, KDirectory *const dir, int which, size_t climit)
+{
+    KFile *file = NULL;
+    char fname[4096];
+    char const *const suffix = which == 1 ? "One" : "Both";
+    KMemBank **const mbank = which == 1 ? &ctx->fragsOne : &ctx->fragsBoth;
+    rc_t rc = string_printf(fname, sizeof(fname), NULL, "%s/frag_data%s.%u", G.tmpfs, suffix, G.pid);
+    
+    if (rc)
+        return rc;
+    
+    rc = KDirectoryCreateFile(dir, &file, true, 0600, kcmInit, fname);
+    KDirectoryRemove(dir, 0, fname);
+    if (rc == 0) {
+        KPageFile *backing;
+        
+        rc = KPageFileMakeUpdate(&backing, file, climit, false);
+        KFileRelease(file);
+        if (rc == 0) {
+            rc = KMemBankMake(mbank, FRAG_CHUNK_SIZE, 0, backing);
+            KPageFileRelease(backing);
+        }
+    }
+    return rc;
 }
 
 static rc_t SetupContext(context_t *ctx, unsigned numfiles)
@@ -256,20 +523,13 @@ static rc_t SetupContext(context_t *ctx, unsigned numfiles)
     memset(ctx, 0, sizeof(*ctx));
     
     if (G.mode == mode_Archive) {
-        KFile *file = NULL;
         KDirectory *dir;
-        char fname[4096];
-        size_t memSize;   /*** memory map for spotid->value mappings **/
         size_t fragSizeBoth; /*** temporary hold for first side of mate pair with both sides aligned**/
         size_t fragSizeOne; /*** temporary hold for first side of mate pair with one side aligned**/
-        size_t nameSize; /** names to rebuild spotid ***/
 
-        memSize =  (G.cache_size / 4) & ~(( 1UL << (MMA_MAP_BITS + 15))-1); /*** allign to 32K*number of map regions ***/
         fragSizeBoth    =   (G.cache_size / 8);
-        if(fragSizeBoth > 1UL << 31) fragSizeBoth = 1UL << 31; /*** don't go above 2Gb **/
         fragSizeOne     =   (G.cache_size / 2);
-        nameSize = G.cache_size - memSize - fragSizeOne - fragSizeBoth;
-        
+
         rc = KLoadProgressbar_Make(&ctx->progress[0], 0); if (rc) return rc;
         rc = KLoadProgressbar_Make(&ctx->progress[1], 0); if (rc) return rc;
         rc = KLoadProgressbar_Make(&ctx->progress[2], 0); if (rc) return rc;
@@ -278,63 +538,12 @@ static rc_t SetupContext(context_t *ctx, unsigned numfiles)
         KLoadProgressbar_Append(ctx->progress[0], 100 * numfiles);
         
         rc = KDirectoryNativeDir(&dir);
-        if (rc)
-            return rc;
-        
-        rc = string_printf(fname, sizeof(fname), NULL, "%s/key2id.%u", G.tmpfs, G.pid); if (rc) return rc;
-        rc = KDirectoryCreateFile(dir, &file, true, 0600, kcmInit, fname);
-        KDirectoryRemove(dir, 0, fname);
-        if (rc == 0) {
-            rc = KBTreeMakeUpdate(&ctx->key2id, file, nameSize,
-                                  false, kbtOpaqueKey,
-                                  1, 255,
-                                  NULL
-                                  );
-            KFileRelease(file);
-        }
         if (rc == 0)
-            rc = string_printf(fname, sizeof(fname), NULL, "%s/id2value.%u", G.tmpfs, G.pid);
-        if (rc == 0) {
-            rc = KDirectoryCreateFile(dir, &file, true, 0600, kcmInit, fname);
-            KDirectoryRemove(dir, 0, fname);
-            if (rc == 0) {
-                size_t const elemSize = sizeof(ctx_value_t);
-                
-                assert(sizeof(ctx_value_t) <= elemSize);
-                rc = MMArrayMake(&ctx->id2value, file, memSize, elemSize);
-            }
-        }
+            rc = OpenMMapFile(ctx, dir);
         if (rc == 0)
-            rc = string_printf(fname, sizeof(fname), NULL, "%s/frag_dataBoth.%u", G.tmpfs, G.pid);
-        if (rc == 0) {
-            rc = KDirectoryCreateFile(dir, &file, true, 0600, kcmInit, fname);
-            KDirectoryRemove(dir, 0, fname);
-            if (rc == 0) {
-                KPageFile *backing;
-                
-                rc = KPageFileMakeUpdate(&backing, file, fragSizeBoth, 0);
-                KFileRelease(file);
-                if (rc == 0) {
-                    rc = KMemBankMake(&ctx->fragsBoth, FRAG_CHUNK_SIZE, 0, backing);
-                    KPageFileRelease(backing);
-                }
-            }
-            rc = string_printf(fname, sizeof(fname), NULL, "%s/frag_dataOne.%u", G.tmpfs, G.pid);
-            if (rc == 0) {
-                rc = KDirectoryCreateFile(dir, &file, true, 0600, kcmInit, fname);
-                KDirectoryRemove(dir, 0, fname);
-                if (rc == 0) {
-                    KPageFile *backing;
-                    
-                    rc = KPageFileMakeUpdate(&backing, file, fragSizeOne, 0);
-                    KFileRelease(file);
-                    if (rc == 0) {
-                        rc = KMemBankMake(&ctx->fragsOne, FRAG_CHUNK_SIZE, 0, backing);
-                        KPageFileRelease(backing);
-                    }
-                }
-            }
-        }
+            rc = OpenMBankFile(ctx, dir, 0, fragSizeBoth);
+        if (rc == 0)
+            rc = OpenMBankFile(ctx, dir, 1, fragSizeOne);
         KDirectoryRelease(dir);
     }
     return rc;
@@ -354,21 +563,14 @@ static void ContextRelease(context_t *ctx)
     KLoadProgressbar_Release(ctx->progress[1], true);
     KLoadProgressbar_Release(ctx->progress[2], true);
     KLoadProgressbar_Release(ctx->progress[3], true);
-    /* too slow
-    KMemBankRelease(ctx->fragsOne);
-    KMemBankRelease(ctx->fragsBoth);
     MMArrayWhack(ctx->id2value);
-    KBTreeDropBacking(ctx->key2id);
-    KBTreeRelease(ctx->key2id);
-    */
 }
 
 static
-void COPY_QUAL(uint8_t D[], const uint8_t S[], unsigned L, bool R) 
+void COPY_QUAL(uint8_t D[], uint8_t const S[], unsigned const L, bool const R) 
 {
-    unsigned i;
-    
     if (R) {
+        unsigned i;
         unsigned j;
         
         for (i = 0, j = L - 1; i != L; ++i, --j)
@@ -379,32 +581,51 @@ void COPY_QUAL(uint8_t D[], const uint8_t S[], unsigned L, bool R)
 }
 
 static
-void COPY_READ(char D[], const char S[], unsigned L, bool R)
+void COPY_READ(INSDC_dna_text D[], INSDC_dna_text const S[], unsigned const L, bool const R)
 {
-    if(R) {
-        DNAReverseCompliment(S, D, L);
-    } else {
+    static INSDC_dna_text const compl[] = {
+         0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 , 
+         0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 , 
+         0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 , 
+         0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 , 
+         0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 , 
+         0 ,  0 ,  0 ,  0 ,  0 ,  0 , '.',  0 , 
+        '0', '1', '2', '3',  0 ,  0 ,  0 ,  0 , 
+         0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 , 
+         0 , 'T', 'V', 'G', 'H',  0 ,  0 , 'C', 
+        'D',  0 ,  0 , 'M',  0 , 'K', 'N',  0 , 
+         0 ,  0 , 'Y', 'S', 'A', 'A', 'B', 'W', 
+         0 , 'R',  0 ,  0 ,  0 ,  0 ,  0 ,  0 , 
+         0 , 'T', 'V', 'G', 'H',  0 ,  0 , 'C', 
+        'D',  0 ,  0 , 'M',  0 , 'K', 'N',  0 , 
+         0 ,  0 , 'Y', 'S', 'A', 'A', 'B', 'W', 
+         0 , 'R',  0 ,  0 ,  0 ,  0 ,  0 ,  0 , 
+         0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 , 
+         0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 , 
+         0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 , 
+         0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 , 
+         0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 , 
+         0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 , 
+         0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 , 
+         0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 , 
+         0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 , 
+         0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 , 
+         0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 , 
+         0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 , 
+         0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 , 
+         0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 , 
+         0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 , 
+         0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0
+    };
+    if (R) {
+        unsigned i;
+        unsigned j;
+        
+        for (i = 0, j = L - 1; i != L; ++i, --j)
+            D[i] = compl[((uint8_t const *)S)[j]];
+    }
+    else
         memcpy(D, S, L);
-    }
-}
-
-static rc_t ConvertNumber(char dst[], unsigned size, unsigned *cur, unsigned long val)
-{
-    static char const map[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWYXZ[]abcdefghijklmnopqrstuvwxyz";
-    unsigned cp = *cur;
-    
-    if (val == 0) {
-        if (cp >= size)
-            return RC(rcExe, rcFile, rcReading, rcName, rcTooLong);
-        dst[cp++] = map[0];
-    }
-    else for ( ; val != 0; val >>= 6) {
-        if (cp >= size)
-            return RC(rcExe, rcFile, rcReading, rcName, rcTooLong);
-        dst[cp++] = map[val & 0x3F];
-    }
-    *cur = cp;
-    return 0;
 }
 
 static rc_t OpenBAM(const BAMFile **bam, VDatabase *db, const char bamFile[])
@@ -492,8 +713,9 @@ static void EditAlignedQualities(uint8_t qual[], bool const hasMismatch[], unsig
 {
     unsigned i;
     
-    for (i = 0; G.editAlignedQual && i != readlen; ++i) {
+    for (i = 0; i < readlen; ++i) {
         uint8_t const q = hasMismatch[i] ? G.alignedQualValue : qual[i];
+        
         qual[i] = q;
     }
 }
@@ -502,8 +724,9 @@ static void EditUnalignedQualities(uint8_t qual[], bool const hasMismatch[], uns
 {
     unsigned i;
     
-    for (i = 0; G.keepMismatchQual && i != readlen; ++i) {
+    for (i = 0; i < readlen; ++i) {
         uint8_t const q = (qual[i] & 0x7F) | (hasMismatch[i] ? 0x80 : 0);
+        
         qual[i] = q;
     }
 }
@@ -584,6 +807,8 @@ INSDC_SRA_platform_id GetINSDCPlatform(BAMFile const *bam, char const name[]) {
             case 'C':
                 if (platform_cmp(rg->platform, "COMPLETE GENOMICS"))
                     return SRA_PLATFORM_COMPLETE_GENOMICS;
+                if (platform_cmp(rg->platform, "CAPILLARY"))
+                    return SRA_PLATFORM_SANGER;
                 break;
             case 'H':
                 if (platform_cmp(rg->platform, "HELICOS"))
@@ -615,7 +840,19 @@ INSDC_SRA_platform_id GetINSDCPlatform(BAMFile const *bam, char const name[]) {
     return SRA_PLATFORM_UNDEFINED;
 }
 
-static void LogNoMatch(char const readName[], char const refName[], uint32_t const refPos)
+static
+rc_t CheckLimitAndLogError(void)
+{
+    ++G.errCount;
+    if (G.maxErrCount > 0 && G.errCount > G.maxErrCount) {
+        (void)PLOGERR(klogErr, (klogErr, RC(rcAlign, rcFile, rcReading, rcError, rcExcessive), "Number of errors $(cnt) exceeds limit of $(max): Exiting", "cnt=%u,max=%u", G.errCount, G.maxErrCount));
+        return RC(rcAlign, rcFile, rcReading, rcError, rcExcessive);
+    }
+    return 0;
+}
+
+static
+void RecordNoMatch(char const readName[], char const refName[], uint32_t const refPos)
 {
     if (G.noMatchLog) {
         static uint64_t lpos = 0;
@@ -629,14 +866,44 @@ static void LogNoMatch(char const readName[], char const refName[], uint32_t con
     }
 }
 
-static rc_t CheckLimitAndLogError(void)
+static
+rc_t LogNoMatch(char const readName[], char const refName[], unsigned rpos, unsigned matches)
 {
-    ++G.errCount;
-    if (G.maxErrCount > 0 && G.errCount > G.maxErrCount) {
-        (void)PLOGERR(klogErr, (klogErr, RC(rcAlign, rcFile, rcReading, rcError, rcExcessive), "Number of errors $(cnt) exceeds limit of $(max): Exiting", "cnt=%u,max=%u", G.errCount, G.maxErrCount));
-        return RC(rcAlign, rcFile, rcReading, rcError, rcExcessive);
+    rc_t const rc = CheckLimitAndLogError();
+    static unsigned count = 0;
+    
+    ++count;
+    if (rc) {
+        (void)PLOGMSG(klogInfo, (klogInfo, "This is the last warning; this class of warning occurred $(occurred) times",
+                                 "occurred=%u", count));
+        (void)PLOGMSG(klogWarn, (klogWarn, "Spot '$(name)' contains too few ($(count)) matching bases to reference '$(ref)' at $(pos)",
+                                 "name=%s,ref=%s,pos=%u,count=%u", readName, refName, rpos, matches));
     }
-    return 0;
+    else if (G.maxWarnCount_NoMatch == 0 || count < G.maxWarnCount_NoMatch)
+        (void)PLOGMSG(klogWarn, (klogWarn, "Spot '$(name)' contains too few ($(count)) matching bases to reference '$(ref)' at $(pos)",
+                                 "name=%s,ref=%s,pos=%u,count=%u", readName, refName, rpos, matches));
+    return rc;
+}
+
+static
+rc_t LogDupConflict(char const readName[])
+{
+    rc_t const rc = CheckLimitAndLogError();
+    static unsigned count = 0;
+    
+    ++count;
+    if (rc) {
+        (void)PLOGMSG(klogInfo, (klogInfo, "This is the last warning; this class of warning occurred $(occurred) times",
+                                 "occurred=%u", count));
+        (void)PLOGERR(klogWarn, (klogWarn, RC(rcApp, rcFile, rcReading, rcData, rcInconsistent),
+                                 "Spot '$(name)' is both a duplicate and NOT a duplicate!",
+                                 "name=%s", readName));
+    }
+    else if (G.maxWarnCount_DupConflict == 0 || count < G.maxWarnCount_DupConflict)
+        (void)PLOGERR(klogWarn, (klogWarn, RC(rcApp, rcFile, rcReading, rcData, rcInconsistent),
+                                 "Spot '$(name)' is both a duplicate and NOT a duplicate!",
+                                 "name=%s", readName));
+    return rc;
 }
 
 static rc_t ProcessBAM(char const bamFile[], context_t *ctx, VDatabase *db,
@@ -651,7 +918,7 @@ static rc_t ProcessBAM(char const bamFile[], context_t *ctx, VDatabase *db,
     rc_t rc;
     int32_t lastRefSeqId = -1;
     size_t rsize;
-    uint32_t keyId = 0;
+    uint64_t keyId = 0;
     uint64_t reccount = 0;
     SequenceRecord srec;
     char spotGroup[512];
@@ -662,15 +929,41 @@ static rc_t ProcessBAM(char const bamFile[], context_t *ctx, VDatabase *db,
     long     fcountOne=0;
     int skipRefSeqID = -1;
     uint64_t recordsProcessed = 0;
+    uint64_t filterFlagConflictRecords=0; /*** counts number of conflicts between flags 0x400 and 0x200 ***/
+#define MAX_WARNINGS_FLAG_CONFLICT 10000 /*** maximum errors to report ***/
+
     bool isColorSpace = false;
     bool isNotColorSpace = G.noColorSpace;
+    char alignGroup[32];
+    size_t alignGroupLen;
     
     rc = OpenBAM(&bam, db, bamFile);
-    if (rc == 0 && !G.noVerifyReferences && ref != NULL) {
+    if (rc) return rc;
+    if (!G.noVerifyReferences && ref != NULL) {
         rc = VerifyReferences(bam, ref);
         if (G.onlyVerifyReferences) {
             BAMFileRelease(bam);
             return rc;
+        }
+    }
+    if (ctx->key2id_max == 0) {
+        uint32_t rgcount;
+        unsigned rgi;
+        
+        BAMFileGetReadGroupCount(bam, &rgcount);
+        if (rgcount > (sizeof(ctx->key2id)/sizeof(ctx->key2id[0]) - 1))
+            ctx->key2id_max = 1;
+        else
+            ctx->key2id_max = sizeof(ctx->key2id)/sizeof(ctx->key2id[0]);
+        
+        for (rgi = 0; rgi != rgcount; ++rgi) {
+            BAMReadGroup const *rg;
+            
+            BAMFileGetReadGroup(bam, rgi, &rg);
+            if (rg && rg->platform && platform_cmp(rg->platform, "CAPILLARY")) {
+                G.hasTI = true;
+                break;
+            }
         }
     }
     memset(&srec, 0, sizeof(srec));
@@ -695,22 +988,22 @@ static rc_t ProcessBAM(char const bamFile[], context_t *ctx, VDatabase *db,
         AlignmentRecord data;
         uint32_t readlen;
         uint16_t flags;
-        int64_t rpos;
+        int64_t rpos=0;
         char *seqDNA;
         const BAMRefSeq *refSeq;
         ctx_value_t *value;
         bool wasInserted;
-        int32_t refSeqId;
+        int32_t refSeqId=-1;
         uint8_t *qual;
         bool mated;
         const char *name;
-        char const *rgname;
         char cskey = 0;
         bool originally_aligned;
         bool isPrimary;
         uint32_t opCount;
         bool hasCG;
-        uint32_t ti = 0;
+        uint64_t ti = 0;
+        uint32_t csSeqLen = 0;
 
         rc = BAMFileRead(bam, &rec);
         if (rc) {
@@ -724,8 +1017,10 @@ static rc_t ProcessBAM(char const bamFile[], context_t *ctx, VDatabase *db,
             progress = new_value;
         }
 
+
+        /**************************************************************/
         if (!G.noColorSpace) {
-            if (BAMAlignmentHasColorSpace(rec)) {
+            if (BAMAlignmentHasColorSpace(rec)) {/*BAM*/
                 if (isNotColorSpace) {
                 MIXED_BASE_AND_COLOR:
                     rc = RC(rcApp, rcFile, rcReading, rcData, rcInconsistent);  
@@ -739,10 +1034,10 @@ static rc_t ProcessBAM(char const bamFile[], context_t *ctx, VDatabase *db,
             else
                 isNotColorSpace = true;
         }
-        hasCG = BAMAlignmentHasCGData(rec);
+        hasCG = BAMAlignmentHasCGData(rec);/*BAM*/
         if (hasCG) {
-            BAMAlignmentGetCigarCount(rec, &opCount);
-            rc = KDataBufferResize(&cigBuf, opCount + 10);
+            BAMAlignmentGetCigarCount(rec, &opCount);/*BAM*/
+            rc = KDataBufferResize(&cigBuf, opCount * 2 + 5);
             if (rc) {
                 (void)LOGERR(klogErr, rc, "Failed to resize CIGAR buffer");
                 goto LOOP_END;
@@ -760,7 +1055,7 @@ static rc_t ProcessBAM(char const bamFile[], context_t *ctx, VDatabase *db,
         else {
             uint32_t const *tmp;
             
-            BAMAlignmentGetRawCigar(rec, &tmp, &opCount);
+            BAMAlignmentGetRawCigar(rec, &tmp, &opCount);/*BAM*/
             rc = KDataBufferResize(&cigBuf, opCount);
             if (rc) {
                 (void)LOGERR(klogErr, rc, "Failed to resize CIGAR buffer");
@@ -768,21 +1063,31 @@ static rc_t ProcessBAM(char const bamFile[], context_t *ctx, VDatabase *db,
             }
             memcpy(cigBuf.base, tmp, opCount * sizeof(uint32_t));
             
-            BAMAlignmentGetReadLength(rec, &readlen);
-            rc = KDataBufferResize(&buf, readlen);
+            BAMAlignmentGetReadLength(rec, &readlen);/*BAM*/
+            if (isColorSpace) {
+                BAMAlignmentGetCSSeqLen(rec, &csSeqLen);
+                if (readlen != csSeqLen && readlen != 0) {
+                    rc = RC(rcAlign, rcRow, rcReading, rcData, rcInconsistent);
+                    (void)LOGERR(klogErr, rc, "Sequence length and CS Sequence length are not equal");
+                    goto LOOP_END;
+                }
+            }
+            else if (readlen == 0) {
+            }
+            rc = KDataBufferResize(&buf, readlen | csSeqLen);
             if (rc) {
                 (void)LOGERR(klogErr, rc, "Failed to resize record buffer");
                 goto LOOP_END;
             }
             
-            AlignmentRecordInit(&data, buf.base, readlen, &seqDNA);
-            qual = (uint8_t *)&seqDNA[readlen];
+            AlignmentRecordInit(&data, buf.base, readlen | csSeqLen, &seqDNA);
+            qual = (uint8_t *)&seqDNA[readlen | csSeqLen];
         }
-        BAMAlignmentGetSequence(rec, seqDNA);
+        BAMAlignmentGetSequence(rec, seqDNA);/*BAM*/
         if (G.useQUAL) {
             uint8_t const *squal;
             
-            BAMAlignmentGetQuality(rec, &squal);
+            BAMAlignmentGetQuality(rec, &squal);/*BAM*/
             memcpy(qual, squal, readlen);
         }
         else {
@@ -790,7 +1095,11 @@ static rc_t ProcessBAM(char const bamFile[], context_t *ctx, VDatabase *db,
             uint8_t qoffset = 0;
             unsigned i;
             
-            BAMAlignmentGetQuality2(rec, &squal, &qoffset);
+            rc = BAMAlignmentGetQuality2(rec, &squal, &qoffset);/*BAM*/
+            if (rc) {
+                (void)PLOGERR(klogErr, (klogErr, rc, "Spot '$(name)': length of original quality does not match sequence", "name=%s", name));
+                goto LOOP_END;
+            }
             if (qoffset) {
                 for (i = 0; i != readlen; ++i)
                     qual[i] = squal[i] - qoffset;
@@ -799,29 +1108,43 @@ static rc_t ProcessBAM(char const bamFile[], context_t *ctx, VDatabase *db,
                 memcpy(qual, squal, readlen);
         }
         if (hasCG) {
-            rc = BAMAlignmentGetCGData(rec, seqDNA, qual, cigBuf.base, opCount + 10, &opCount);
+            rc = BAMAlignmentGetCGSeqQual(rec, seqDNA, qual);/*BAM*/
+            if (rc == 0)
+                rc = BAMAlignmentGetCGCigar(rec, cigBuf.base, cigBuf.elem_count, &opCount);/*BAM*/
             if (rc) {
                 (void)LOGERR(klogErr, rc, "Failed to read CG data");
                 goto LOOP_END;
             }
         }
         if (G.hasTI) {
-            rc = BAMAlignmentGetTI(rec, &ti);
+            rc = BAMAlignmentGetTI(rec, &ti);/*BAM*/
             if (rc)
                 ti = 0;
             rc = 0;
         }
+        data.data.align_group.buffer = alignGroup;
+        if (BAMAlignmentGetCGAlignGroup(rec, alignGroup, sizeof(alignGroup), &alignGroupLen) == 0)/*BAM*/
+            data.data.align_group.elements = alignGroupLen;
+        else
+            data.data.align_group.elements = 0;
 
         AR_MAPQ(data) = GetMapQ(rec);
-        BAMAlignmentGetFlags(rec, &flags);
-        BAMAlignmentGetReadName2(rec, &name, &namelen);
-        BAMAlignmentGetReadGroupName(rec, &rgname);
-        
-        AR_REF_ORIENT(data) = (flags & BAMFlags_SelfIsReverse) == 0 ? false : true;
-        isPrimary = (flags & BAMFlags_IsNotPrimary) == 0 ? true : false;
+        BAMAlignmentGetFlags(rec, &flags);/*BAM*/
+        BAMAlignmentGetReadName2(rec, &name, &namelen);/*BAM*/
+        {{
+            char const *rgname;
+
+            BAMAlignmentGetReadGroupName(rec, &rgname);/*BAM*/
+            if (rgname)
+                strcpy(spotGroup, rgname);
+            else
+                spotGroup[0] = '\0';
+        }}        
+        AR_REF_ORIENT(data) = (flags & BAMFlags_SelfIsReverse) == 0 ? false : true;/*BAM*/
+        isPrimary = (flags & BAMFlags_IsNotPrimary) == 0 ? true : false;/*BAM*/
         if (G.noSecondary && !isPrimary)
             goto LOOP_END;
-        originally_aligned = (flags & BAMFlags_SelfIsUnmapped) == 0;
+        originally_aligned = (flags & BAMFlags_SelfIsUnmapped) == 0;/*BAM*/
         aligned = originally_aligned && (AR_MAPQ(data) >= G.minMapQual);
         
         if (aligned && align == NULL) {
@@ -830,15 +1153,15 @@ static rc_t ProcessBAM(char const bamFile[], context_t *ctx, VDatabase *db,
             goto LOOP_END;
         }
         while (aligned) {
-            BAMAlignmentGetPosition(rec, &rpos);
-            BAMAlignmentGetRefSeqId(rec, &refSeqId);
+            BAMAlignmentGetPosition(rec, &rpos);/*BAM*/
+            BAMAlignmentGetRefSeqId(rec, &refSeqId);/*BAM*/
             if (rpos >= 0 && refSeqId >= 0) {
                 if (refSeqId == skipRefSeqID)
                     goto LOOP_END;
                 if (refSeqId == lastRefSeqId)
                     break;
                 refSeq = NULL;
-                BAMFileGetRefSeqById(bam, refSeqId, &refSeq);
+                BAMFileGetRefSeqById(bam, refSeqId, &refSeq);/*BAM*/
                 if (refSeq == NULL) {
                     rc = RC(rcApp, rcFile, rcReading, rcData, rcInconsistent);
                     (void)PLOGERR(klogWarn, (klogWarn, rc, "File '$(file)': Spot '$(name)' refers to an unknown Reference number $(refSeqId)", "file=%s,refSeqId=%i,name=%s", bamFile, (int)refSeqId, name));
@@ -863,14 +1186,18 @@ static rc_t ProcessBAM(char const bamFile[], context_t *ctx, VDatabase *db,
                         (void)PLOGMSG(level, (level, "Could not find a Reference to match { name: '$(name)', length: $(rlen) }", "name=%s,rlen=%u", refSeq->name, (unsigned)refSeq->length));
                     }
                     else if (!G.limit2config)
-                        (void)PLOGERR(klogErr, (klogErr, rc, "File '$(file)': Spot '$(sname) refers to an unknown Reference '$(rname)'", "file=%s,rname=%s,sname=%s", bamFile, refSeq->name, name));
+                        (void)PLOGERR(klogErr, (klogErr, rc, "File '$(file)': Spot '$(sname)' refers to an unknown Reference '$(rname)'", "file=%s,rname=%s,sname=%s", bamFile, refSeq->name, name));
                     if (G.limit2config)
                         rc = 0;
                     goto LOOP_END;
                 }
             }
+            else if (refSeqId < 0) {
+                (void)PLOGMSG(klogWarn, (klogWarn, "Spot '$(name)' was marked aligned, but reference id = $(id) is invalid", "name=%.*s,id=%i", namelen, name, refSeqId));
+                if ((rc = CheckLimitAndLogError()) != 0) goto LOOP_END;
+            }
             else {
-                (void)PLOGMSG(klogWarn, (klogWarn, "Spot '$(name)' was marked aligned, but reference id = $(id) and reference position = $(pos) are invalid", "name=%.*s,id=%i,pos=%i", namelen, name, refSeqId, rpos));
+                (void)PLOGMSG(klogWarn, (klogWarn, "Spot '$(name)' was marked aligned, but reference position = $(pos) is invalid", "name=%.*s,pos=%i", namelen, name, rpos));
                 if ((rc = CheckLimitAndLogError()) != 0) goto LOOP_END;
             }
 
@@ -879,22 +1206,7 @@ static rc_t ProcessBAM(char const bamFile[], context_t *ctx, VDatabase *db,
         if (!aligned && (G.refFilter != NULL || G.limit2config))
             goto LOOP_END;
         
-        keyId = ctx->idCount; /** will be changed by KBTreeEntry if found **/
-        if (rgname) {
-            unsigned const n = strlen(rgname);
-
-            memcpy(spotGroup, rgname, n);
-            spotGroup[n] = ' ';
-            memcpy(spotGroup + n + 1, name, namelen);
-            rc = KBTreeEntry(ctx->key2id, &keyId, &wasInserted, spotGroup, namelen + n + 1);
-            spotGroup[n] = '\0';
-        }
-        else {
-            rgname = NULL;
-            spotGroup[0] = '\0';
-            rc = KBTreeEntry(ctx->key2id, &keyId, &wasInserted, name, namelen);
-        }
-        
+        rc = GetKeyID(ctx, &keyId, &wasInserted, spotGroup, name, namelen);
         if (rc) {
             (void)PLOGERR(klogErr, (klogErr, rc, "KBTreeEntry: failed on key '$(key)'", "key=%.*s", namelen, name));
             goto LOOP_END;
@@ -908,10 +1220,10 @@ static rc_t ProcessBAM(char const bamFile[], context_t *ctx, VDatabase *db,
         AR_KEY(data) = keyId;
         
         mated = false;
-        if (flags & BAMFlags_WasPaired) {
-            if ((flags & BAMFlags_IsFirst) != 0)
+        if (flags & BAMFlags_WasPaired) {/*BAM*/
+            if ((flags & BAMFlags_IsFirst) != 0)/*BAM*/
                 AR_READNO(data) |= 1;
-            if ((flags & BAMFlags_IsSecond) != 0)
+            if ((flags & BAMFlags_IsSecond) != 0)/*BAM*/
                 AR_READNO(data) |= 2;
             switch (AR_READNO(data)) {
             case 1:
@@ -936,21 +1248,17 @@ static rc_t ProcessBAM(char const bamFile[], context_t *ctx, VDatabase *db,
             AR_READNO(data) = 1;
         
         if (wasInserted) {
-            ++ctx->idCount;
             memset(value, 0, sizeof(*value));
             value->unmated = !mated;
-            value->pcr_dup = (flags & BAMFlags_IsDuplicate) == 0 ? 0 : 1;
-            value->platform = GetINSDCPlatform(bam, rgname);
+            value->pcr_dup = (flags & BAMFlags_IsDuplicate) == 0 ? 0 : 1;/*BAM*/
+            value->platform = GetINSDCPlatform(bam, spotGroup);
         }
         else {
-            if (!G.acceptBadDups && value->pcr_dup != ((flags & BAMFlags_IsDuplicate) == 0 ? 0 : 1)) {
-                (void)PLOGERR(klogWarn, (klogWarn, RC(rcApp, rcFile, rcReading, rcData, rcInconsistent),
-                                         "Spot '$(name)' is both a duplicate and NOT a duplicate!",
-                                         "name=%s", name));
-                rc = CheckLimitAndLogError();
-                goto LOOP_END;
+            if (!G.acceptBadDups && value->pcr_dup != ((flags & BAMFlags_IsDuplicate) == 0 ? 0 : 1)) {/*BAM*/
+                rc = LogDupConflict(name);
+                goto LOOP_END; /* TODO: is this correct? */
             }
-            value->pcr_dup &= (flags & BAMFlags_IsDuplicate) == 0 ? 0 : 1;
+            value->pcr_dup &= (flags & BAMFlags_IsDuplicate) == 0 ? 0 : 1;/*BAM*/
             if (mated && value->unmated) {
                 (void)PLOGERR(klogWarn, (klogWarn, RC(rcApp, rcFile, rcReading, rcData, rcInconsistent),
                                          "Spot '$(name)', which was first seen without mate info, now has mate info",
@@ -974,10 +1282,18 @@ static rc_t ProcessBAM(char const bamFile[], context_t *ctx, VDatabase *db,
             case 1:
                 if (CTX_VALUE_GET_P_ID(*value, 0) != 0)
                     isPrimary = false;
+                else if (aligned && value->unaligned_1) {
+                    (void)PLOGMSG(klogWarn, (klogWarn, "Read 1 of spot '$(name)', which was unmapped, is now being mapped at position $(pos) on reference '$(ref)'; this alignment will be considered as secondary", "name=%s,ref=%s,pos=%u", name, refSeq->name, rpos));
+                    isPrimary = false;
+                }
                 break;
             case 2:
                 if (CTX_VALUE_GET_P_ID(*value, 1) != 0)
                     isPrimary = false;
+                else if (aligned && value->unaligned_2) {
+                    (void)PLOGMSG(klogWarn, (klogWarn, "Read 2 of spot '$(name)', which was unmapped, is now being mapped at position $(pos) on reference '$(ref)'; this alignment will be considered as secondary", "name=%s,ref=%s,pos=%u", name, refSeq->name, rpos));
+                    isPrimary = false;
+                }
                 break;
             default:
                 break;
@@ -994,28 +1310,66 @@ static rc_t ProcessBAM(char const bamFile[], context_t *ctx, VDatabase *db,
                 if (   (GetRCState(rc) == rcViolated  && GetRCObject(rc) == rcConstraint)
                     || (GetRCState(rc) == rcExcessive && GetRCObject(rc) == rcRange))
                 {
-                    LogNoMatch(name, refSeq->name, rpos);
+                    RecordNoMatch(name, refSeq->name, rpos);
                 }
                 if (GetRCState(rc) == rcViolated && GetRCObject(rc) == rcConstraint) {
-                    (void)PLOGERR(klogWarn, (klogWarn, rc, "Spot '$(name)' contains too few ($(count)) matching bases to reference '$(ref)' at $(pos)",
-                                             "name=%s,ref=%s,pos=%u,count=%u", name, refSeq->name, (unsigned)rpos,
-                                             (unsigned)matches));
+                    rc = LogNoMatch(name, refSeq->name, (unsigned)rpos, (unsigned)matches);
+                }
+                else if (GetRCObject(rc) == rcData && GetRCState(rc) == rcInvalid) {
+                    (void)PLOGERR(klogWarn, (klogWarn, rc, "Spot '$(name)': bad alignment to reference '$(ref)' at $(pos)", "name=%s,ref=%s,pos=%u", name, refSeq->name, rpos));
+                    CheckLimitAndLogError();
+                }
+                else if (GetRCObject(rc) == rcData) {
+                    (void)PLOGERR(klogWarn, (klogWarn, rc, "Spot '$(name)': bad alignment to reference '$(ref)' at $(pos)", "name=%s,ref=%s,pos=%u", name, refSeq->name, rpos));
+                    rc = CheckLimitAndLogError();
                 }
                 else {
                     (void)PLOGERR(klogWarn, (klogWarn, rc, "Spot '$(name)': error reading reference '$(ref)' at $(pos)", "name=%s,ref=%s,pos=%u", name, refSeq->name, rpos));
+                    rc = CheckLimitAndLogError();
                 }
-                if ((rc = CheckLimitAndLogError()) != 0) goto LOOP_END;
+                if (rc) goto LOOP_END;
             }
         }
         if (isColorSpace) {
             /* must be after ReferenceRead */
-            BAMAlignmentGetCSKey(rec, &cskey);
-            BAMAlignmentGetCSSequence(rec, seqDNA);
+            BAMAlignmentGetCSKey(rec, &cskey);/*BAM*/
+            BAMAlignmentGetCSSequence(rec, seqDNA, csSeqLen);/*BAM*/
+            if (!aligned && !G.useQUAL) {
+                uint8_t const *squal;
+                uint8_t qoffset = 0;
+                
+                rc = BAMAlignmentGetCSQuality(rec, &squal, &qoffset);/*BAM*/
+                if (rc) {
+                    (void)PLOGERR(klogErr, (klogErr, rc, "Spot '$(name)': length of colorspace quality does not match sequence", "name=%s", name));
+                    goto LOOP_END;
+                }
+                if (qoffset) {
+                    unsigned i;
+                    
+                    for (i = 0; i < csSeqLen; ++i)
+                        qual[i] = squal[i] - qoffset;
+                }
+                else
+                    memcpy(qual, squal, csSeqLen);
+                readlen = csSeqLen;
+            }
         }
         
         if (aligned) {
-            EditAlignedQualities(qual, AR_HAS_MISMATCH(data), readlen);
-            EditUnalignedQualities(qual, AR_HAS_MISMATCH(data), readlen);
+            if (G.editAlignedQual ) EditAlignedQualities  (qual, AR_HAS_MISMATCH(data), readlen);
+            if (G.keepMismatchQual) EditUnalignedQualities(qual, AR_HAS_MISMATCH(data), readlen);
+        }
+        else if (isPrimary) {
+            switch (AR_READNO(data)) {
+            case 1:
+                value->unaligned_1 = 1;
+                break;
+            case 2:
+                value->unaligned_2 = 1;
+                break;
+            default:
+                break;
+            }
         }
         if (isPrimary) {
             switch (AR_READNO(data)) {
@@ -1037,7 +1391,7 @@ static rc_t ProcessBAM(char const bamFile[], context_t *ctx, VDatabase *db,
         }
         if (mated) {
             if (isPrimary || !originally_aligned) {
-                if (value->spotId != 0) {
+                if (CTX_VALUE_GET_S_ID(*value) != 0) {
                     (void)PLOGMSG(klogWarn, (klogWarn, "Spot '$(name)' has already been assigned a spot id", "name=%.*s", namelen, name));
                 }
                 else if (!value->has_a_read) {
@@ -1057,11 +1411,11 @@ static rc_t ProcessBAM(char const bamFile[], context_t *ctx, VDatabase *db,
                     fi.sglen   = strlen(spotGroup);
                     fi.readlen = readlen;
                     fi.cskey = cskey;
-                    fi.is_bad = (flags & BAMFlags_IsLowQuality) != 0;
+                    fi.is_bad = (flags & BAMFlags_IsLowQuality) != 0;/*BAM*/
                     sz = sizeof(fi) + 2*fi.readlen + fi.sglen;
                     if (align) {
-                        BAMAlignmentGetMateRefSeqId(rec, &mate_refSeqId);
-                        BAMAlignmentGetMatePosition(rec, &pnext);
+                        BAMAlignmentGetMateRefSeqId(rec, &mate_refSeqId);/*BAM*/
+                        BAMAlignmentGetMatePosition(rec, &pnext);/*BAM*/
                     }
                     if(align && mate_refSeqId == refSeqId && pnext > 0 && pnext!=rpos /*** weird case in some bams**/){ 
                         frags = ctx->fragsBoth;
@@ -1089,9 +1443,9 @@ static rc_t ProcessBAM(char const bamFile[], context_t *ctx, VDatabase *db,
                         uint8_t *dst = (uint8_t*) fragBuf.base;
                         memcpy(dst,&fi,sizeof(fi));
                         dst += sizeof(fi);
-                        COPY_READ((char *)dst, seqDNA, fi.readlen, fi.orientation);
+                        COPY_READ((char *)dst, seqDNA, fi.readlen, (isColorSpace && !aligned) ? 0 : fi.orientation);
                         dst += fi.readlen;
-                        COPY_QUAL(dst, qual, fi.readlen, fi.orientation);
+                        COPY_QUAL(dst, qual, fi.readlen, (isColorSpace && !aligned) ? 0 : fi.orientation);
                         dst += fi.readlen;
                         memcpy(dst,spotGroup,fi.sglen);
                     }}
@@ -1158,8 +1512,8 @@ static rc_t ProcessBAM(char const bamFile[], context_t *ctx, VDatabase *db,
                         src += fip->readlen;
                         
                         srec.orientation[read2] = AR_REF_ORIENT(data);
-                        COPY_READ(srec.seq + srec.readStart[read2], seqDNA, srec.readLen[read2], srec.orientation[read2]);
-                        COPY_QUAL(srec.qual + srec.readStart[read2], qual, srec.readLen[read2], srec.orientation[read2]);
+                        COPY_READ(srec.seq + srec.readStart[read2], seqDNA, srec.readLen[read2], (isColorSpace && !aligned) ? 0 : srec.orientation[read2]);
+                        COPY_QUAL(srec.qual + srec.readStart[read2], qual, srec.readLen[read2],  (isColorSpace && !aligned) ? 0 : srec.orientation[read2]);
 
                         srec.keyId = keyId;
                         srec.is_bad[read2] = (flags & BAMFlags_IsLowQuality) != 0;
@@ -1169,9 +1523,13 @@ static rc_t ProcessBAM(char const bamFile[], context_t *ctx, VDatabase *db,
                         
                         srec.spotGroup = spotGroup;
                         srec.spotGroupLen = strlen(spotGroup);
-                        
                         if (value->pcr_dup && (srec.is_bad[0] || srec.is_bad[1])) {
-                            (void)PLOGMSG(klogWarn, (klogWarn, "Spot '$(name)': both 0x400 and 0x200 flag bits set, only 0x400 will be saved", "name=%s", name));
+                            filterFlagConflictRecords++;
+                            if(filterFlagConflictRecords < MAX_WARNINGS_FLAG_CONFLICT){
+                                (void)PLOGMSG(klogWarn, (klogWarn, "Spot '$(name)': both 0x400 and 0x200 flag bits set, only 0x400 will be saved", "name=%s", name));
+                            } else if(filterFlagConflictRecords == MAX_WARNINGS_FLAG_CONFLICT){
+                                (void)PLOGMSG(klogWarn, (klogWarn, "Last reported warning: Spot '$(name)': both 0x400 and 0x200 flag bits set, only 0x400 will be saved", "name=%s", name));
+                            }
                         }
                         rc = SequenceWriteRecord(seq, &srec, isColorSpace, value->pcr_dup, value->platform);
                         if (rc) {
@@ -1200,14 +1558,14 @@ static rc_t ProcessBAM(char const bamFile[], context_t *ctx, VDatabase *db,
                 int64_t mrid;
                 int64_t tlen;
                 
-                BAMAlignmentGetMatePosition(rec, &mpos);
-                BAMAlignmentGetMateRefSeqId(rec, &bam_mrid);
-                BAMAlignmentGetInsertSize(rec, &tlen);
+                BAMAlignmentGetMatePosition(rec, &mpos);/*BAM*/
+                BAMAlignmentGetMateRefSeqId(rec, &bam_mrid);/*BAM*/
+                BAMAlignmentGetInsertSize(rec, &tlen);/*BAM*/
                 
                 if (mpos >= 0 && bam_mrid >= 0 && tlen != 0) {
-                    BAMRefSeq const *mref;
+                    BAMRefSeq const *mref;/*BAM*/
                     
-                    BAMFileGetRefSeq(bam, bam_mrid, &mref);
+                    BAMFileGetRefSeq(bam, bam_mrid, &mref);/*BAM*/
                     if (mref) {
                         rc_t rc_temp = ReferenceGet1stRow(ref, &mrid, mref->name);
                         if (rc_temp == 0) {
@@ -1238,16 +1596,22 @@ static rc_t ProcessBAM(char const bamFile[], context_t *ctx, VDatabase *db,
             srec.aligned[0] = aligned;
             srec.is_bad[0] = (flags & BAMFlags_IsLowQuality) != 0;
             srec.orientation[0] = AR_REF_ORIENT(data);
-            COPY_READ(srec.seq  + srec.readStart[0], seqDNA, readlen, srec.orientation[0]);
-            COPY_QUAL(srec.qual + srec.readStart[0], qual, readlen, srec.orientation[0]);
+            srec.cskey[0] = cskey;
+            COPY_READ(srec.seq  + srec.readStart[0], seqDNA, readlen, (isColorSpace && !aligned) ? 0 : srec.orientation[0]);
+            COPY_QUAL(srec.qual + srec.readStart[0], qual, readlen, (isColorSpace && !aligned) ? 0 : srec.orientation[0]);
 	     
             srec.keyId = keyId;
             
             srec.spotGroup = spotGroup;
             srec.spotGroupLen = strlen(spotGroup);
-            
             if (value->pcr_dup && srec.is_bad[0]) {
-                (void)PLOGMSG(klogWarn, (klogWarn, "Spot '$(name)': both 0x400 and 0x200 flag bits set, only 0x400 will be saved", "name=%s", name));
+                filterFlagConflictRecords++;
+                if (filterFlagConflictRecords < MAX_WARNINGS_FLAG_CONFLICT) {
+                    (void)PLOGMSG(klogWarn, (klogWarn, "Spot '$(name)': both 0x400 and 0x200 flag bits set, only 0x400 will be saved", "name=%s", name));
+                }
+                else if (filterFlagConflictRecords == MAX_WARNINGS_FLAG_CONFLICT) {
+                    (void)PLOGMSG(klogWarn, (klogWarn, "Last reported warning: Spot '$(name)': both 0x400 and 0x200 flag bits set, only 0x400 will be saved", "name=%s", name));
+		}
             }
             rc = SequenceWriteRecord(seq, &srec, isColorSpace, value->pcr_dup, value->platform);
             if (rc) {
@@ -1262,6 +1626,10 @@ static rc_t ProcessBAM(char const bamFile[], context_t *ctx, VDatabase *db,
             if (value->alignmentCount[AR_READNO(data) - 1] < 254)
                 ++value->alignmentCount[AR_READNO(data) - 1];
             ++ctx->alignCount;
+            
+            assert(keyId >> 32 < ctx->key2id_count);
+            assert((uint32_t)keyId < ctx->idCount[keyId >> 32]);
+            
             rc = AlignmentWriteRecord(align, &data);
             if (rc == 0) {
                 if (!isPrimary)
@@ -1279,6 +1647,7 @@ static rc_t ProcessBAM(char const bamFile[], context_t *ctx, VDatabase *db,
                 (void)PLOGERR(klogErr, (klogErr, rc, "AlignmentWriteRecord failed", ""));
             }
         }
+        /**************************************************************/
         
     LOOP_END:
         BAMAlignmentRelease(rec);
@@ -1287,6 +1656,9 @@ static rc_t ProcessBAM(char const bamFile[], context_t *ctx, VDatabase *db,
             break;
         if (rc == 0)
             *had_sequences = true;
+    }
+    if (filterFlagConflictRecords > 0) {
+        (void)PLOGMSG(klogWarn, (klogWarn, "$(cnt1) out of $(cnt2) records contained warning : both 0x400 and 0x200 flag bits set, only 0x400 will be saved", "cnt1=%lu,cnt2=%lu", filterFlagConflictRecords,recordsProcessed));
     }
     if (rc == 0 && recordsProcessed == 0) {
         (void)LOGMSG(klogWarn, (G.limit2config || G.refFilter != NULL) ? 
@@ -1298,13 +1670,17 @@ static rc_t ProcessBAM(char const bamFile[], context_t *ctx, VDatabase *db,
     KDataBufferWhack(&buf);
     KDataBufferWhack(&fragBuf);
     KDataBufferWhack(&srec.storage);
+    KDataBufferWhack(&cigBuf);
     return rc;
 }
 
 static rc_t WriteSoloFragments(context_t *ctx, Sequence *seq)
 {
     uint32_t i;
-    uint32_t fcountOne=0,fcountBoth=0;
+    unsigned j;
+    uint32_t fcountOne  = 0;
+    uint32_t fcountBoth = 0;
+    uint64_t idCount = 0;
     rc_t rc;
     KDataBuffer fragBuf;
     SequenceRecord srec;
@@ -1317,84 +1693,94 @@ static rc_t WriteSoloFragments(context_t *ctx, Sequence *seq)
         (void)LOGERR(klogErr, rc, "KDataBufferMake failed");
         return rc;
     }
-    KLoadProgressbar_Append(ctx->progress[ctx->pass - 1], ctx->idCount);
+    for (idCount = 0, j = 0; j < ctx->key2id_count; ++j) {
+        idCount += ctx->idCount[j];
+    }
+    KLoadProgressbar_Append(ctx->progress[ctx->pass - 1], idCount);
     
-    for (i = 0; i != ctx->idCount; ++i) {
-        ctx_value_t *value;
-        size_t rsize;
-        uint64_t id;
-        uint64_t sz;
-        unsigned readLen[2];
-        unsigned read = 0;
-        FragmentInfo *fip;
-        uint8_t  *src;
-        KMemBank *frags;
-        
-        rc = MMArrayGet(ctx->id2value, (void **)&value, i);
-        if (rc)
-            break;
-        KLoadProgressbar_Process(ctx->progress[ctx->pass - 1], 1, false);
-        if(value->fragmentId == 0)
-            continue;
-        if(value->fragmentId & 1) {
-            frags = ctx->fragsOne;
-            fcountOne++;
+    for (idCount = 0, j = 0; j < ctx->key2id_count; ++j) {
+        for (i = 0; i != ctx->idCount[j]; ++i, ++idCount) {
+            uint64_t const keyId = ((uint64_t)j << 32) | i;
+            ctx_value_t *value;
+            size_t rsize;
+            uint64_t id;
+            uint64_t sz;
+            unsigned readLen[2];
+            unsigned read = 0;
+            FragmentInfo const *fip;
+            uint8_t const *src;
+            KMemBank *frags;
+            
+            rc = MMArrayGet(ctx->id2value, (void **)&value, keyId);
+            if (rc)
+                break;
+            KLoadProgressbar_Process(ctx->progress[ctx->pass - 1], 1, false);
+            if (value->fragmentId == 0)
+                continue;
+            if (value->fragmentId & 1) {
+                frags = ctx->fragsOne;
+                fcountOne++;
+            }
+            else {
+                frags = ctx->fragsBoth; 
+                fcountBoth++;
+            }
+            id = value->fragmentId >> 1;
+            
+            rc = KMemBankSize(frags, id, &sz);
+            if (rc) {
+                (void)LOGERR(klogErr, rc, "KMemBankSize failed");
+                break;
+            }
+            rc = KDataBufferResize(&fragBuf, (size_t)sz);
+            if (rc) {
+                (void)LOGERR(klogErr, rc, "KDataBufferResize failed");
+                break;
+            }
+            rc = KMemBankRead(frags, id, 0, fragBuf.base, sz, &rsize);
+            if (rc) {
+                (void)LOGERR(klogErr, rc, "KMemBankRead failed");
+                break;
+            }
+            assert( rsize == sz );
+            fip = (FragmentInfo const *)fragBuf.base;
+            src = (uint8_t const *)&fip[1];
+            
+            readLen[0] = readLen[1] = 0;
+            if (!value->unmated && (   (fip->aligned && CTX_VALUE_GET_P_ID(*value, 0) == 0)
+                                    || (value->unaligned_2)))
+            {
+                read = 1;
+            }
+            
+            readLen[read] = fip->readlen;
+            rc = SequenceRecordInit(&srec, value->unmated ? 1 : 2, readLen);
+            if (rc) {
+                (void)LOGERR(klogErr, rc, "SequenceRecordInit failed");
+                break;
+            }
+            
+            srec.ti[read] = fip->ti;
+            srec.aligned[read] = fip->aligned;
+            srec.is_bad[read] = fip->is_bad;
+            srec.orientation[read] = fip->orientation;
+            srec.cskey[read] = fip->cskey;
+            memcpy(srec.seq + srec.readStart[read], src, srec.readLen[read]);
+            src += fip->readlen;
+            memcpy(srec.qual + srec.readStart[read], src, srec.readLen[read]);
+            src += fip->readlen;
+            srec.spotGroup = (char *)src;
+            srec.spotGroupLen = fip->sglen;
+            srec.keyId = keyId;
+            
+            rc = SequenceWriteRecord(seq, &srec, ctx->isColorSpace, value->pcr_dup, value->platform);
+            if (rc) {
+                (void)LOGERR(klogErr, rc, "SequenceWriteRecord failed");
+                break;
+            }
+            /*rc = KMemBankFree(frags, id);*/
+            CTX_VALUE_SET_S_ID(*value, ++ctx->spotId);
         }
-        else {
-            frags = ctx->fragsBoth; 
-            fcountBoth++;
-        }
-        id = value->fragmentId >> 1;
-        
-        rc = KMemBankSize(frags, id, &sz);
-        if (rc) {
-            (void)LOGERR(klogErr, rc, "KMemBankSize failed");
-            break;
-        }
-        rc = KDataBufferResize(&fragBuf, (size_t)sz);
-        if (rc) {
-            (void)LOGERR(klogErr, rc, "KDataBufferResize failed");
-            break;
-        }
-        rc = KMemBankRead(frags, id, 0, fragBuf.base, sz, &rsize);
-        if (rc) {
-            (void)LOGERR(klogErr, rc, "KMemBankRead failed");
-            break;
-        }
-        assert( rsize == sz );
-        fip = (FragmentInfo *) fragBuf.base;
-        src = (uint8_t*)&fip[1];
-        
-        readLen[0] = readLen[1] = 0;
-        if (!value->unmated && fip->aligned && CTX_VALUE_GET_P_ID(*value, 0) == 0)
-            read = 1;
-        
-        readLen[read] = fip->readlen;
-        rc = SequenceRecordInit(&srec, value->unmated ? 1 : 2, readLen);
-        if (rc) {
-            (void)LOGERR(klogErr, rc, "SequenceRecordInit failed");
-            break;
-        }
-        
-        srec.ti[read] = fip->ti;
-        srec.aligned[read] = fip->aligned;
-        srec.orientation[read] = fip->orientation;
-        memcpy(srec.seq + srec.readStart[read], src, srec.readLen[read]);
-        src += fip->readlen;
-        memcpy(srec.qual + srec.readStart[read], src, srec.readLen[read]);
-        src += fip->readlen;
-        srec.spotGroup = (char *)src;
-        srec.spotGroupLen = fip->sglen;
-        src += fip->sglen;
-        srec.keyId = i;
-        
-        rc = SequenceWriteRecord(seq, &srec, ctx->isColorSpace, value->pcr_dup, value->platform);
-        if (rc) {
-            (void)LOGERR(klogErr, rc, "SequenceWriteRecord failed");
-            break;
-        }
-        /*rc = KMemBankFree(frags, id);*/
-        CTX_VALUE_SET_S_ID(*value, ++ctx->spotId);
     }
     /*printf("DONE_SOLO:\tcnt2=%d\tcnt1=%d\n",fcountBoth,fcountOne);*/
     KDataBufferWhack(&fragBuf);
@@ -1407,7 +1793,7 @@ static rc_t SequenceUpdateAlignInfo(context_t *ctx, Sequence *seq)
     rc_t rc = 0;
     uint64_t row;
     const ctx_value_t *value;
-    uint32_t keyId;
+    uint64_t keyId;
     
     ++ctx->pass;
     KLoadProgressbar_Append(ctx->progress[ctx->pass - 1], ctx->spotId + 1);
@@ -1430,6 +1816,7 @@ static rc_t SequenceUpdateAlignInfo(context_t *ctx, Sequence *seq)
         }
         {{
             int64_t primaryId[2];
+            uint64_t const spotId = CTX_VALUE_GET_S_ID(*value);
             
             primaryId[0] = CTX_VALUE_GET_P_ID(*value, 0);
             primaryId[1] = CTX_VALUE_GET_P_ID(*value, 1);
@@ -1450,7 +1837,7 @@ static rc_t SequenceUpdateAlignInfo(context_t *ctx, Sequence *seq)
 static rc_t AlignmentUpdateSpotInfo(context_t *ctx, Alignment *align)
 {
     rc_t rc;
-    uint32_t keyId;
+    uint64_t keyId;
     
     ++ctx->pass;
 
@@ -1466,12 +1853,16 @@ static rc_t AlignmentUpdateSpotInfo(context_t *ctx, Alignment *align)
                 rc = 0;
             break;
         }
+        assert(keyId >> 32 < ctx->key2id_count);
+        assert((uint32_t)keyId < ctx->idCount[keyId >> 32]);
         rc = MMArrayGet(ctx->id2value, (void **)&value, keyId);
         if (rc == 0) {
             int64_t const spotId = CTX_VALUE_GET_S_ID(*value);
             
-            if (spotId == 0)
-                (void)PLOGMSG(klogWarn, (klogWarn, "Spot #$(id) was never assigned a spot id, probably has no primary alignments", "id=%u", keyId));
+            if (spotId == 0) {
+                (void)PLOGMSG(klogWarn, (klogWarn, "Spot '$(id)' was never assigned a spot id, probably has no primary alignments", "id=%lx", keyId));
+                /* (void)PLOGMSG(klogWarn, (klogWarn, "Spot #$(i): { $(s) }", "i=%lu,s=%s", keyId, Print_ctx_value_t(value))); */
+            }
             rc = AlignmentWriteSpotId(align, spotId);
         }
         KLoadProgressbar_Process(ctx->progress[ctx->pass - 1], 1, false);
@@ -1500,7 +1891,7 @@ static rc_t ArchiveBAM(VDBManager *mgr, VDatabase *db,
     
     if (G.onlyVerifyReferences) {
         for (i = 0; i < bamFiles && rc == 0; ++i) {
-            rc = ProcessBAM(bamFile[i], &ctx, db, &ref, NULL, NULL, NULL, NULL);
+            rc = ProcessBAM(bamFile[i], NULL, db, &ref, NULL, NULL, NULL, NULL);
         }
         ReferenceWhack(&ref, false);
         return rc;
@@ -1529,6 +1920,16 @@ static rc_t ArchiveBAM(VDBManager *mgr, VDatabase *db,
         *has_alignments |= this_has_alignments;
         has_sequences |= this_has_sequences;
     }
+/*** No longer need memory for key2id ***/
+    for (i = 0; i != ctx.key2id_count; ++i) {
+        KBTreeDropBacking(ctx.key2id[i]);
+        KBTreeRelease(ctx.key2id[i]);
+        ctx.key2id[i] = NULL;
+    }
+    free(ctx.key2id_names);
+    ctx.key2id_names = NULL;
+/*******************/
+
     if (has_sequences) {
         if (rc == 0 && (rc = Quitting()) == 0) {
             (void)LOGMSG(klogInfo, "Writing unpaired sequences");
@@ -1593,25 +1994,21 @@ rc_t OpenPath(char const path[], KDirectory **dir)
     return rc;
 }
 
-rc_t ConvertDatabaseToUnmapped(char const path[])
+static
+rc_t ConvertDatabaseToUnmapped(VDatabase *db)
 {
-    KDirectory *dir;
-    rc_t rc = OpenPath(path, &dir);
-    
-    if (rc == 0) {
-        KDirectory *tbl;
-        
-        rc = KDirectoryOpenDirUpdate(dir, &tbl, 0, "tbl/SEQUENCE");
-        if (rc == 0) {
-            rc = KDirectoryRename(tbl, true, "col/CMP_ALTREAD", "col/ALTREAD");
-            rc = KDirectoryRename(tbl, true, "col/CMP_READ", "col/READ");
-            KDirectoryRelease(tbl);
-        }
-        KDirectoryRelease(dir);
+    VTable* tbl;
+    rc_t rc = VDatabaseOpenTableUpdate(db, &tbl, "SEQUENCE");
+    if (rc == 0) 
+    {
+        VTableRenameColumn(tbl, false, "CMP_ALTREAD", "ALTREAD");
+        VTableRenameColumn(tbl, false, "CMP_READ", "READ");
+        VTableRenameColumn(tbl, false, "CMP_ALTCSREAD", "ALTCSREAD");
+        VTableRenameColumn(tbl, false, "CMP_CSREAD", "CSREAD");
+        rc = VTableRelease(tbl);
     }
     return rc;
 }
-
 rc_t run(char const progName[],
          unsigned bamFiles, char const *bamFile[],
          unsigned seqFiles, char const *seqFile[])
@@ -1626,26 +2023,27 @@ rc_t run(char const progName[],
         (void)LOGERR (klogErr, rc, "failed to create VDB Manager!");
     }
     else {
-        VSchema *schema;
-        
-        rc = VDBManagerMakeSchema(mgr, &schema);
-        if (rc) {
-            (void)LOGERR (klogErr, rc, "failed to create schema");
+        bool has_alignments = false;
+            
+        if (G.onlyVerifyReferences) {
+            rc = ArchiveBAM(mgr, NULL, bamFiles, bamFile, 0, NULL, &has_alignments);
         }
         else {
-            (void)(rc = VSchemaAddIncludePath(schema, G.schemaIncludePath));
-            rc = VSchemaParseFile(schema, G.schemaPath);
+            VSchema *schema;
+        
+            rc = VDBManagerMakeSchema(mgr, &schema);
             if (rc) {
-                (void)PLOGERR(klogErr, (klogErr, rc, "failed to parse schema file $(file)", "file=%s", G.schemaPath));
+                (void)LOGERR (klogErr, rc, "failed to create schema");
             }
             else {
-                VDatabase *db;
-                bool has_alignments = false;
-                
-                if (G.onlyVerifyReferences) {
-                    rc = ArchiveBAM(mgr, NULL, bamFiles, bamFile, 0, NULL, &has_alignments);
+                (void)(rc = VSchemaAddIncludePath(schema, G.schemaIncludePath));
+                rc = VSchemaParseFile(schema, G.schemaPath);
+                if (rc) {
+                    (void)PLOGERR(klogErr, (klogErr, rc, "failed to parse schema file $(file)", "file=%s", G.schemaPath));
                 }
                 else {
+                    VDatabase *db;
+                    
                     rc = VDBManagerCreateDB(mgr, &db, schema, db_type,
                                             kcmInit + kcmMD5, G.outpath);
                     rc2 = VSchemaRelease(schema);
@@ -1655,16 +2053,16 @@ rc_t run(char const progName[],
                         rc = rc2;
                     if (rc == 0) {
                         rc = ArchiveBAM(mgr, db, bamFiles, bamFile, seqFiles, seqFile, &has_alignments);
+                        if (rc == 0 && !has_alignments) {
+                            rc = ConvertDatabaseToUnmapped(db);
+                        }
+                        
                         rc2 = VDatabaseRelease(db);
                         if (rc2)
                             (void)LOGERR(klogWarn, rc2, "Failed to close database");
                         if (rc == 0)
                             rc = rc2;
-
-                        if (rc == 0 && !has_alignments) {
-                            rc = ConvertDatabaseToUnmapped(G.outpath);
-                        }
-
+                        
                         if (rc == 0) {
                             KMetadata *meta;
                             KDBManager *kmgr;

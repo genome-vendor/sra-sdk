@@ -73,7 +73,7 @@ bool vdh_take_1st_table_from_db( dump_context *ctx,
 bool vdh_take_this_table_from_db( dump_context *ctx, const VDatabase *my_database,
                                   const char * table_to_find );
 
-void vdh_print_col_info( dump_context *ctx,
+rc_t vdh_print_col_info( dump_context *ctx,
                          const p_col_def col_def,
                          const VSchema *my_schema );
 

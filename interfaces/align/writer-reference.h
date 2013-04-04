@@ -43,7 +43,8 @@ struct KFile;
 
 enum EReference_Options {
     ewrefmgr_co_allREADs = 0x01, /* always write READ */
-    ewrefmgr_co_Coverage = 0x02  /* use coverage data, by default not used */
+    ewrefmgr_co_Coverage = 0x02,  /* use coverage data, by default not used */
+    ewrefmgr_co_AcceptHardClip = 0x04 /* accept hard clipping in CIGAR */
 };
 
 typedef struct ReferenceMgr ReferenceMgr;
@@ -64,12 +65,14 @@ ALIGN_EXTERN rc_t CC ReferenceMgr_Make(const ReferenceMgr** cself, VDatabase* db
                                        const uint32_t options, const char* conf, const char* path, uint32_t max_seq_len,
                                        size_t cache, uint32_t num_open);
 
-ALIGN_EXTERN rc_t CC ReferenceMgr_Release(const ReferenceMgr* cself, bool commit, uint64_t* rows, bool build_coverage);
+ALIGN_EXTERN rc_t CC ReferenceMgr_Release(const ReferenceMgr* cself, bool commit, uint64_t* const rows, bool build_coverage);
+
+ALIGN_EXTERN rc_t CC ReferenceMgr_SetCache(ReferenceMgr const *const self, size_t cache, uint32_t num_open);
 
 typedef struct ReferenceSeq ReferenceSeq;
 
 /* id: chr12 or NC_000001.3 */
-ALIGN_EXTERN rc_t CC ReferenceMgr_GetSeq(const ReferenceMgr* cself, const ReferenceSeq** seq, const char* id);
+ALIGN_EXTERN rc_t CC ReferenceMgr_GetSeq(const ReferenceMgr* const cself, const ReferenceSeq** const seq, const char* id);
 
 ALIGN_EXTERN rc_t CC ReferenceMgr_Verify(const ReferenceMgr* cself, const char* id, INSDC_coord_len length, const uint8_t md5[16]);
 
@@ -86,7 +89,7 @@ ALIGN_EXTERN rc_t CC ReferenceMgr_Compress(const ReferenceMgr* cself, uint32_t o
                                            const char* id, INSDC_coord_zero offset,
                                            const char* seq, INSDC_coord_len seq_len,
                                            const void* cigar, uint32_t cigar_len,
-                                           INSDC_coord_zero allele_offset, const char* allele, INSDC_coord_len allele_len,
+                                           INSDC_coord_zero allele_offset, const char* allele, INSDC_coord_len allele_len,INSDC_coord_zero offset_in_allele,
                                            const void* allele_cigar, uint32_t allele_cigar_len,
                                            TableWriterAlgnData* data);
 
@@ -102,7 +105,7 @@ ALIGN_EXTERN rc_t CC ReferenceSeq_Compress(const ReferenceSeq* cself, uint32_t o
                                            INSDC_coord_zero offset,
                                            const char* seq, INSDC_coord_len seq_len,
                                            const void* cigar, uint32_t cigar_len,
-                                           INSDC_coord_zero allele_offset, const char* allele, INSDC_coord_len allele_len,
+                                           INSDC_coord_zero allele_offset, const char* allele, INSDC_coord_len allele_len,INSDC_coord_zero offset_in_allele,
                                            const void* allele_cigar, uint32_t allele_cigar_len,
                                            TableWriterAlgnData* data);
 

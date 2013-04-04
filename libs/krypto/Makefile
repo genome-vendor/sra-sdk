@@ -24,10 +24,12 @@
 
 default: all
 
+USE_GCC_IF_ICC = 1
+
 TOP ?= $(shell ../../build/abspath.sh ../..)
 MODULE = libs/krypto
 
-INT_LIBS = \
+INT_LIBS = 
 
 EXT_LIBS = \
 	libkrypto
@@ -38,11 +40,47 @@ ALL_LIBS = \
 
 include $(TOP)/build/Makefile.env
 
+ifeq ($(OS),linux)
+INT_LIBS += libkryptotest
+endif
+
+
 #-------------------------------------------------------------------------------
 # outer targets
 #
-all std: makedirs
-	@ $(MAKE_CMD) $(TARGDIR)/std
+# This differs from other sister Makefiles in needing three other symbols defined
+# VEC_SUPPORTED, VECREG_SUPPORTED and AESNI_SUPPORTED
+# The successive symbols are additive
+# In order they are the compiler supports  the vector 'container' type,
+# the preocessor has supported vector registers
+# the processor supports the Intel AES-NI instruction set
+#
+# The prerequisite call to make compiler-test will have tried to compile objects
+# that show such support if the objec can be made
+all std: makedirs compiler-test
+	@ $(MAKE_CMD) \
+		VEC_SUPPORTED=$(shell if test -f $(OBJDIR)/compile-test.vec.$(LOBX) ; then echo "true"; else echo "false" ; fi) \
+		VECREG_SUPPORTED=$(shell if test -f $(OBJDIR)/compile-test.vecreg.$(LOBX) ; then echo "true"; else echo "false" ; fi) \
+		AESNI_SUPPORTED=$(shell if test -f $(OBJDIR)/compile-test.aes-ni.$(LOBX) ; then echo "true"; else echo "false" ; fi) \
+		$(TARGDIR)/std || \
+	( echo "reattempting without AES-NI instructions"; \
+	  $(MAKE_CMD) \
+		VEC_SUPPORTED=$(shell if test -f $(OBJDIR)/compile-test.vec.$(LOBX) ; then echo "true"; else echo "false" ; fi) \
+		VECREG_SUPPORTED=$(shell if test -f $(OBJDIR)/compile-test.vecreg.$(LOBX) ; then echo "true"; else echo "false" ; fi) \
+		AESNI_SUPPORTED=false \
+		$(TARGDIR)/std ) || \
+	( echo "reattempting without vector register instructions"; \
+	  $(MAKE_CMD) \
+		VEC_SUPPORTED=$(shell if test -f $(OBJDIR)/compile-test.vec.$(LOBX) ; then echo "true"; else echo "false" ; fi) \
+		VECREG_SUPPORTED=false \
+		AESNI_SUPPORTED=false \
+		$(TARGDIR)/std ) || \
+	( echo "reattempting without vector instructions"; \
+	  $(MAKE_CMD) \
+		VEC_SUPPORTED=false \
+		VECREG_SUPPORTED=false \
+		AESNI_SUPPORTED=false \
+		$(TARGDIR)/std )
 
 $(INT_LIBS): makedirs
 	@ $(MAKE_CMD) $(ILIBDIR)/$@
@@ -58,6 +96,9 @@ $(EXT_LIBS): makedirs
 $(TARGDIR)/std: \
 	$(addprefix $(ILIBDIR)/,$(INT_LIBS)) \
 	$(addprefix $(LIBDIR)/,$(EXT_LIBS))
+#	@echo VEC_SUPPORTED $(VEC_SUPPORTED)
+#	@echo VECREG_SUPPORTED $(VECREG_SUPPORTED)
+#	@echo AESNI_SUPPORTED $(AESNI_SUPPORTED)
 
 .PHONY: $(TARGDIR)/std
 
@@ -76,20 +117,176 @@ tag: \
 
 .PHONY: tag $(addsuffix _tag,$(ALL_LIBS))
 
+
+#-------------------------------------------------------------------------------
+# compiler-test
+#
+.PHONY: compiler-test $(TARGDIR)/compiler-test
+
+# Silently try to compile three objects
+compiler-test : makedirs
+	@ $(MAKE_CMD) -i $(TARGDIR)/compiler-test >/dev/null 2>/dev/null
+
+
+COMPILE_TEST_SRC = \
+	compile-test.vec \
+	compile-test.vecreg \
+	compile-test.aes-ni
+
+COMPILE_TEST_OBJ = \
+	$(addsuffix .$(LOBX),$(COMPILE_TEST_SRC))
+
+$(TARGDIR)/compiler-test : $(COMPILE_TEST_OBJ)
+	@echo VEC_SUPPORTED $(VEC_SUPPORTED)
+	@echo VECREG_SUPPORTED $(VECREG_SUPPORTED)
+	@echo AESNI_SUPPORTED $(AESNI_SUPPORTED)
+
+#-------------------------------------------------------------------------------
+# define some additional compiler flags for special object file types
+# currently only gcc is supported and it turns out only with 4.4.0 and up
+# though other compilers could also be supported
+ifeq ($(COMP),gcc)
+CC_LISTING = -Wa,-ahlms=$(<D)/$(@F).list
+_CC_AES_NI  = -funsafe-math-optimizations -mmmx -msse -msse2 -msse3 -mssse3 -msse4.1 -maes -Wa,-march=generic64+aes $(CC_LISTING)
+_CC_VECREG  = -funsafe-math-optimizations -mmmx -msse -msse2 -msse3 -mssse3 -msse4.1 -Wa,-march=generic64+sse4 $(CC_LISTING)
+_CC_VEC     = $(CC_LISTING)
+else
+_CC_LISTING =
+_CC_AES_NI  =
+_CC_VECREG  =
+_CC_VEC     =
+endif
+
+ifeq ($(VEC_SUPPORTED),true)
+CC_VEC = $(_CC_VEC)
+else
+CC_VEC =
+endif
+
+ifeq ($(VECREG_SUPPORTED),true)
+CC_VECREG = $(_CC_VECREG)
+else
+CC_VECREG = 
+endif
+
+ifeq ($(AESNI_SUPPORTED),true)
+CC_AES_NI = $(_CC_AES_NI)
+else
+CC_AES_NI = 
+endif
+
+# Rules for making objects using compiler vectors
+compile-test.vec.pic.o : compile-test.c
+	@ echo +++++ Making $@ using its own rule
+	@ echo $@ $(_CC_VEC)
+	$(CC) -o $@ -fPIC $(OPT) -D_LIBRARY -DUSEVEC $(_CC_VEC) $<
+
+
+%.vec.$(LOBX): %.c
+	$(CC) -o $@ -fPIC $(OPT) -D_LIBRARY -DUSEVEC $(CC_VEC) $<
+
+
+# Rules for making objects using vectors in registers
+compile-test.vecreg.pic.o : compile-test.c
+	@ echo +++++ Making $@ using its own rule
+	@ echo $@ $(_CC_VECREG)
+	$(CC) -o $@ -fPIC $(OPT) -D_LIBRARY -DUSEVEC -DUSEVECREG $(_CC_VECREG) $<
+
+%.vecreg.$(LOBX): %.c
+	$(CC) -o $@ -fPIC $(OPT) -D_LIBRARY -DUSEVEC -DUSEVECREG $(CC_VECREG) $<
+
+
+# Rules for making objects using AES-NI extensions vectors in registers
+compile-test.aes-ni.pic.o : compile-test.c
+	@ echo +++++ Making $@ using its own rule
+	@ echo $@ $(_CC_AES_NI)
+	$(CC) -o $@ -fPIC $(OPT) -D_LIBRARY -DUSEVEC -DUSEVECREG -DUSEAESNI $(_CC_AES_NI) $<
+
+%.aes-ni.$(LOBX): %.c
+	$(CC) -o $@ -fPIC $(OPT) -D_LIBRARY -DUSEVEC -DUSEVECREG -DUSEAESNI $(CC_AES_NI) $<
+
+
+
 #-------------------------------------------------------------------------------
 # krypto
 #
 $(LIBDIR)/libkrypto: $(addprefix $(LIBDIR)/libkrypto.,$(LIBEXT))
 
-KRYPTO_SRC = \
+ALL_LIB_SRC = \
 	ciphermgr \
-	cipher \
-	blockcipher \
-	aes \
-	aes_core \
 	wgaencrypt \
 	encfile \
+	encfilev2 \
+	cipher \
+	aes_core \
+	aes-byte \
+	cipher-byte \
 	key
+
+ifeq ($(OS),linux)
+ALL_LIB_SRC += reencfile
+endif
+
+LIB_SRC = \
+	no-null-ncbi
+
+TEST_LIB_SRC =  \
+	null-ncbi \
+	testcipher
+
+ifeq ($(VEC_SUPPORTED),true)
+ALL_LIB_SRC += \
+	cipher-vec.vec \
+	aes-ncbi.vec
+LIB_SRC += \
+	no-null-ncbi.vec
+TEST_LIB_SRC += \
+	null-ncbi.vec
+else
+ALL_LIB_SRC += \
+	cipher-no-vec.vec
+LIB_SRC += \
+	no-null-ncbi.vec
+TEST_LIB_SRC += \
+	no-null-ncbi.vec
+endif
+
+ifeq ($(VECREG_SUPPORTED),true)
+ALL_LIB_SRC += \
+	cipher-vec.vecreg \
+	aes-ncbi.vecreg
+LIB_SRC += \
+	no-null-ncbi.vecreg
+TEST_LIB_SRC += \
+	null-ncbi.vecreg
+else
+ALL_LIB_SRC += \
+	cipher-no-vec.vecreg
+LIB_SRC += \
+	no-null-ncbi.vecreg
+TEST_LIB_SRC += \
+	no-null-ncbi.vecreg
+endif
+
+ifeq ($(AESNI_SUPPORTED),true)
+ALL_LIB_SRC += \
+	cipher-vec.aes-ni \
+	aes-ncbi.aes-ni
+LIB_SRC += \
+	no-null-ncbi.aes-ni
+TEST_LIB_SRC += \
+	no-null-ncbi.aes-ni
+else
+ALL_LIB_SRC += \
+	cipher-no-vec.aes-ni
+LIB_SRC += \
+	no-null-ncbi.aes-ni
+TEST_LIB_SRC += \
+	no-null-ncbi.aes-ni
+endif
+
+
+KRYPTO_SRC = $(ALL_LIB_SRC) $(LIB_SRC)
 
 KRYPTO_OBJ = \
 	$(addsuffix .$(LOBX),$(KRYPTO_SRC))
@@ -97,7 +294,8 @@ KRYPTO_OBJ = \
 KRYPTO_LIB = \
 	-dkfg \
 	-dkfs \
-	-dklib
+	-dklib \
+    -dkproc
 
 $(LIBDIR)/libkrypto.$(SHLX): $(KRYPTO_OBJ)
 	$(LD) --dlib --vers $(SRCDIR) -o $@ $^ $(KRYPTO_LIB)
@@ -107,6 +305,35 @@ $(LIBDIR)/libkrypto.$(LIBX): $(KRYPTO_OBJ)
 
 libkrypto_tag:
 	@ $(TOP)/build/tag-module.sh $(MODULE) libkrypto $(KRYPTO_OBJ)
+
+
+#-------------------------------------------------------------------------------
+# kryptotest
+#
+
+$(ILIBDIR)/libkryptotest: $(addprefix $(ILIBDIR)/libkryptotest.,$(ILIBEXT))
+
+
+KRYPTOTEST_SRC = $(ALL_LIB_SRC)	$(TEST_LIB_SRC)
+
+KRYPTOTEST_OBJ = \
+	$(addsuffix .$(LOBX),$(KRYPTOTEST_SRC))
+
+KRYPTOTEST_LIB = \
+	-dkfg \
+	-dkfs \
+	-dklib \
+	-dkproc 
+
+
+$(ILIBDIR)/libkryptotest.$(SHLX): $(KRYPTOTEST_OBJ)
+	$(LD) --dlib --vers $(SRCDIR) -o $@ $^ $(KRYPTOTEST_LIB)
+
+$(ILIBDIR)/libkryptotest.$(LIBX): $(KRYPTOTEST_OBJ)
+	$(LD) --slib --vers $(SRCDIR) -o $@ $^ $(KRYPTOTEST_LIB)
+
+libkryptotest_tag:
+	@ $(TOP)/build/tag-module.sh $(MODULE) libkryptotest $(KRYPTOTEST_OBJ)
 
 
 

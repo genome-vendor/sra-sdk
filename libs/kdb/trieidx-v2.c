@@ -808,7 +808,7 @@ rc_t KPTrieIndexFind_v2 ( const KPTrieIndex_v2 *self,
 #if V2FIND_RETURNS_SPAN
     uint32_t *span,
 #endif
-    int ( CC * custom_cmp ) ( const void *item, const PBSTNode *n, void *data ), void *data )
+    int ( CC * custom_cmp ) ( const void *item, const PBSTNode *n, void *data ), void *data, bool convertFromV1 )
 {
     rc_t rc;
 
@@ -831,7 +831,7 @@ rc_t KPTrieIndexFind_v2 ( const KPTrieIndex_v2 *self,
             size_t usize;
 
             /* detect conversion from v1 */
-            if ( self -> id_bits == 0 )
+            if ( convertFromV1 && self -> id_bits == 0 )
             {
                 /* v1 stored tree will have just a 32-bit spot id as data */
                 uint32_t id;
@@ -843,9 +843,16 @@ rc_t KPTrieIndexFind_v2 ( const KPTrieIndex_v2 *self,
             else
             {
                 /* should be native v2 */
-                rc = Unpack ( self -> id_bits, sizeof * start_id * 8,
-                    pnode . data . addr, 0, self -> id_bits, NULL,
-                    start_id, sizeof * start_id, & usize );
+                if ( self -> id_bits > 0 )
+                {
+                    rc = Unpack ( self -> id_bits, sizeof * start_id * 8,
+                        pnode . data . addr, 0, self -> id_bits, NULL,
+                        start_id, sizeof * start_id, & usize );
+                }
+                else
+                {
+                    rc = 0;
+                }
                 * start_id += self -> first;
             }
 
@@ -981,7 +988,7 @@ rc_t KTrieIndexFind_v2 ( const KTrieIndex_v2 *self,
 #if V2FIND_RETURNS_SPAN
     uint32_t *span,
 #endif
-    int ( CC * custom_cmp ) ( const void *item, const PBSTNode *n, void *data ), void *data )
+    int ( CC * custom_cmp ) ( const void *item, const PBSTNode *n, void *data ), void *data, bool convertFromV1  )
 {
     /* search within persisted index */
     if ( self -> pt . key2id != NULL )
@@ -990,7 +997,7 @@ rc_t KTrieIndexFind_v2 ( const KTrieIndex_v2 *self,
 #if V2FIND_RETURNS_SPAN
                                     span,
 #endif
-                                    custom_cmp, data );
+                                    custom_cmp, data, convertFromV1 );
     }
 
     return RC ( rcDB, rcIndex, rcSelecting, rcString, rcNotFound );

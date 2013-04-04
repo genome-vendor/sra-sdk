@@ -414,6 +414,7 @@ rc_t HandleOneFile (VFSManager * mgr, const char * path, bool decrypt_bin_compat
                         switch (GetRCState(rc))
                         {
                         case 0:
+                        case rcInsufficient:
                             rc = KEncFileValidate (buffile);
                             if (rc)
                             {

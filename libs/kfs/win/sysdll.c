@@ -24,6 +24,10 @@
 *
 */
 
+#ifndef _WIN32_WINNT /* This file requires OS newer than Windows 2000 */
+# define _WIN32_WINNT 0x0501
+#endif
+
 #include <kfs/extern.h>
 
 #define TRACK_REFERENCES 0
@@ -475,6 +479,9 @@ static
 rc_t KDyldLoad ( KDyld *self, KDylib *lib, const wchar_t *path )
 {
     DWORD err;
+#if WE_WERE_BUILDING_FOR_WINDOWS_7_ALONE
+    UINT errMode = GetErrorMode();
+#endif
 
 	if ( path == NULL )
 	{
@@ -484,15 +491,21 @@ rc_t KDyldLoad ( KDyld *self, KDylib *lib, const wchar_t *path )
         return RC ( rcFS, rcDylib, rcLoading, rcNoObj, rcUnknown );
 	}
 
+    SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX); /* suppress the message box in case of an error */
     lib -> handle = LoadLibraryW ( path );
+#if WE_WERE_BUILDING_FOR_WINDOWS_7_ALONE
+    SetErrorMode(errMode);
+#endif
     if ( lib -> handle != NULL )
         return KDylibSetLogging ( lib );
 
     err = GetLastError ();
     switch ( err )
     {
-    case ERROR_MOD_NOT_FOUND:
+    case ERROR_MOD_NOT_FOUND :
         return RC ( rcFS, rcDylib, rcLoading, rcPath, rcNotFound );
+    case ERROR_BAD_EXE_FORMAT :
+        return RC ( rcFS, rcDylib, rcLoading, rcFormat, rcInvalid );
     }
 
     return RC ( rcFS, rcDylib, rcLoading, rcNoObj, rcUnknown );
@@ -511,7 +524,7 @@ rc_t KDyldVTryLoadLib ( KDyld *self, KDylib **lib,
     {
         wchar_t real [ MAX_PATH ];
 
-		rc = KSysDirRealPath ( sdir, real, sizeof real, path, args );
+		rc = KSysDirOSPath ( sdir, real, sizeof real, path, args );
 		if ( rc == 0 )
 		{
 			WString pstr;
@@ -798,7 +811,8 @@ rc_t KDlsetWhack ( KDlset *self )
     return 0;
 }
 
-
+#define STRINGIZE(s) #s
+#define LIBNAME(pref, name, suff) STRINGIZE(pref) name STRINGIZE(suff)
 /* MakeSet
  *  load a dynamic library
  *
@@ -806,7 +820,7 @@ rc_t KDlsetWhack ( KDlset *self )
  */
 LIB_EXPORT rc_t CC KDyldMakeSet ( const KDyld *self, KDlset **setp )
 {
-    rc_t rc;
+    rc_t rc = 0;
 
     if ( setp == NULL )
         rc = RC ( rcFS, rcDylib, rcConstructing, rcParam, rcNull );
@@ -826,8 +840,20 @@ LIB_EXPORT rc_t CC KDyldMakeSet ( const KDyld *self, KDlset **setp )
                 VectorInit ( & set -> ord, 0, 16 );
                 KRefcountInit ( & set -> refcount, 1, "KDlset", "make", "dlset" );
 #if ! ALWAYS_ADD_EXE
-                * setp = set;
-                return 0;
+                {   
+                    KDylib *jni;
+                    const char* libname = LIBNAME(LIBPREFIX, "vdb_jni.", SHLIBEXT);
+                    if ( KDyldLoadLib ( ( KDyld* ) self, & jni, libname ) == 0 )
+                    {
+                        rc = KDlsetAddLib ( set, jni );
+                        KDylibRelease ( jni );
+                    }
+                    if (rc == 0)
+                    {
+                        * setp = set;
+                        return 0;
+                    }
+                }
 #else
                 {
                     KDylib *exe;

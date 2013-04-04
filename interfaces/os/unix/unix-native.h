@@ -44,25 +44,12 @@ extern "C" {
  *  a structure for communicating a timeout
  *  which under Unix converts to an absolute time once prepared
  */
-typedef struct timeout_t timeout_t;
 struct timeout_t
 {
     struct timespec ts;
     uint32_t mS;
     uint32_t prepared;
 };
-
-/* Init
- *  initialize a timeout in milliseconds
- */
-rc_t TimeoutInit ( timeout_t *tm, uint32_t msec );
-
-
-/* Prepare
- *  ensures that a timeout is prepared with an absolute value
- */
-rc_t TimeoutPrepare ( timeout_t *tm );
-
 
 #ifdef __cplusplus
 }

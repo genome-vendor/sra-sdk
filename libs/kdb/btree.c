@@ -939,6 +939,8 @@ typedef struct KBTreeBranchNode_v2 KBTreeBranchNode;
 
 #if _DEBUGGING 
 #define VALIDATE_SEARCH_WINDOW 0
+#endif
+
 #if VALIDATE_SEARCH_WINDOW
 static
 bool validate_search_window(KBTreeSrchWindow *win)
@@ -953,7 +955,7 @@ bool validate_search_window(KBTreeSrchWindow *win)
 #else
 #define validate_search_window(A) true
 #endif
-#endif
+
 /* Whack
  */
 static
@@ -1094,7 +1096,7 @@ LIB_EXPORT rc_t CC KBTreeMakeRead ( const KBTree **btp,
 #if BTREE_KEY2ID
 LIB_EXPORT rc_t CC KBTreeMakeUpdate ( KBTree **btp, KFile *backing,
     size_t climit, bool write_through, KBTreeKeyType type,
-    size_t min_key_size, size_t max_key_size,
+    size_t min_key_size, size_t max_key_size, size_t id_size,
     KBTreeCompareFunc cmp )
 #else
 LIB_EXPORT rc_t CC KBTreeMakeUpdate ( KBTree **btp, KFile *backing,
@@ -1111,9 +1113,7 @@ LIB_EXPORT rc_t CC KBTreeMakeUpdate ( KBTree **btp, KFile *backing,
         rc = RC ( rcDB, rcTree, rcConstructing, rcParam, rcNull );
     else
     {
-        if ( backing == NULL )
-            rc = RC ( rcDB, rcTree, rcConstructing, rcFile, rcNull );
-        else if ( type >= kbtLastDefined )
+        if ( type >= kbtLastDefined )
             rc = RC ( rcDB, rcTree, rcConstructing, rcType, rcUnrecognized );
         else if ( min_key_size == 0 )
             rc = RC ( rcDB, rcTree, rcConstructing, rcParam, rcInvalid );
@@ -1121,15 +1121,18 @@ LIB_EXPORT rc_t CC KBTreeMakeUpdate ( KBTree **btp, KFile *backing,
             rc = RC ( rcDB, rcTree, rcConstructing, rcParam, rcExcessive );
         else if ( min_key_size > max_key_size )
             rc = RC ( rcDB, rcTree, rcConstructing, rcParam, rcInconsistent );
+#if BTREE_KEY2ID && ! BTREE_KEY2ID64
+        else if ( id_size != sizeof ( uint32_t ) )
+            rc = RC ( rcDB, rcTree, rcConstructing, rcParam, rcInvalid );
+#endif
         else
         {
-            KBTree *bt = malloc ( sizeof * bt );
+            KBTree *bt = calloc ( 1,sizeof * bt );
             if ( bt == NULL )
                 rc = RC ( rcDB, rcTree, rcConstructing, rcMemory, rcExhausted );
             else
             {
-                rc = KBTreeReadHeader ( & bt -> hdr, backing );
-                if ( rc == 0 || GetRCState ( rc ) == rcNotFound )
+                if ( backing == NULL || ( rc = KBTreeReadHeader ( & bt -> hdr, backing )) == 0 || GetRCState ( rc ) == rcNotFound )
                 {
                     /* detect empty file */
                     if ( bt -> hdr . version == 0 )
@@ -1172,7 +1175,7 @@ LIB_EXPORT rc_t CC KBTreeMakeUpdate ( KBTree **btp, KFile *backing,
 
                     if ( rc == 0 )
                     {
-                        rc = KFileAddRef ( backing );
+                        if(backing) rc = KFileAddRef ( backing );
                         if ( rc == 0 )
                         {
                             /* create page file */
@@ -1192,7 +1195,7 @@ LIB_EXPORT rc_t CC KBTreeMakeUpdate ( KBTree **btp, KFile *backing,
                                 return 0;
                             }
 
-                            KFileRelease ( backing );
+                            if(backing) KFileRelease ( backing );
                         }
                     }
                 }
@@ -1460,7 +1463,7 @@ rc_t branch_find ( const KBTree *self, const KPage *page,
 
 
 #if BTREE_KEY2ID
-LIB_EXPORT rc_t CC KBTreeFind ( const KBTree *self, uint32_t *id,
+LIB_EXPORT rc_t CC KBTreeFind ( const KBTree *self, uint64_t *id,
     const void *key, size_t key_size )
 #else
 LIB_EXPORT rc_t CC KBTreeFind ( const KBTree *self, KBTreeValue *val,
@@ -1492,11 +1495,19 @@ LIB_EXPORT rc_t CC KBTreeFind ( const KBTree *self, KBTreeValue *val,
             rc = KPageFileGet ( self -> pgfile, & page, self -> hdr . root >> 1 );
             if ( rc == 0 )
             {
+#if BTREE_KEY2ID && ! BTREE_KEY2ID64
+                uint32_t id32;
+#endif
                 rc = ( ( ( self -> hdr . root & 1 ) == 0 ) ? leaf_find : branch_find )
-#if BTREE_KEY2ID
+#if BTREE_KEY2ID64
                     ( self, page, id, key, key_size );
+#elif BTREE_KEY2ID
+                    ( self, page, & id32, key, key_size );
 #else
                     ( self, page, val, key, key_size );
+#endif
+#if BTREE_KEY2ID && ! BTREE_KEY2ID64
+                    * id = id32;
 #endif
                 
                 KPageRelease ( page );
@@ -2706,7 +2717,7 @@ rc_t branch_entry ( KBTree *self, KBTreeEntryData *pb, KPage *page, KBTreeSplit 
 
 
 #if BTREE_KEY2ID
-LIB_EXPORT rc_t CC KBTreeEntry ( KBTree *self, uint32_t *id,
+LIB_EXPORT rc_t CC KBTreeEntry ( KBTree *self, uint64_t *id,
     bool *was_inserted, const void *key, size_t key_size )
 #else
 LIB_EXPORT rc_t CC KBTreeEntry ( KBTree *self,
@@ -2743,11 +2754,20 @@ LIB_EXPORT rc_t CC KBTreeEntry ( KBTree *self,
             bool leaf;
             KPage *page;
 
+#if BTREE_KEY2ID && ! BTREE_KEY2ID64
+            /* TEMPORARY
+               until full 64-bit ids are supported
+            */
+            uint32_t id32 = ( uint32_t ) * id;
+#endif
+
             /* package the entry params into a block */
             KBTreeEntryData pb;
             pb . self = self;
-#if BTREE_KEY2ID
+#if BTREE_KEY2ID64
             pb . id = id;
+#elif BTREE_KEY2ID
+            pb . id = & id32;
 #else
             pb . val = val;
             pb . alloc_size = alloc_size;
@@ -2781,6 +2801,9 @@ LIB_EXPORT rc_t CC KBTreeEntry ( KBTree *self,
                     leaf_entry ( self, & pb, page, & split ):
                     branch_entry ( self, & pb, page, & split );
 
+#if BTREE_KEY2ID && ! BTREE_KEY2ID64
+                * id = id32;
+#endif
                 if ( rc != 0 )
                 {
                     /* detect split */
@@ -2869,7 +2892,7 @@ LIB_EXPORT rc_t CC KBTreeEntry ( KBTree *self,
 #if BTREE_KEY2ID
 static
 rc_t invoke_foreach_func ( const KBTree *self, const void *cnode, const void *ordp,
-    void ( CC * f ) ( const void *key, size_t key_size, uint32_t id, void *data ), void *data )
+    void ( CC * f ) ( const void *key, size_t key_size, uint64_t id, void *data ), void *data )
 #else
 static
 rc_t invoke_foreach_func ( const KBTree *self, const void *cnode, const void *ordp,
@@ -2905,8 +2928,8 @@ rc_t invoke_foreach_func ( const KBTree *self, const void *cnode, const void *or
 
 #if BTREE_KEY2ID
 static
-rc_t leaf_foreach ( const KBTree *self, bool reverse, uint32_t nid,
-    void ( CC * f ) ( const void *key, size_t key_size, uint32_t id, void *data ), void *data )
+rc_t leaf_foreach ( const KBTree *self, bool reverse, uint64_t nid,
+    void ( CC * f ) ( const void *key, size_t key_size, uint64_t id, void *data ), void *data )
 #else
 static
 rc_t leaf_foreach ( const KBTree *self, bool reverse, uint32_t nid,
@@ -2944,8 +2967,8 @@ rc_t leaf_foreach ( const KBTree *self, bool reverse, uint32_t nid,
 
 #if BTREE_KEY2ID
 static
-rc_t branch_foreach ( const KBTree *self, bool reverse, uint32_t nid,
-    void ( CC * f ) ( const void *key, size_t key_size, uint32_t id, void *data ), void *data )
+rc_t branch_foreach ( const KBTree *self, bool reverse, uint64_t nid,
+    void ( CC * f ) ( const void *key, size_t key_size, uint64_t id, void *data ), void *data )
 #else
 static
 rc_t branch_foreach ( const KBTree *self, bool reverse, uint32_t nid,
@@ -3009,7 +3032,7 @@ rc_t branch_foreach ( const KBTree *self, bool reverse, uint32_t nid,
 
 #if BTREE_KEY2ID
 LIB_EXPORT rc_t CC KBTreeForEach ( const KBTree *self, bool reverse,
-    void ( CC * f ) ( const void *key, size_t key_size, uint32_t id, void *data ), void *data )
+    void ( CC * f ) ( const void *key, size_t key_size, uint64_t id, void *data ), void *data )
 #else
 LIB_EXPORT rc_t CC KBTreeForEach ( const KBTree *self, bool reverse,
     void ( CC * f ) ( const void *key, size_t key_size, KBTreeValue *val, void *data ), void *data )

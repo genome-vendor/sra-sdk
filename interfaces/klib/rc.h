@@ -104,7 +104,7 @@ RC_ENUM ( RCModule )
     RC_ENTRY ( rcSRA, "short read archive" )
     RC_VLAST ( rcLastModule_v1_0 )
     RC_ENTRY ( rcKFG = rcLastModule_v1_0, "configuration" )
-    RC_ENTRY ( rcAlign, "alignment module" )
+    RC_ENTRY ( rcAlign, "alignment" )
     RC_ENTRY ( rcKrypto, "cryptographic" )
     RC_ENTRY ( rcRDBMS, "RDBMS" )
     RC_ENTRY ( rcNS, "network system" )
@@ -369,12 +369,22 @@ KLIB_EXTERN bool CC GetUnreadRCInfo ( rc_t *rc, const char **filename, const cha
 
 #if RECORD_RC_FILE_LINE
 
-#define SET_RC_FILE_FUNC_LINE( rc ) \
-    SetRCFileFuncLine ( ( rc ), __FILE__, __func__, __LINE__ )
+    #if defined(__SUNPRO_CC)  &&  __SUNPRO_CC <= 0x590  &&  defined(__cplusplus)
+    
+        #define SET_RC_FILE_FUNC_LINE( rc ) \
+            SetRCFileFuncLine ( ( rc ), __FILE__, "(unknown)", __LINE__ )
+    
+    #else
+    
+        #define SET_RC_FILE_FUNC_LINE( rc ) \
+            SetRCFileFuncLine ( ( rc ), __FILE__, __func__, __LINE__ )
+    
+    #endif
+
 #else
 
-#define SET_RC_FILE_FUNC_LINE( rc ) \
-    ( rc_t ) ( rc )
+    #define SET_RC_FILE_FUNC_LINE( rc ) \
+        ( rc_t ) ( rc )
 
 #endif
 
@@ -406,6 +416,12 @@ KLIB_EXTERN bool CC GetUnreadRCInfo ( rc_t *rc, const char **filename, const cha
 /* RC
  *  form a complete return code from parts
  */
+#define SILENT_RC( mod, targ, ctx, obj, state )              \
+    ( rc_t ) ( ASSERT_OBJ_STATE (),                          \
+        CTX ( mod, targ, ctx )    | /* 18 bits */            \
+        ( ( rc_t ) ( obj ) << 6 ) | /*  8 bits */            \
+        ( ( rc_t ) ( state ) ) )    /*  6 bits */
+
 #define RC( mod, targ, ctx, obj, state )                     \
     ( rc_t ) ( ASSERT_OBJ_STATE (),                          \
     SET_RC_FILE_FUNC_LINE (                                  \

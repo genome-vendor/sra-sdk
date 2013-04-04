@@ -128,15 +128,20 @@ ALIGN_EXTERN rc_t CC ReferenceObj_External(const ReferenceObj* cself, bool* exte
 ALIGN_EXTERN rc_t CC ReferenceObj_Read(const ReferenceObj* cself, INSDC_coord_zero offset, INSDC_coord_len len,
                                        uint8_t* buffer, INSDC_coord_len* written);
 
+ALIGN_EXTERN rc_t CC ReferenceObj_GetIdCount( const ReferenceObj* cself, int64_t row_id, uint32_t *count );
+
 /* return pointer to iterator for (PRIMARY|SECONDARY)_ALIGNMENT_IDS to a given range on reference,
    both cursors could be NULL
    ref_len will be truncated to seq length for non-circular references
    for other parameters see AlignMgrMakePlacementIterator
  */
 ALIGN_EXTERN rc_t CC ReferenceObj_MakePlacementIterator ( const ReferenceObj* cself,
-    PlacementIterator **iter, INSDC_coord_zero ref_pos, INSDC_coord_len ref_len, int32_t min_mapq,
+    PlacementIterator **iter,
+    INSDC_coord_zero ref_window_start,
+    INSDC_coord_len ref_window_len, int32_t min_mapq,
     struct VCursor const *ref_cur, struct VCursor const *align_cur, align_id_src ids,
-    const PlacementRecordExtendFuncs *ext_0, const PlacementRecordExtendFuncs *ext_1 );
+    const PlacementRecordExtendFuncs *ext_0, const PlacementRecordExtendFuncs *ext_1,
+    const char * rd_group );
 
 #ifdef __cplusplus
 }

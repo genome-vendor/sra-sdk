@@ -231,7 +231,7 @@ uint32_t col_defs_count_copy_cols( col_defs* defs );
  * does not require an open cursor.
 */
 rc_t col_defs_exclude_these_columns( col_defs* defs,
-                const char * column_names );
+                const char * prefix, const char * column_names );
 
 rc_t col_defs_as_string( col_defs* defs, char ** dst, bool only_requested );
 

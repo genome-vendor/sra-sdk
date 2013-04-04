@@ -214,7 +214,7 @@ rc_t KDBManagerVOpenDBReadInt ( const KDBManager *self,
         const KDirectory *dir;
 
         /* open the directory if its a database */
-	rc = KDBOpenPathTypeRead ( wd, dbpath, &dir, kptDatabase, NULL );
+        rc = KDBOpenPathTypeRead ( wd, dbpath, &dir, kptDatabase, NULL );
         if ( rc == 0 )
         {
             /* allocate a new guy */

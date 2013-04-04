@@ -135,8 +135,8 @@ rc_t CC sts_print(KFmtHandler* formatter, const KStsFmtFlags flags, KWrtHandler*
 
     uint32_t envc = 0;
     wrt_nvp_t envs[5];
-    const char ebuffer[2048];
-    const char mbuffer[2048];
+    char ebuffer[2048];
+    char mbuffer[2048];
     KFmtWriter fmtwrt;
 
     assert(formatter != NULL);

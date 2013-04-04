@@ -28,6 +28,7 @@
 #include <klib/rc.h>
 #include <vdb/xform.h>
 #include <vdb/schema.h>
+#include <klib/data-buffer.h>
 #include <sysalloc.h>
 
 #include <stdint.h>
@@ -35,7 +36,9 @@
 #include <math.h>
 #include <assert.h>
 
-typedef void (*math_f)(void *dst, const void *src, uint32_t vec_length, uint32_t vec_count);
+typedef void (*math_f)(void *const dst,
+                       void const *const src, uint32_t const offset,
+                       uint32_t const vec_length, uint32_t const vec_count);
 typedef struct self_t {
     uint32_t vec_length;
     math_f f;
@@ -44,10 +47,10 @@ typedef struct self_t {
 #define FUNC(VALTYPE) F_ ## VALTYPE
 
 #define FUNC_DEF(VALTYPE) \
-static void FUNC(VALTYPE)(void *Dst, const void *Src, uint32_t vec_length, uint32_t vec_count) { \
+static void FUNC(VALTYPE)(void *Dst, void const *Src, uint32_t const offset, uint32_t const vec_length, uint32_t const vec_count) { \
     VALTYPE sum; \
-    VALTYPE *dst = (VALTYPE *)Dst; \
-    const VALTYPE *src = (const VALTYPE *)Src; \
+    VALTYPE *const dst = (VALTYPE *)Dst; \
+    VALTYPE const *const src = &((VALTYPE const *)Src)[offset]; \
     uint32_t i; \
     uint32_t j; \
     uint32_t k; \
@@ -71,7 +74,30 @@ FUNC_DEF(int32_t)
 FUNC_DEF(int64_t)
 
 static
-rc_t CC array_func(
+rc_t CC vec_sum_row_func(void *const Self,
+                         VXformInfo const *info,
+                         int64_t const row_id,
+                         VRowResult *const rslt,
+                         uint32_t const argc,
+                         VRowData const argv[])
+{
+    self_t const *self = Self;
+    rc_t rc;
+    
+    assert(argc == 1);
+    
+    rslt->data->elem_bits = rslt->elem_bits;
+    rc = KDataBufferResize(rslt->data, rslt->elem_count = 1);
+    if (rc == 0) {
+        self->f(rslt->data->base,
+                argv[0].u.data.base, argv[0].u.data.first_elem,
+                argv[0].u.data.elem_count, 1);
+    }
+    return rc;
+}
+
+static
+rc_t CC vec_sum_array_func(
                 void *Self,
                 const VXformInfo *info,
                 void *dst,
@@ -82,7 +108,7 @@ rc_t CC array_func(
     
     assert(elem_count % self->vec_length == 0);
     assert((elem_count / self->vec_length) >> 32 == 0);
-    self->f(dst, src, self->vec_length, (uint32_t)(elem_count / self->vec_length));
+    self->f(dst, src, 0, self->vec_length, (uint32_t)(elem_count / self->vec_length));
     return 0;
 }
 
@@ -92,90 +118,122 @@ void CC vxf_vec_sum_wrapper( void *ptr )
 	free( ptr );
 }
 
-/*
- function < type T, U32 dim >
- T vec_sum #1.0 ( T [ dim ] in )
- */
-VTRANSFACT_IMPL(vdb_vec_sum, 1, 0, 0) (
-                                       const void *Self,
-                                       const VXfactInfo *info,
-                                       VFuncDesc *rslt,
-                                       const VFactoryParams *cp,
-                                       const VFunctionParams *dp
-) {
+rc_t vec_sum_make(self_t **const rslt,
+                  VXfactInfo const *const info,
+                  VFunctionParams const *const dp)
+{
     self_t *self;
     rc_t rc = 0;
     
     self = malloc(sizeof(*self));
     if (self == NULL)
-        return RC(rcVDB, rcFunction, rcConstructing, rcMemory, rcExhausted);
-    
-    rslt->self = self;
-    rslt->whack = vxf_vec_sum_wrapper;
-    rslt->variant = vftArray;
-    rslt->u.af = array_func;
-    
-    self->vec_length = dp->argv[0].fd.td.dim;
-    
-    switch (info->fdesc.desc.intrinsic_bits) {
-    case 8:
-        switch (info->fdesc.desc.domain) {
-        case vtdInt:
-            self->f = FUNC(int8_t);
+        rc = RC(rcVDB, rcFunction, rcConstructing, rcMemory, rcExhausted);
+    else {
+        self->vec_length = dp->argv[0].fd.td.dim;
+        
+        switch (info->fdesc.desc.intrinsic_bits) {
+        case 8:
+            switch (info->fdesc.desc.domain) {
+            case vtdInt:
+                self->f = FUNC(int8_t);
+                break;
+            case vtdUint:
+                self->f = FUNC(uint8_t);
+                break;
+            default:
+                rc = RC(rcVDB, rcFunction, rcConstructing, rcParam, rcInvalid);
+            }
             break;
-        case vtdUint:
-            self->f = FUNC(uint8_t);
+        case 16:
+            switch (info->fdesc.desc.domain) {
+            case vtdInt:
+                self->f = FUNC(int16_t);
+                break;
+            case vtdUint:
+                self->f = FUNC(uint16_t);
+                break;
+            default:
+                rc = RC(rcVDB, rcFunction, rcConstructing, rcParam, rcInvalid);
+            }
+            break;
+        case 32:
+            switch (info->fdesc.desc.domain) {
+            case vtdInt:
+                self->f = FUNC(int32_t);
+                break;
+            case vtdUint:
+                self->f = FUNC(uint32_t);
+                break;
+            case vtdFloat:
+                self->f = FUNC(float);
+                break;
+            default:
+                rc = RC(rcVDB, rcFunction, rcConstructing, rcParam, rcInvalid);
+            }
+            break;
+        case 64:
+            switch (info->fdesc.desc.domain) {
+            case vtdInt:
+                self->f = FUNC(int64_t);
+                break;
+            case vtdUint:
+                self->f = FUNC(uint64_t);
+                break;
+            case vtdFloat:
+                self->f = FUNC(double);
+                break;
+            default:
+                rc = RC(rcVDB, rcFunction, rcConstructing, rcParam, rcInvalid);
+            }
             break;
         default:
             rc = RC(rcVDB, rcFunction, rcConstructing, rcParam, rcInvalid);
         }
-        break;
-    case 16:
-        switch (info->fdesc.desc.domain) {
-        case vtdInt:
-            self->f = FUNC(int16_t);
-            break;
-        case vtdUint:
-            self->f = FUNC(uint16_t);
-            break;
-        default:
-            rc = RC(rcVDB, rcFunction, rcConstructing, rcParam, rcInvalid);
+        if (rc) {
+            free(self);
+            self = NULL;
         }
-        break;
-    case 32:
-        switch (info->fdesc.desc.domain) {
-        case vtdInt:
-            self->f = FUNC(int32_t);
-            break;
-        case vtdUint:
-            self->f = FUNC(uint32_t);
-            break;
-        case vtdFloat:
-            self->f = FUNC(float);
-            break;
-        default:
-            rc = RC(rcVDB, rcFunction, rcConstructing, rcParam, rcInvalid);
-        }
-        break;
-    case 64:
-        switch (info->fdesc.desc.domain) {
-        case vtdInt:
-            self->f = FUNC(int64_t);
-            break;
-        case vtdUint:
-            self->f = FUNC(uint64_t);
-            break;
-        case vtdFloat:
-            self->f = FUNC(double);
-            break;
-        default:
-            rc = RC(rcVDB, rcFunction, rcConstructing, rcParam, rcInvalid);
-        }
-        break;
-    default:
-        rc = RC(rcVDB, rcFunction, rcConstructing, rcParam, rcInvalid);
     }
-    if (rc)
-        free(self);
-    return 0;
+    *rslt = self;
+    return rc;
+}
+
+VTRANSFACT_IMPL(vdb_vec_sum, 1, 0, 0)(const void *Self,
+                                      const VXfactInfo *info,
+                                      VFuncDesc *rslt,
+                                      const VFactoryParams *cp,
+                                      const VFunctionParams *dp)
+{
+    self_t *self;
+    rc_t rc = vec_sum_make(&self, info, dp);
+    
+    if (rc == 0) {
+        rslt->self = self;
+        rslt->whack = vxf_vec_sum_wrapper;
+        rslt->variant = vftRow;
+        rslt->u.rf = vec_sum_row_func;
+    }
+    return rc;
+}
+
+/*
+ function < type T, U32 dim >
+ T vec_sum #1.0 ( T [ dim ] in )
+ */
+VTRANSFACT_IMPL(vdb_fixed_vec_sum, 1, 0, 0)(const void *Self,
+                                            const VXfactInfo *info,
+                                            VFuncDesc *rslt,
+                                            const VFactoryParams *cp,
+                                            const VFunctionParams *dp)
+{
+    self_t *self;
+    rc_t rc = vec_sum_make(&self, info, dp);
+    
+    if (rc == 0) {
+        rslt->self = self;
+        rslt->whack = vxf_vec_sum_wrapper;
+        rslt->variant = vftArray;
+        rslt->u.af = vec_sum_array_func;
+    }
+    return rc;
 }

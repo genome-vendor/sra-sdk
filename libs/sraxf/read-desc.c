@@ -33,6 +33,7 @@
 #include <sysalloc.h>
 
 #include <assert.h>
+#include <string.h>
 
 static
 rc_t CC make_read_desc ( void *self, const VXformInfo *info, int64_t row_id,
@@ -97,6 +98,7 @@ rc_t CC make_read_desc ( void *self, const VXformInfo *info, int64_t row_id,
         {
             uint32_t label_start = lbl_start [ idx ];
             uint32_t label_len = lbl_len [ idx ];
+            size_t   label_used;
             if ( label_start + label_len > label_max )
             {
                 if ( label_start > label_max )
@@ -110,8 +112,11 @@ rc_t CC make_read_desc ( void *self, const VXformInfo *info, int64_t row_id,
             dst[idx].type = read_type[idx] & SRA_READ_TYPE_BIOLOGICAL;
             dst[idx].cs_key = cs_key[idx];
 
-            string_copy( dst[idx].label, sizeof(dst[idx].label), 
-                         & label [ label_start ], label_len );
+            label_used = string_copy( dst[idx].label, sizeof(dst[idx].label), 
+                                      & label [ label_start ], label_len );
+            /* Pad with NULs so that bitcmp sees fully initialized data */
+            memset( dst[idx].label + label_used, '\0',
+                    sizeof(dst[idx].label) - label_used );        
         }
 
         rslt->elem_bits = sizeof(*dst) * 8;

@@ -79,6 +79,8 @@ typedef struct PageMap {
      * is sized to reserve_leng elements
      * == storage.base
      */
+    bool   random_access;
+    enum { eBlobPageMapOptimizedNone, eBlobPageMapOptimizedSucceeded, eBlobPageMapOptimizedFailed}  optimized;
     elem_count_t *length;
 
     /* array of run lengths of row lengths
@@ -94,22 +96,14 @@ typedef struct PageMap {
      * == leng_run + reserve_leng
      */
     row_count_t *data_run;
-#if 0
-/****** OLD TO BE REMOVED **/
-    elem_count_t *exp_length;
-    elem_count_t *exp_offset;
-    row_count_t  *exp_repeat;
-    pm_size_t    exp_length_last; /* index of last length expanded */
-    pm_size_t    exp_offset_last; /* index of last offset expanded */
-    elem_count_t exp_offset_next;
-    /* memory allocation object for explength[], exp_offset[] */
-    KDataBuffer estorage;
-/****************************/
-#endif
-/****** NEW *****************/
+    /** expanded offsets into data - needed for random access ***/
+    /** only valid when random_access is true **/
+    elem_count_t *data_offset;
+
 /******* DYNAMIC EXPANSION CONTROL *****************/
     PageMapRegion		*exp_rgn_last;
     row_count_t			exp_row_last;   /* last row analyzed for region expansion */
+    row_count_t			exp_lr_used;    /* how much leng_run was used from the */
     pm_size_t			exp_lr_last;	/* index of last leng_run expanded */
     pm_size_t			exp_dr_last;	/* index of last data_run expanded */
     pm_size_t			exp_rgn_cnt;    /* current number of expanded regions */
@@ -130,6 +124,7 @@ typedef struct PageMap {
     pm_size_t reserve_data;  /* number of allocated elements in data_run[] */
     pm_size_t start_valid;   /* the expanded array contains valid data upto start_valid */
     row_count_t row_count;   /* total number of rows in page map */
+    row_count_t pre_exp_row_count; /* number of rows pre-expanded */
     KRefcount refcount;
 } PageMap;
 
@@ -173,9 +168,11 @@ rc_t PageMapNewSingle(PageMap **lhs, uint64_t row_count, uint64_t row_length);
 
 rc_t PageMapNewFixedRowLength(PageMap **lhs, uint64_t row_count, uint64_t row_len);
 
-uint32_t PageMapFastRowCount(const PageMap *self);
+rc_t PageMapToRandomAccess(PageMap **rslt, PageMap * src,uint32_t *data_offset);
 
 uint32_t PageMapFixedRowLength(const PageMap *self);
+
+rc_t	PageMapRowLengthRange(const PageMap *self, elem_count_t *min,elem_count_t *max);
 
 uint32_t PageMapHasSimpleStructure(const PageMap *self);
 
@@ -207,11 +204,12 @@ typedef struct PageMapIterator PageMapIterator;
 struct PageMapIterator {
     row_count_t		last_row;
     row_count_t		cur_row;
-    PageMapRegion*	rgns;	  /** all regions from the pagemap **/
+    PageMapRegion**	rgns;	  /** all regions from the pagemap **/
     pm_size_t		cur_rgn;  /** offset of the current region **/
     row_count_t 	cur_rgn_row; /** row relative to offset of the region **/
-    elem_count_t	*exp_base; /*** exp buffer ***/
+    elem_count_t	**exp_base; /*** exp buffer ***/
     row_count_t		repeat_count; /** remaining repeat count **/
+    elem_count_t	static_datalen;
 #if _HEAVY_PAGEMAP_DEBUGGING
     PageMap *parent;
 #endif
@@ -226,10 +224,12 @@ static __inline__ bool PageMapIteratorAdvance(PageMapIterator *self, row_count_t
 	self->cur_rgn_row += rows;
 	if(self->repeat_count > rows) self->repeat_count-= rows;
 	else self->repeat_count = 0;
-	while(self->rgns[self->cur_rgn].numrows <= self->cur_rgn_row){
-		self->cur_rgn_row -= self->rgns[self->cur_rgn].numrows;
-		self->cur_rgn++;
-	}
+	if(self->rgns){/** non-static, non simple random access**/
+		while((*self->rgns)[self->cur_rgn].numrows <= self->cur_rgn_row){
+			self->cur_rgn_row -= (*self->rgns)[self->cur_rgn].numrows;
+			self->cur_rgn++;
+		}
+        }
         return true;
     }
     return false;
@@ -240,18 +240,21 @@ static __inline__ bool PageMapIteratorAdvance(PageMapIterator *self, row_count_t
 static __inline__ elem_count_t PageMapIteratorDataLength(const PageMapIterator *self)
 {
     elem_count_t datalen=0;
-    switch (self->rgns[self->cur_rgn].type){
+    if(self->rgns == NULL) {/* static or simple random-access*/
+	return  self->static_datalen;
+    }
+    switch ((*self->rgns)[self->cur_rgn].type){
 	case PM_REGION_EXPAND_FULL:
-		if(self->rgns[self->cur_rgn].expanded){
-			datalen = self->exp_base[self->rgns[self->cur_rgn].data_offset + 2*self->cur_rgn_row];
+		if((*self->rgns)[self->cur_rgn].expanded){
+			datalen = (*self->exp_base)[(*self->rgns)[self->cur_rgn].data_offset + 2*self->cur_rgn_row];
 		} else {
-			datalen = self->rgns[self->cur_rgn].length;
+			datalen = (*self->rgns)[self->cur_rgn].length;
 		}
                 break;
 	case PM_REGION_EXPAND_SAMELEN:
 	case PM_REGION_EXPAND_EQUIDISTANT:
 	case PM_REGION_EXPAND_SAMEDATA:
-		datalen = self->rgns[self->cur_rgn].length;
+		datalen = (*self->rgns)[self->cur_rgn].length;
 		break;
 	default:
 		assert(0);
@@ -271,26 +274,31 @@ static __inline__ elem_count_t PageMapIteratorDataLength(const PageMapIterator *
 static __inline__ elem_count_t PageMapIteratorDataOffset(const PageMapIterator *self)
 {
     elem_count_t dataoff=0;
-    switch (self->rgns[self->cur_rgn].type){
+    if(self->rgns == NULL){ /** static or simple random **/
+	if(self->exp_base != NULL)  /** simple random access */
+		dataoff= (*self->exp_base)[self->cur_row];
+	return dataoff;
+    }
+    switch ((*self->rgns)[self->cur_rgn].type){
         case PM_REGION_EXPAND_FULL:
-                if(self->rgns[self->cur_rgn].expanded){
-                        dataoff = self->exp_base[self->rgns[self->cur_rgn].data_offset + 2*self->cur_rgn_row + 1];
+                if((*self->rgns)[self->cur_rgn].expanded){
+                        dataoff = (*self->exp_base)[(*self->rgns)[self->cur_rgn].data_offset + 2*self->cur_rgn_row + 1];
                 } else {
-                        dataoff = self->rgns[self->cur_rgn].data_offset;
+                        dataoff = (*self->rgns)[self->cur_rgn].data_offset;
                 }
                 break;
         case PM_REGION_EXPAND_SAMELEN:
-		if(self->rgns[self->cur_rgn].expanded){
-                        dataoff = self->exp_base[self->rgns[self->cur_rgn].data_offset + self->cur_rgn_row];
+		if((*self->rgns)[self->cur_rgn].expanded){
+                        dataoff = (*self->exp_base)[(*self->rgns)[self->cur_rgn].data_offset + self->cur_rgn_row];
                 } else {
-                        dataoff = self->rgns[self->cur_rgn].data_offset;
+                        dataoff = (*self->rgns)[self->cur_rgn].data_offset;
                 }
                 break;
         case PM_REGION_EXPAND_EQUIDISTANT:
-		dataoff = self->rgns[self->cur_rgn].data_offset + self->rgns[self->cur_rgn].length * self->cur_rgn_row;
+		dataoff = (*self->rgns)[self->cur_rgn].data_offset + (*self->rgns)[self->cur_rgn].length * self->cur_rgn_row;
 		break;
         case PM_REGION_EXPAND_SAMEDATA:
-                dataoff = self->rgns[self->cur_rgn].data_offset;
+                dataoff = (*self->rgns)[self->cur_rgn].data_offset;
                 break;
         default:
                 assert(0);
@@ -310,42 +318,50 @@ static __inline__ row_count_t PageMapIteratorRepeatCount(const PageMapIterator *
 {
     if(cself->repeat_count==0){
 	PageMapIterator *self = (PageMapIterator*) cself;
-	switch (self->rgns[self->cur_rgn].type){
-	 case PM_REGION_EXPAND_FULL:
-		if(self->rgns[self->cur_rgn].expanded){
-			int i;
-			elem_count_t* base = self->exp_base + self->rgns[self->cur_rgn].data_offset;
-			self->repeat_count = 1;
-			for(i=self->cur_rgn_row+1;i<self->rgns[self->cur_rgn].numrows;i++){
-				if(base[2*self->cur_rgn_row]== base[2*i] && base[2*self->cur_rgn_row+1]== base[2*i+1]) self->repeat_count++;
-				else break;
+	if(self->rgns==NULL){ /** must be simple random access **/
+		uint64_t i;
+		assert(*self->exp_base);
+		for(i=self->cur_row+1,self->repeat_count=1;
+                    i< self->last_row && (*self->exp_base)[i]==(*self->exp_base)[self->cur_row];
+                    i++,self->repeat_count++){}
+	} else {
+		switch ((*self->rgns)[self->cur_rgn].type){
+		 case PM_REGION_EXPAND_FULL:
+			if((*self->rgns)[self->cur_rgn].expanded){
+				int i;
+				elem_count_t* base = (*self->exp_base) + (*self->rgns)[self->cur_rgn].data_offset;
+				self->repeat_count = 1;
+				for(i=self->cur_rgn_row+1;i<(*self->rgns)[self->cur_rgn].numrows;i++){
+					if(base[2*self->cur_rgn_row]== base[2*i] && base[2*self->cur_rgn_row+1]== base[2*i+1]) self->repeat_count++;
+					else break;
+				}
+			} else {
+				self->repeat_count =  (*self->rgns)[self->cur_rgn].numrows - self->cur_rgn_row;
 			}
-		} else {
-			self->repeat_count =  self->rgns[self->cur_rgn].numrows - self->cur_rgn_row;
-		}
-		break;
-	 case PM_REGION_EXPAND_SAMELEN:
-		if(self->rgns[self->cur_rgn].expanded){
-			int i;
-			elem_count_t* base = self->exp_base + self->rgns[self->cur_rgn].data_offset;
-			self->repeat_count = 1;
-			for(i=self->cur_rgn_row+1;i<self->rgns[self->cur_rgn].numrows;i++){
-				if(base[self->cur_rgn_row] == base[i]) self->repeat_count++;
-				else break;
+			break;
+		 case PM_REGION_EXPAND_SAMELEN:
+			if((*self->rgns)[self->cur_rgn].expanded){
+				int i;
+				elem_count_t* base = (*self->exp_base) + (*self->rgns)[self->cur_rgn].data_offset;
+				self->repeat_count = 1;
+				for(i=self->cur_rgn_row+1;i<(*self->rgns)[self->cur_rgn].numrows;i++){
+					if(base[self->cur_rgn_row] == base[i]) self->repeat_count++;
+					else break;
+				}
+			} else {
+				self->repeat_count = (*self->rgns)[self->cur_rgn].numrows - self->cur_rgn_row;
 			}
-		} else {
-			self->repeat_count = self->rgns[self->cur_rgn].numrows - self->cur_rgn_row;
+			break;
+		 case PM_REGION_EXPAND_EQUIDISTANT:
+			self->repeat_count = 1;
+			break;
+		 case PM_REGION_EXPAND_SAMEDATA:
+			self->repeat_count =  (*self->rgns)[self->cur_rgn].numrows - self->cur_rgn_row;
+			break;
+		 default:
+			assert(0);
+			break;
 		}
-		break;
-	 case PM_REGION_EXPAND_EQUIDISTANT:
-		self->repeat_count = 1;
-		break;
-	 case PM_REGION_EXPAND_SAMEDATA:
-		self->repeat_count =  self->rgns[self->cur_rgn].numrows - self->cur_rgn_row;
-		break;
-	 default:
-		assert(0);
-		break;
 	}
     }
 #if _HEAVY_PAGEMAP_DEBUGGING
@@ -360,5 +376,8 @@ static __inline__ row_count_t PageMapIteratorRepeatCount(const PageMapIterator *
 
 elem_count_t PageMapLastLength(const PageMap *cself);
 bool PageMapHasRows(const PageMap *self);
+rc_t PageMapExpand(const PageMap *cself, row_count_t upto);
+rc_t PageMapExpandFull(const PageMap *cself);
+rc_t PageMapPreExpandFull(const PageMap *cself, row_count_t upto);
 
 #endif /* _h_page_map_ */

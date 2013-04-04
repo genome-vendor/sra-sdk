@@ -29,7 +29,6 @@
 
 #include <kfg/extern.h>
 #include <klib/rc.h>
-#include <klib/text.h>
 #include <klib/namelist.h>
 
 #ifdef __cplusplus
@@ -64,15 +63,15 @@ typedef union
 	VNamelist*	    namelist;
 } KFGSymbol;
 
-extern rc_t CC KFGScan_yylex_init(KFGScanBlock* sb, const char *str);
-extern void CC KFGScan_yylex_destroy(KFGScanBlock* sb);
+rc_t CC KFGScan_yylex_init(KFGScanBlock* sb, const char *str);
+void CC KFGScan_yylex_destroy(KFGScanBlock* sb);
 
-extern void CC KFGScan_set_debug(bool on, KFGScanBlock* scannerContext);
+void CC KFGScan_set_debug(bool on, KFGScanBlock* scannerContext);
 
-extern int CC KFGScan_yylex(KFGSymbol* pb, KFGScanBlock* scannerContext);
+int CC KFGScan_yylex(KFGSymbol* pb, KFGScanBlock* scannerContext);
 
-extern int CC KFG_parse(KFGParseBlock* pb, KFGScanBlock* scannerContext);
-extern void CC KFG_error(KFGParseBlock* pb, KFGScanBlock* sb, const char* msg);
+int CC KFG_parse(KFGParseBlock* pb, KFGScanBlock* scannerContext);
+void CC KFG_error(KFGParseBlock* pb, KFGScanBlock* sb, const char* msg);
 
 #ifdef __cplusplus
 }

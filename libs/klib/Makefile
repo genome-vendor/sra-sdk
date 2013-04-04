@@ -42,25 +42,23 @@ include $(TOP)/build/Makefile.env
 #-------------------------------------------------------------------------------
 # outer targets
 #
-vers-includes: $(addsuffix .vers.h,$(EXT_LIBS))
-
-all: makedirs vers-includes
+all: makedirs
 	@ $(MAKE) -C $(SRCDIR)/judy all
 	@ $(MAKE_CMD) $(TARGDIR)/all
 
-std: makedirs vers-includes
+std: makedirs
 	@ $(MAKE) -C $(SRCDIR)/judy std
 	@ $(MAKE_CMD) $(TARGDIR)/std
 
-$(INT_LIBS): makedirs vers-includes
+$(INT_LIBS): makedirs
 	@ $(MAKE) -C $(SRCDIR)/judy std
 	@ $(MAKE_CMD) $(ILIBDIR)/$@
 
-$(EXT_LIBS): makedirs vers-includes
+$(EXT_LIBS): makedirs
 	@ $(MAKE) -C $(SRCDIR)/judy std
 	@ $(MAKE_CMD) $(LIBDIR)/$@
 
-.PHONY: vers-includes all std $(ALL_LIBS)
+.PHONY: all std $(ALL_LIBS)
 
 #-------------------------------------------------------------------------------
 # all, std
@@ -108,6 +106,7 @@ KLIB_SRC = \
 	SHA-32bit \
 	SHA-64bit \
 	qsort \
+	ksort \
 	bsearch \
 	pack \
 	unpack \

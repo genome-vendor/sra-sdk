@@ -69,6 +69,7 @@ rc_t CC redimension_drvr(
     if (rc == 0) {
         y->byte_order = src->byte_order;
         PageMapAddRef(y->pm = src->pm);
+	y->pm->optimized = eBlobPageMapOptimizedFailed; /** pagemap is no longer valid; prevent optimization ***/
         BlobHeadersAddRef(y->headers = src->headers);
         
         *rslt = y;

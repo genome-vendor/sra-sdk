@@ -41,6 +41,7 @@
 extern "C" {
 #endif
 
+
 /*--------------------------------------------------------------------------
  * KCondition
  *  a POSIX-style condition object
@@ -51,13 +52,8 @@ extern "C" {
  *  the former involves the potential to wait for a signal and the latter
  *  to generate a signal using the external lock for blocking.
  */
-struct KCondition
-{
-#if 0
-    pthread_cond_t cond;
-#endif
-    atomic32_t refcount;
-};
+struct KCondition;
+
 
 /* Init
  *  initialize an inline KCondition

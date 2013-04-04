@@ -42,6 +42,24 @@ unset OBJX
 unset SRCFILE
 unset SOURCES
 unset DEPENDENCIES
+# paths for translating local to remote
+unset RHOME
+unset LHOME
+unset RHOST
+unset RPORT
+unset PROXY_TOOL
+
+function convert_path
+{
+    if [ "$OS" != "rwin" ] ; then
+        convert_path_result="$(cygpath -w $1)"
+    elif [ "$1" != "." ] ; then
+        convert_path_result="$RHOME${1#$LHOME}"
+        convert_path_result="${convert_path_result//\//\\}"
+    else
+        convert_path_result="."
+    fi
+}
 
 while [ $# -ne 0 ]
 do
@@ -64,6 +82,31 @@ do
         shift
         ;;
 
+    --rhome)
+        RHOME="$2"
+        shift
+        ;;
+
+    --lhome)
+        LHOME="$2"
+        shift
+        ;;
+
+    --rhost)
+        RHOST="$2"
+        shift
+        ;;
+
+    --rport)
+        RPORT="$2"
+        shift
+        ;;
+
+    --proxy_tool)
+        PROXY_TOOL="$2"
+        shift
+        ;;
+
     -D*)
         ARG="${1#-D}"
         if [ "$ARG" = "" ]
@@ -81,8 +124,8 @@ do
             ARG="$2"
             shift
         fi
-        ARG="$(cygpath -w $ARG)"
-        ARGS="$ARGS /I$ARG"
+        convert_path $ARG
+        ARGS="$ARGS /I$convert_path_result"
         ;;
 
     -o*)
@@ -115,8 +158,9 @@ do
     *)
         SRCFILE="$(basename $1)"
         SOURCES="$SOURCES $1"
-        ARG="$(cygpath -w $1)"
-        ARGS="$ARGS $ARG"
+        convert_path $1
+        ARGS="$ARGS $convert_path_result"
+        SRCDIR="$(dirname $1)" # assume the last source file is in the same dir as all the .vers files we need as dependencies
         ;;
         
     esac
@@ -127,15 +171,16 @@ done
 unset STATUS
 
 CMD="$CC $ARGS"
-echo "$CMD"
 
 # run command with redirection
-if $CMD > $TARG.out 2> $TARG.err
+if [ "$OS" = "win" ]
 then
-    # success
-    STATUS=0
+    $CMD > $TARG.out 2> $TARG.err
+    STATUS=$?
 else
-    # failure
+    # determine current directory
+    CURDIR="$(pwd)"
+    ${TOP}/build/run_remotely.sh $PROXY_TOOL $RHOST $RPORT $RHOME $LHOME $CURDIR $CMD > $TARG.out 2> $TARG.err
     STATUS=$?
 fi
 
@@ -144,12 +189,51 @@ if [ "$DEPENDENCIES" = "1" ]
 then
     sed -e '/including file/!d' -e 's/.*including file: *\([^\r\n][^\r\n]*\)/\1/g' -e '/ /d' $TARG.out > $TARG.inc
     echo -n "$TARG.$OBJX: $SOURCES" | sed -e 's/\r//g' > $TARG.d
-    for inc in $(cat $TARG.inc)
-    do
-        echo -n " $(cygpath -u $inc)"  | sed -e 's/\r//g' >> $TARG.d
-    done
+    if [ "$OS" = "win" ]
+    then 
+        for inc in $(cat $TARG.inc)
+        do
+            # vers.h files are now generated in the objdir
+            if [ "$inc" != "${inc%.vers.h}" ]
+            then
+                inc="${inc%.h}"
+            fi
+            echo -n " $(cygpath -u $inc)"  | sed -e 's/\r//g' >> $TARG.d
+        done
+    else # rwin
+        # sometimes home path comes back in lowercase
+        # make sure to compare lowercased prefixes
+        rhome_low=$(echo ${RHOME} | tr '[A-Z]' '[a-z]' | tr '\\' '/')
+        rhome_len=${#RHOME}
+
+        for inc in $(cat $TARG.inc)
+        do
+            inc_low=$(echo ${inc} | tr '[A-Z]' '[a-z]' | tr '\\' '/')
+            # vers.h files are now generated in the objdir
+            if [ "$inc" != "${inc%.vers.h}" ]
+            then
+                # convert the "...vers.h" in the object directory into "...vers" in the source directory
+                inc="${inc%.h}"
+                if [ "${inc_low#$rhome_low}" != "$inc_low" ]
+                then
+                    inc="${inc:$rhome_len}"
+                    inc="${inc//\\//}"
+                    inc="$(basename $inc)"
+                    inc="$SRCDIR/$inc"
+                fi
+            else
+                if [ "${inc_low#$rhome_low}" != "$inc_low" ]
+                then
+                    inc="$LHOME${inc:$rhome_len}"
+                fi
+            fi
+            echo -n " $inc" | tr '\\' '/' >> $TARG.d
+        done
+    fi
+    echo >> $TARG.d
 fi
 
+echo "$CMD"
 # repeat output files but without CR
 sed -e 's/\r//g' $TARG.err > /dev/stderr
 sed -e 's/\r//g' -e "/^$SRCFILE$/d" -e '/including file/d' $TARG.out

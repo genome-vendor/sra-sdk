@@ -35,12 +35,16 @@
 #include <klib/refcount.h>
 #include <klib/vector.h>
 #include <klib/log.h>
+#include <klib/out.h>
 #include <klib/namelist.h>
 
 #include <kfs/file.h>
 #include <kfs/bzip.h>
 #include <kfs/gzip.h>
 #include <kfs/directory.h>
+
+#include <vfs/manager.h>
+#include <vfs/path.h>
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -115,7 +119,7 @@ struct XTocEntry
     XTocEntry_t type;           /* XTocEntry_e */
     union utype
     {
-        struct idtype
+        struct /* idtype - name conflict on Solaris */
         {
             XTocEntry * target;
         } id;
@@ -1120,7 +1124,7 @@ static
         rc = RC (rcFS, rcFile, rcConstructing, rcMemory, rcExhausted);
     else
     {
-        rc = KFileInit (&self->dad, (const KFile_vt*)&vtKXTocFile, true, false);
+        rc = KFileInit (&self->dad, (const KFile_vt*)&vtKXTocFile, "KXTocFile", "no-name", true, false);
         if (rc == 0)
         {
             rc = KFileAddRef (base);
@@ -2115,12 +2119,15 @@ static rc_t CC KXTocDirResolvePath (const KXTocDir *self,
     rc_t rc;
     const char * path;
 
+    KOutMsg ("+++++\n%s: absolute %d\n", __func__, absolute);
+
     assert (self);
     assert (resolved);
     assert (path_);
 
     *resolved = '\0';
     rc = XTocMakePath (&path, false, path_, args);
+    KOutMsg ("%s: rc %R new '%s' old '%s'\n", __func__, rc, path, path_);
     if (rc != 0)
     {
         PLOGERR (klogErr,
@@ -2132,11 +2139,10 @@ static rc_t CC KXTocDirResolvePath (const KXTocDir *self,
 
         if (absolute)
         {
-
-
             XTocEntry * entry;
 
             rc = XTocEntryResolvePath (self->entry, path, false, &entry);
+
             if (rc)
                 PLOGERR (klogErr,
                          (klogErr, rc, "Error resolving path based on $(P)", "P=%s", path_));
@@ -2190,11 +2196,11 @@ static rc_t CC KXTocDirResolveAlias (const KXTocDir * self,
 				 const char *path_,
 				 va_list args)
 {
-#if 1
+#if 0
     return -1;
 #else
     rc_t rc;
-    char * path;
+    const char * path;
 
     assert (self);
     assert (resolved);
@@ -2211,13 +2217,13 @@ static rc_t CC KXTocDirResolveAlias (const KXTocDir * self,
     {
         XTocEntry * entry;
 
-        rc = XocEntryResolvePath (self->entry, path, true , &entry);
+        rc = XTocEntryResolvePath (self->entry, path, true , &entry);
         if (rc)
             PLOGERR (klogErr,
-                     (klogErr, rc, "Error resolvong path based on $(P)", "P=%s", path_));
+                     (klogErr, rc, "Error resolving path based on $(P)", "P=%s", path_));
         else
         {
-            free (path);
+            free ((void*)path);
             path = NULL;
             rc = XTocEntryMakeFullPath (entry, &path);
         }
@@ -2230,7 +2236,7 @@ static rc_t CC KXTocDirResolveAlias (const KXTocDir * self,
         string_copy (resolved, rsize, path, string_size (path));
     
     if (path)
-        free (path);
+        free ((void*)path);
 
     return rc;
 #endif
@@ -2412,7 +2418,7 @@ static	rc_t CC KXTocDirVDate		(const KXTocDir *self,
         rc = XTocEntryResolvePath (self->entry, path, false, &entry);
         if (rc)
             PLOGERR (klogErr,
-                     (klogErr, rc, "Error resolveing path from $(P)", "P=%s", path_));
+                     (klogErr, rc, "Error resolving path from $(P)", "P=%s", path_));
         else
             *date = entry->mtime;
         free ((void*)path);
@@ -2749,7 +2755,7 @@ rc_t CC KXTocDirFileLocator		(const KXTocDir *self,
         rc = XTocEntryResolvePath (self->entry, path, false, &entry);
         if (rc)
             PLOGERR (klogErr,
-                     (klogErr, rc, "Error resolveing path from $(P)", "P=%s", path_));
+                     (klogErr, rc, "Error resolving path from $(P)", "P=%s", path_));
         else if (entry->type != xtoce_file)
             rc = RC (rcFS, rcDirectory, rcAccessing, rcPath, rcIncorrect);
         else
@@ -2795,7 +2801,7 @@ rc_t CC KXTocDirFileSize		(const KXTocDir *self,
         rc = XTocEntryResolvePath (self->entry, path, false, &entry);
         if (rc)
             PLOGERR (klogErr,
-                     (klogErr, rc, "Error resolveing path from $(P)", "P=%s", path_));
+                     (klogErr, rc, "Error resolving path from $(P)", "P=%s", path_));
         else if (entry->type != xtoce_file)
             rc = RC (rcFS, rcDirectory, rcAccessing, rcPath, rcIncorrect);
         else
@@ -2841,7 +2847,7 @@ rc_t CC KXTocDirFilePhysicalSize        (const KXTocDir *self,
         rc = XTocEntryResolvePath (self->entry, path, false, &entry);
         if (rc)
             PLOGERR (klogErr,
-                     (klogErr, rc, "Error resolveing path from $(P)", "P=%s", path_));
+                     (klogErr, rc, "Error resolving path from $(P)", "P=%s", path_));
         else if (entry->type != xtoce_file)
             rc = RC (rcFS, rcDirectory, rcAccessing, rcPath, rcIncorrect);
         else
@@ -3173,31 +3179,115 @@ rc_t KXTocDirMake (const KXTocDir ** pself, const KDirectory * base,
 }
 
 
-LIB_EXPORT rc_t CC KDirectoryOpenXTocDirRead (const KDirectory * self,
-                                              const KDirectory ** pnew_dir,
-                                              bool chroot,
-                                              const KFile * xml,
-                                              const char * path, ... )
+static 
+rc_t KDirectoryOpenXTocDirReadInt (const KDirectory * dir,
+                                   const KDirectory ** pnew_dir,
+                                   const KFile * xml,
+                                   const String * spath)
+{
+    XToc * xtoc;
+    rc_t rc;
+
+    rc = XTocMake (&xtoc, spath);
+    if (rc)
+        LOGERR (klogErr, rc, "Error creating toc for xtc directory");
+    else
+    {
+        String sroot;
+        XTocCache * cache;
+
+        StringInitCString (&sroot, ".");
+        rc = XTocMakeXTocCache (xtoc, &cache, &sroot, xtoc->root);
+        if (rc)
+            LOGERR (klogErr, rc, 
+                    "Failed to make cache for root for "
+                    "xtoc directory");
+        else
+        {
+            const KXTocDir * xdir;
+
+            /* now that we have a cache node we should release
+             * the original reference to the xtoc */
+/* ??? */
+            XTocRelease (xtoc);
+
+            xtoc->cache = xtoc->root->cache = cache;
+
+            rc = KXTocDirMake (&xdir, dir, xtoc, cache, xtoc->root,
+                               &sroot);
+            if (rc)
+                LOGERR (klogErr, rc, "Error making xtoc directory");
+            else
+            {
+                DBG_KXTocDir((xdir));
+                cache->dir = xdir;
+
+                rc = XTocParseXml (xtoc->root, xml);
+                if (rc)
+                    LOGERR (klogErr, rc, "Error parsing copycat xml file");
+                else
+                {
+                    *pnew_dir = &xdir->dad;
+                    return 0;
+                }
+                KDirectoryRelease (&xdir->dad);
+            }                
+            XTocCacheRelease (cache);
+        }
+        XTocRelease (xtoc);
+    }
+    return rc;
+}
+
+rc_t CC KDirectoryOpenXTocDirReadDir (const KDirectory * self,
+                                                 const KDirectory ** pnew_dir,
+                                                 const KFile * xml,
+                                                 const String * spath)
 {
     rc_t rc;
-    va_list args;
+    
+    /* loosely validate parameters */
+    if (pnew_dir == NULL)
+    {
+        rc = RC (rcFS, rcDirectory, rcOpening, rcParam, rcNull);
+        LOGERR (klogErr, rc,
+                "new directory parameter is NULL for opening XToc Directory");
+        return rc;
+    }
+    *pnew_dir = NULL;
 
-    va_start (args, path);
-    rc = KDirectoryVOpenXTocDirRead (self, pnew_dir, chroot, xml, path, args);
-    va_end (args);
-
+    if (self == NULL)
+    {
+        rc = RC (rcFS, rcDirectory, rcOpening, rcSelf, rcNull);
+        LOGERR (klogErr, rc, "self is NULL for opening XToc Directory");
+        return rc;
+    }
+    else if (xml == NULL)
+    {
+        rc = RC (rcFS, rcDirectory, rcOpening, rcParam, rcNull);
+        LOGERR (klogErr, rc, "xml parameter is NULL for opening XToc Directory");
+        return rc;
+    }
+    else if (spath == NULL)
+    {
+        rc = RC (rcFS, rcDirectory, rcOpening, rcParam, rcNull);
+        LOGERR (klogErr, rc, "base path parameter is NULL for opening XToc Directory");
+        return rc;
+    }
+    else
+    {
+        rc = KDirectoryOpenXTocDirReadInt (self, pnew_dir, xml, spath);
+    }
     return rc;
 }
 
 
-LIB_EXPORT rc_t CC KDirectoryVOpenXTocDirRead (const KDirectory * self,
-                                              const KDirectory ** pnew_dir,
-                                              bool chroot,
-                                              const KFile * xml,
-                                              const char * _path,
-                                              va_list args )
-
-
+rc_t CC KDirectoryVOpenXTocDirRead (const KDirectory * self,
+                                               const KDirectory ** pnew_dir,
+                                               bool chroot,
+                                               const KFile * xml,
+                                               const char * _path,
+                                               va_list args )
 {
     rc_t rc;
     
@@ -3234,7 +3324,6 @@ LIB_EXPORT rc_t CC KDirectoryVOpenXTocDirRead (const KDirectory * self,
     {
         String spath;
         const KDirectory * bdir;
-        XToc * xtoc;
         KPathType type;
         char path [8192];
 
@@ -3243,7 +3332,7 @@ LIB_EXPORT rc_t CC KDirectoryVOpenXTocDirRead (const KDirectory * self,
             return rc;
 
         type = KDirectoryPathType (self, path);
-        switch (type)
+        switch (type & ~kptAlias)
         {
         case kptNotFound:
             rc = RC (rcFS, rcDirectory, rcOpening, rcParam, rcNotFound);
@@ -3262,7 +3351,7 @@ LIB_EXPORT rc_t CC KDirectoryVOpenXTocDirRead (const KDirectory * self,
         case kptZombieFile:
         case kptDataset:
         case kptDatatype:
-
+            KOutMsg ("%s: type '%u' path '%s'\n",type,path);
             rc = RC (rcFS, rcDirectory, rcOpening, rcParam, rcWrongType);
             LOGERR (klogErr, rc, "base path parameter is an unusable type when opening XToc Directory");
             return rc;
@@ -3285,64 +3374,86 @@ LIB_EXPORT rc_t CC KDirectoryVOpenXTocDirRead (const KDirectory * self,
         else
         {
             static const char absroot[] = "/";
+
             if (chroot)
                 StringInitCString (&spath, absroot);
             else
                 StringInitCString (&spath, path);
 
-            rc = XTocMake (&xtoc, &spath);
-            if (rc)
-                LOGERR (klogErr, rc, "Error creating toc for xtc directory");
-            else
-            {
-                String sroot;
-                XTocCache * cache;
+            rc = KDirectoryOpenXTocDirReadInt (bdir, pnew_dir, xml, &spath);
+            if (rc == 0)
+                return 0;
 
-                StringInitCString (&sroot, ".");
-                rc = XTocMakeXTocCache (xtoc, &cache, &sroot, xtoc->root);
-                if (rc)
-                    LOGERR (klogErr, rc, 
-                            "Failed to make cache for root for "
-                            "xtoc directory");
-                else
-                {
-                    const KXTocDir * xdir;
-
-                    /* now that we have a cache node we should release
-                     * the original reference to the xtoc */
-/* ??? */
-                    XTocRelease (xtoc);
-
-                    xtoc->cache = xtoc->root->cache = cache;
-
-                    rc = KXTocDirMake (&xdir, bdir, xtoc, cache, xtoc->root,
-                                       &sroot);
-                    if (rc)
-                        LOGERR (klogErr, rc, "Error making xtoc directory");
-                    else
-                    {
-                        DBG_KXTocDir((xdir));
-                        cache->dir = xdir;
-
-                        rc = XTocParseXml (xtoc->root, xml);
-                        if (rc)
-                            LOGERR (klogErr, rc, "Error parsing copycat xml file");
-                        else
-                        {
-                            *pnew_dir = &xdir->dad;
-                            return 0;
-                        }
-                        KDirectoryRelease (&xdir->dad);
-                    }                
-                    XTocCacheRelease (cache);
-                }
-                XTocRelease (xtoc);
-            }
             KDirectoryRelease (bdir);
         }
     }
     return rc;
 }
+
+
+rc_t CC KDirectoryOpenXTocDirRead (const KDirectory * self,
+                                              const KDirectory ** pnew_dir,
+                                              bool chroot,
+                                              const KFile * xml,
+                                              const char * path, ... )
+{
+    rc_t rc;
+    va_list args;
+
+    va_start (args, path);
+    rc = KDirectoryVOpenXTocDirRead (self, pnew_dir, chroot, xml, path, args);
+    va_end (args);
+
+    return rc;
+}
+
+
+struct VFSManager;
+
+rc_t CC VFSManagerOpenXTocDirRead (const struct VFSManager * self,
+                                              const struct KDirectory ** pnew_dir,
+                                              const struct KFile * xml,
+                                              const struct VPath * path)
+{
+    rc_t rc = 0;
+
+    /* needs to be replaced with proper checking and rc returns */
+    assert (pnew_dir);
+
+    *pnew_dir = NULL;
+
+    assert (self);
+    assert (xml);
+    assert (path);
+
+    if (rc == 0)
+    {
+        const KDirectory * dir;
+
+        rc = VFSManagerOpenDirectoryRead (self, &dir, path);
+        if (rc == 0)
+        {
+            char pbuff [8192];
+            size_t z;
+
+            rc = VPathReadPath (path, pbuff, sizeof pbuff, &z);
+            if (rc == 0)
+            {
+                String string;
+
+                StringInit (&string, pbuff, z, string_len (pbuff, z));
+
+                rc = KDirectoryOpenXTocDirReadDir (dir, pnew_dir, xml, &string);
+                if (rc == 0)
+                    return 0;
+            }
+
+            KDirectoryRelease (dir);
+        }
+    }
+    return rc;
+}
+
 
 
 /* end of file */

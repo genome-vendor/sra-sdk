@@ -28,6 +28,7 @@
 #include <vdb/database.h>
 #include <vdb/table.h>
 #include <vdb/cursor.h>
+#include <vdb/vdb-priv.h>
 
 
 #include <klib/rc.h>
@@ -49,6 +50,10 @@ struct SubSelect
 {
     const VCursor *curs;
     uint32_t idx;
+    const VCursor *native_curs; /** Native cursors are either master cursor or sub_cursors - no need to AddRef **/
+    bool  first_time;
+    char  *col_name;
+    uint32_t col_name_len;
 };
 
 static
@@ -75,6 +80,18 @@ rc_t CC simple_sub_select ( void *data, const VXformInfo *info,
     if(argc > 1 ){
     	const int32_t *remote_idx = argv[1].u.data.base;
 	idx=remote_idx[argv[1].u.data.first_elem];
+    }
+    if(self->native_curs && self->first_time){ /*** can we use native cursor for the data? ***/
+	SubSelect *mself = (SubSelect *)self;
+	uint32_t idx;
+	rc = VCursorAddColumn ( mself->native_curs, & idx, "%.*s", mself->col_name_len, mself->col_name );
+	if(rc == 0 || GetRCState(rc) == rcExists){
+		VCursorRelease( mself->curs);
+		mself->curs = mself->native_curs;
+		mself->idx  = idx;
+	}
+	mself->first_time = false;
+	rc = 0; /** reset rc? **/
     }
 	
     /* sub-select */
@@ -122,39 +139,53 @@ rc_t CC simple_sub_select ( void *data, const VXformInfo *info,
 /* open_sub_cursor
  */
 static
-rc_t open_sub_cursor ( SubSelect **fself, const VXfactInfo *info, const VFactoryParams *cp )
+rc_t open_sub_cursor ( SubSelect **fself, const VXfactInfo *info, const VFactoryParams *cp, const VCursor *native_curs )
 {
     rc_t rc=0;
-    const VDatabase *db;
     const VTable *tbl, *ftbl = NULL;
+    char name[256]="";
+    const VCursor *curs;
 
     if ( cp -> argv [ 0 ] . count > 0 )
     {
-    	rc = VTableOpenParentRead ( info -> tbl, & db );
-        if ( rc ==0 )
-        {
-            rc = VDatabaseOpenTableRead ( db, & ftbl,"%.*s",
-		        ( int ) cp -> argv [ 0 ] . count, cp -> argv [ 0 ] . data . ascii );
-            VDatabaseRelease ( db );
-            tbl = ftbl;
-        }
+	sprintf(name,"%.*s",(int)cp->argv[0].count,cp->argv[0].data.ascii);
+	rc = VCursorLinkedCursorGet(native_curs,name,&curs);
+	if(rc == 0){
+		rc = VCursorOpenParentRead(curs,&ftbl);
+		if(rc != 0)
+			return rc;
+		VCursorAddRef(curs);
+		tbl = ftbl;
+	} else {
+		const VDatabase *db;
+		rc = VTableOpenParentRead ( info -> tbl, & db );
+		if(rc != 0) return rc;
+		rc = VDatabaseOpenTableRead ( db, & ftbl,name);
+		if(rc != 0) return rc;
+		VDatabaseRelease ( db );
+		tbl = ftbl;
+		rc = VTableCreateCachedCursorRead ( tbl, (const VCursor**)& curs, 256*1024*1024 ); /*** some random io is expected ***/
+		if(rc != 0) return rc;
+		rc = VCursorPermitPostOpenAdd( curs );
+		if(rc != 0) return rc;
+		rc = VCursorOpen( curs );
+		if(rc != 0) return rc;
+		rc = VCursorLinkedCursorSet(native_curs,name,curs);
+		if(rc != 0) return rc;
+	}
+	native_curs = NULL;
     }
-    else
+    else /** we don't now if native_curs permits adding columns **/
     {
         tbl = info -> tbl;
+	rc = VTableCreateCachedCursorRead ( tbl, & curs, 0 ); /*** some random io is expected ***/
     }
-
-	
     if ( rc == 0 )
     {
-        const VCursor *curs;
-        rc = VTableCreateCachedCursorRead ( tbl, & curs, 16*1024*1024 ); /*** some random io is expected ***/
-        if ( rc == 0 )
-        {
             uint32_t idx;
             rc = VCursorAddColumn ( curs, & idx, "%.*s",
                 ( int ) cp -> argv [ 1 ] . count, cp -> argv [ 1 ] . data . ascii );
-            if ( rc == 0 )
+            if ( rc == 0 || GetRCState(rc) == rcExists)
             {
                 rc = VCursorOpen ( curs );
                 if ( rc == 0 )
@@ -179,6 +210,11 @@ rc_t open_sub_cursor ( SubSelect **fself, const VXfactInfo *info, const VFactory
                             {
                                 self -> curs = curs;
                                 self -> idx = idx;
+				self->native_curs = native_curs;
+				self->first_time  = true;
+				self->col_name_len  = cp->argv[1].count;
+				self->col_name = malloc(self->col_name_len);
+				memcpy(self->col_name,cp->argv[1].data.ascii,self->col_name_len);
                                 * fself = self;
                                 if ( ftbl != NULL )
                                     VTableRelease ( ftbl );
@@ -189,9 +225,7 @@ rc_t open_sub_cursor ( SubSelect **fself, const VXfactInfo *info, const VFactory
                 }
             }
             VCursorRelease ( curs );
-        }
     }
-
     if ( ftbl != NULL )
         VTableRelease ( ftbl );
 
@@ -205,7 +239,8 @@ static
 void CC close_sub_cursor ( void *data )
 {
     SubSelect *self = data;
-    VCursorRelease ( self -> curs );
+    if(self->curs != self->native_curs) VCursorRelease ( self -> curs );
+    free ( self->col_name);
     free ( self );
 }
 
@@ -224,7 +259,7 @@ VTRANSFACT_IMPL ( vdb_simple_sub_select_1, 1, 0, 0 ) ( const void *Self, const V
     assert ( cp -> argc == 2 );
     assert ( dp -> argc == 1 || dp -> argc == 2);
 
-    rc = open_sub_cursor ( & fself, info, cp );
+    rc = open_sub_cursor ( & fself, info, cp, (const VCursor*)info->parms );
     if ( rc == 0 )
     {
         rslt -> self = fself;

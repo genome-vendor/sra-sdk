@@ -61,6 +61,7 @@ struct KPTrieIndexCCParms_v2
     bool key2id;
     bool id2key;
     bool all_ids;
+    bool convertFromV1;
     bool failed;
 };
 
@@ -68,7 +69,7 @@ struct KPTrieIndexCCParms_v2
  */
 static
 void KPTrieIndexCCParmsInit_v2 ( KPTrieIndexCCParms_v2 *pb,
-    const KPTrieIndex_v2 *self, const KIndex *outer, bool key2id, bool id2key, bool all_ids )
+    const KPTrieIndex_v2 *self, const KIndex *outer, bool key2id, bool id2key, bool all_ids, bool convertFromV1 )
 {
     KIdStatsInit ( & pb -> stats );
     pb -> rc = 0;
@@ -77,6 +78,7 @@ void KPTrieIndexCCParmsInit_v2 ( KPTrieIndexCCParms_v2 *pb,
     pb -> key2id = key2id;
     pb -> id2key = self -> ord2node ? id2key : false;
     pb -> all_ids = all_ids;
+    pb -> convertFromV1 = convertFromV1;
     pb -> failed = false;
 }
 
@@ -111,7 +113,7 @@ void KPTrieIndexCCParmsWhack_v2 ( KPTrieIndexCCParms_v2 *pb )
 static
 bool CC KPTrieIndexCCVisit_v2 ( PTNode *n, void *data )
 {
-    KPTrieIndexCCParms_v2 *pb = data;
+    KPTrieIndexCCParms_v2 *pb = (KPTrieIndexCCParms_v2 *)data;
     const KPTrieIndex_v2 *self = pb -> self;
 
     rc_t rc;
@@ -121,48 +123,71 @@ bool CC KPTrieIndexCCVisit_v2 ( PTNode *n, void *data )
     uint32_t i, ord;
 
     /* detect conversion from v1 */
-    if ( self -> id_bits == 0 )
+    if ( pb -> convertFromV1 && self -> id_bits == 0 )
     {
-        /* payload of v1 PTNode is a 32-bit spot id */
         uint32_t id32;
+
+        /* payload of v1 PTNode is a 32-bit spot id */
         assert ( n -> data . size == sizeof id32 );
         memcpy ( & id32, n -> data . addr, sizeof id32 );
         id = self -> byteswap ? bswap_32 ( id32 ) : id32;
-        span = 1;
-        ord = ( uint32_t ) ( id - self -> first + 1 );
     }
     else
     {
         /* native v2 */
         /* TBD - should this pass n -> data . size * 8 ??? */
-        rc = Unpack ( self -> id_bits, sizeof id * 8,
-            n -> data . addr, 0, self -> id_bits, NULL,
-            & id, sizeof id, & usize );
-        if ( rc != 0 )
+        if ( self -> id_bits != 0 )
         {
-            PLOGMSG ( klogWarn, ( klogWarn, "could not determine row id of v2 node $(nid)",
-                                 "nid=0x%08x", n -> id ));
-            pb -> failed = true;
-            return false;
-        }
-        id += self -> first;
-
-        ord = KPTrieIndexID2Ord_v2 ( self, id );
-        if ( ord == 0 )
-        {
-            PLOGMSG ( klogWarn, ( klogWarn, "v2 node $(nid): row id $(rid) not found in trie",
-                                  "nid=0x%08x,rid=%ld", n -> id, id ));
-            pb -> failed = true;
-            return false;
-        }
-
-        if ( self -> ord2node != NULL )
-        {
-            if ( ord == self -> count )
-                span = self -> maxid - id + 1;
-            else switch ( self -> variant )
+            rc = Unpack ( self -> id_bits, sizeof id * 8,
+                n -> data . addr, 0, self -> id_bits, NULL,
+                & id, sizeof id, & usize );
+            if ( rc != 0 )
             {
+                PLOGMSG ( klogWarn, ( klogWarn, "could not determine row id of v2 node $(nid)",
+                                 "nid=0x%08x", n -> id ));
+                pb -> failed = true;
+                return false;
+            }
+        }
+        else
+        {
+            id = 0;
+        }
+
+        id += self -> first;
+    }
+
+    /* convert from row-id to 1-based ordinal index */
+    ord = KPTrieIndexID2Ord_v2 ( self, id );
+    if ( ord == 0 )
+    {
+        /* 0 means not found */
+        PLOGMSG ( klogWarn, ( klogWarn, "v2 node $(nid): row id $(rid) not found in trie",
+                              "nid=0x%08x,rid=%ld", n -> id, id ));
+        pb -> failed = true;
+        return false;
+    }
+
+    if ( self -> ord2node != NULL )
+    {
+        /* to calculate span of last entry, where
+           1-based "ord" == the number of nodes,
+           just find the distance between the last row-id
+           in index ( self->maxid ) and the current row-id */
+        if ( ord == self -> count )
+            span = self -> maxid - id + 1;
+        else
+        {
+            /* from here on, we will use "ord" to be the
+               ZERO-BASED index of the slot FOLLOWING the
+               one corresponding to id. we want to find the
+               row-id AFTER the current one and calculate distance */
+            switch ( self -> variant )
+            {
+            /* linear array */
             case 0:
+                /* starting with the FOLLOWING slot,
+                   count duplicate entries */
                 for ( i = ord; i < self -> count; ++ i )
                 {
                     if ( n -> id != self -> ord2node [ i ] )
@@ -170,6 +195,10 @@ bool CC KPTrieIndexCCVisit_v2 ( PTNode *n, void *data )
                 }
                 span = self -> first + i - id;
                 break;
+
+            /* packed ordered array of sparse row-ids from here on
+               we already have "id" for this node, so the span will
+               be the distance from NEXT id - 1-based ord is 0-based next */
             case 1:
                 span = self -> first + self -> id2ord . v8 [ ord ] - id;
                 break;
@@ -189,22 +218,22 @@ bool CC KPTrieIndexCCVisit_v2 ( PTNode *n, void *data )
                 return true;
             }
         }
-        else if ( self -> span_bits == 0 )
-            span = 1;
-        else
+    }
+    else if ( self -> span_bits == 0 )
+        span = 1;
+    else
+    {
+        /* TBD - this case is never used in practice.
+           it would be an skey without a projection index */
+        rc = Unpack ( self -> span_bits, sizeof span * 8,
+                      n -> data . addr, 0, self -> id_bits, NULL,
+                      & span, sizeof span, & usize );
+        if ( rc != 0 )
         {
-            /* TBD - this case is never used in practice.
-               it would be an skey without a projection index */
-            rc = Unpack ( self -> span_bits, sizeof span * 8,
-                n -> data . addr, 0, self -> id_bits, NULL,
-                & span, sizeof span, & usize );
-            if ( rc != 0 )
-            {
-                PLOGMSG ( klogWarn, ( klogWarn, "could not determine span of v2 node $(nid), row id $(rid)",
-                                      "nid=0x%08x,rid=%ld", n -> id, id ));
-                pb -> failed = true;
-                return false;
-            }
+            PLOGMSG ( klogWarn, ( klogWarn, "could not determine span of v2 node $(nid), row id $(rid)",
+                                  "nid=0x%08x,rid=%ld", n -> id, id ));
+            pb -> failed = true;
+            return false;
         }
     }
 
@@ -283,7 +312,7 @@ bool CC KPTrieIndexCCVisit_v2 ( PTNode *n, void *data )
             size_t key_size, bsize = sizeof buffer;
             if ( sizeof buffer <= orig -> size )
             {
-                key = malloc ( bsize = orig -> size + 1 );
+                key = (char *)malloc ( bsize = orig -> size + 1 );
                 if ( key == 0 )
                 {
                     pb -> rc = RC ( rcDB, rcIndex, rcValidating, rcMemory, rcExhausted );
@@ -334,7 +363,7 @@ bool CC KPTrieIndexCCVisit_v2 ( PTNode *n, void *data )
 rc_t KPTrieIndexCheckConsistency_v2 ( const KPTrieIndex_v2 *self,
     int64_t *start_id, uint64_t *id_range, uint64_t *num_keys,
     uint64_t *num_rows, uint64_t *num_holes,
-    const KIndex *outer, bool key2id, bool id2key, bool all_ids )
+    const KIndex *outer, bool key2id, bool id2key, bool all_ids, bool convertFromV1 )
 {
     rc_t rc = 0;
     KPTrieIndexCCParms_v2 pb;
@@ -345,7 +374,7 @@ rc_t KPTrieIndexCheckConsistency_v2 ( const KPTrieIndex_v2 *self,
     if ( ( key2id || id2key ) && outer == NULL )
         return RC ( rcDB, rcIndex, rcValidating, rcSelf, rcNull );
 
-    KPTrieIndexCCParmsInit_v2 ( & pb, self, outer, key2id, id2key, all_ids );
+    KPTrieIndexCCParmsInit_v2 ( & pb, self, outer, key2id, id2key, all_ids, convertFromV1 );
     if ( PTrieDoUntil ( self -> key2id, KPTrieIndexCCVisit_v2, & pb ) )
         rc = pb . rc;
     else if ( pb . failed )

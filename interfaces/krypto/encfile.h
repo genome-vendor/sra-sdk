@@ -1,4 +1,3 @@
-
 /*===========================================================================
 *
 *                            PUBLIC DOMAIN NOTICE
@@ -37,7 +36,7 @@
 #endif
 
 #ifdef __cplusplus
-extern "C" {}
+extern "C" {
 #endif
 
 struct KFile;
@@ -48,21 +47,35 @@ typedef struct KEncFile KEncFile;
 /* ----------
  * Read mode is fully seekable if the underlying KFile is seekable some
  * integrity checking will not be performed in allowing this seeking.
+ *
+ * One difference between update and read mode is the handling of
+ * "missing blocks". Open for update will read a missing block as all
+ * zero while 
  */
-KRYPTO_EXTERN rc_t CC KEncFileMakeRead (const struct KFile ** pself, 
-                                        const struct KFile * encrypted,
+KRYPTO_EXTERN rc_t CC KEncFileMakeRead (const struct KFile ** pself,
+                                        const struct KFile * encrypted_input,
                                         const struct KKey * key);
 
 
 /* ----------
- * Write mode encrypted file can only be written straight through form the
+ * Write mode encrypted file can only be written straight through from the
  * first byte to the last.
  */
-KRYPTO_EXTERN rc_t CC KEncFileMakeWrite (struct KFile ** pself, 
-                                         struct KFile * encrypted,
+KRYPTO_EXTERN rc_t CC KEncFileMakeWrite (struct KFile ** pself,
+                                         struct KFile * encrypted_output,
                                          const struct KKey * key);
 
 
+/* ----------
+ * Update mode is read/write mode where seeking within the file is allowed.
+ * 
+ * One difference between update and read mode is the handling of
+ * "missing blocks". Open for update will read a missing block as all
+ * zero while 
+ */
+KRYPTO_EXTERN rc_t CC KEncFileMakeUpdate (struct KFile ** pself, 
+                                          struct KFile * encrypted,
+                                          const struct KKey * key);
 
 
 /* ----------
@@ -96,6 +109,7 @@ KRYPTO_EXTERN rc_t CC KEncFileValidate (const struct KFile * encrypted);
  *      not a large enough buffer to make an identification
  */
 KRYPTO_EXTERN rc_t CC KFileIsEnc (const char * buffer, size_t buffer_size);
+
 
 
 #ifdef __cplusplus

@@ -57,7 +57,7 @@ struct atomic64_t
     atomic64_read_and_add ( v, i )
 
 /* add to v -> counter and return the result */
-static __inline int atomic64_add_and_read ( atomic64_t *v, int i )
+static __inline LONG64 atomic64_add_and_read ( atomic64_t *v, int i )
 {
 	return atomic64_read_and_add ( v, i ) + i;
 }
@@ -90,9 +90,9 @@ static __inline int atomic64_add_and_read ( atomic64_t *v, int i )
     InterlockedCompareExchange64 ( & ( v ) -> counter, ( s ), ( t ) )
 
 /* conditional modifications */
-static __inline int atomic64_read_and_add_lt ( atomic64_t *v, int i, int t )
+static __inline LONG64 atomic64_read_and_add_lt ( atomic64_t *v, int i, int t )
 {
-	LONG val, val_intern;
+	LONG64 val, val_intern;
 	for ( val = atomic64_read ( v ); val < t; val = val_intern )
 	{
 		val_intern = atomic64_test_and_set ( v, val + i, val );
@@ -102,9 +102,9 @@ static __inline int atomic64_read_and_add_lt ( atomic64_t *v, int i, int t )
 	return val;
 }
 
-static __inline int atomic64_read_and_add_le ( atomic64_t *v, int i, int t )
+static __inline LONG64 atomic64_read_and_add_le ( atomic64_t *v, int i, int t )
 {
-	LONG val, val_intern;
+	LONG64 val, val_intern;
 	for ( val = atomic64_read ( v ); val <= t; val = val_intern )
 	{
 		val_intern = atomic64_test_and_set ( v, val + i, val );
@@ -114,9 +114,9 @@ static __inline int atomic64_read_and_add_le ( atomic64_t *v, int i, int t )
 	return val;
 }
 
-static __inline int atomic64_read_and_add_eq ( atomic64_t *v, int i, int t )
+static __inline LONG64 atomic64_read_and_add_eq ( atomic64_t *v, int i, int t )
 {
-	LONG val, val_intern;
+	LONG64 val, val_intern;
 	for ( val = atomic64_read( v ); val == t; val = val_intern )
 	{
 		val_intern = atomic64_test_and_set ( v, val + i, val );
@@ -126,9 +126,9 @@ static __inline int atomic64_read_and_add_eq ( atomic64_t *v, int i, int t )
 	return val;
 }
 
-static __inline int atomic64_read_and_add_ne ( atomic64_t *v, int i, int t )
+static __inline LONG64 atomic64_read_and_add_ne ( atomic64_t *v, int i, int t )
 {
-	LONG val, val_intern;
+	LONG64 val, val_intern;
 	for ( val = atomic64_read ( v ); val != t; val = val_intern )
 	{
 		val_intern = atomic64_test_and_set ( v, val + i, val );
@@ -138,9 +138,9 @@ static __inline int atomic64_read_and_add_ne ( atomic64_t *v, int i, int t )
 	return val;
 }
 
-static __inline int atomic64_read_and_add_ge ( atomic64_t *v, int i, int t )
+static __inline LONG64 atomic64_read_and_add_ge ( atomic64_t *v, int i, int t )
 {
-	LONG val, val_intern;
+	LONG64 val, val_intern;
 	for ( val = atomic64_read ( v ); val >= t; val = val_intern )
 	{
 		val_intern = atomic64_test_and_set ( v, val + i, val );
@@ -150,9 +150,9 @@ static __inline int atomic64_read_and_add_ge ( atomic64_t *v, int i, int t )
 	return val;
 }
 
-static __inline int atomic64_read_and_add_gt ( atomic64_t *v, int i, int t )
+static __inline LONG64 atomic64_read_and_add_gt ( atomic64_t *v, int i, int t )
 {
-	LONG val, val_intern;
+	LONG64 val, val_intern;
 	for ( val = atomic64_read ( v ); val > t; val = val_intern )
 	{
 		val_intern = atomic64_test_and_set ( v, val + i, val );
@@ -162,9 +162,9 @@ static __inline int atomic64_read_and_add_gt ( atomic64_t *v, int i, int t )
 	return val;
 }
 
-static __inline int atomic64_read_and_add_odd ( atomic64_t *v, int i )
+static __inline LONG64 atomic64_read_and_add_odd ( atomic64_t *v, int i )
 {
-	LONG val, val_intern;
+	LONG64 val, val_intern;
 	for ( val = atomic64_read ( v ); ( val & 1 ) != 0; val = val_intern )
 	{
 		val_intern = atomic64_test_and_set ( v, val + i, val );
@@ -174,9 +174,9 @@ static __inline int atomic64_read_and_add_odd ( atomic64_t *v, int i )
 	return val;
 }
 
-static __inline int atomic64_read_and_add_even ( atomic64_t *v, int i )
+static __inline LONG64 atomic64_read_and_add_even ( atomic64_t *v, int i )
 {
-	LONG val, val_intern;
+	LONG64 val, val_intern;
 	for ( val = atomic64_read ( v ); ( val & 1 ) == 0; val = val_intern )
 	{
 		val_intern = atomic64_test_and_set ( v, val + i, val );

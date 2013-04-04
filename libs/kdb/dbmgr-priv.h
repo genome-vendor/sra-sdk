@@ -53,7 +53,7 @@ extern "C" {
  */
 struct KSymbol;
 struct KDirectory;
-
+struct VFSManager;
 
 /*--------------------------------------------------------------------------
  * KDBManager
@@ -69,6 +69,9 @@ struct KDBManager
 
     /* open references */
     KRefcount refcount;
+
+    /* other managers needed by the KDB manager */
+    struct VFSManager * vfsmgr;
 };
 
 

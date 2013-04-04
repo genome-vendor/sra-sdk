@@ -73,3 +73,10 @@ ifdef NCBI
   endif
 	DFLT_LIBXML_INCLUDES = $(NCBI)/libxml/include/libxml2
 endif
+
+# flex+bison
+LEX  = @ true
+YACC = @ true
+
+# build matrix
+COMPILERS = GCC # ICC

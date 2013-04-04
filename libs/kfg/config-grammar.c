@@ -74,8 +74,6 @@
 /* Copy the first part of user declarations.  */
 
   
-	#include <klib/namelist.h>
-	
 	#include "kfg-parse.h"
 	
 	#define YYSTYPE KFGSymbol
@@ -443,8 +441,8 @@ static const yytype_int8 yyrhs[] =
 /* YYRLINE[YYN] -- source line where rule number YYN was defined.  */
 static const yytype_uint8 yyrline[] =
 {
-       0,    82,    82,    83,    87,    88,    92,   101,   102,   106,
-     107,   111,   115,   116,   117,   118,   122,   123
+       0,    80,    80,    81,    85,    86,    90,    99,   100,   104,
+     105,   109,   113,   114,   115,   116,   120,   121
 };
 #endif
 

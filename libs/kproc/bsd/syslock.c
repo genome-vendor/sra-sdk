@@ -27,6 +27,7 @@
 #include <kproc/extern.h>
 #include "syslock-priv.h"
 #include "syscond-priv.h"
+#include <kproc/timeout.h>
 #include <kproc/lock.h>
 #include <kproc/cond.h>
 #include <os-native.h>

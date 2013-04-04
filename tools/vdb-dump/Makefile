@@ -42,15 +42,13 @@ ALL_TOOLS = \
 #-------------------------------------------------------------------------------
 # outer targets
 #
-vers-includes: $(addsuffix .vers.h,$(EXT_TOOLS))
-
-all std: makedirs vers-includes
+all std: vers-includes
 	@ $(MAKE_CMD) $(TARGDIR)/$@
 
-$(ALL_TOOLS): makedirs vers-includes
+$(ALL_TOOLS): vers-includes
 	@ $(MAKE_CMD) $(BINDIR)/$@
 
-.PHONY: vers-includes all std $(ALL_TOOLS)
+.PHONY: all std $(ALL_TOOLS)
 
 #-------------------------------------------------------------------------------
 # all
@@ -69,18 +67,18 @@ $(TARGDIR)/std: \
 .PHONY: $(TARGDIR)/std
 
 #-------------------------------------------------------------------------------
+# vers-includes
+#
+$(TARGDIR)/vers-includes: $(addsuffix .vers.h,$(EXT_TOOLS))
+
+.PHONY: $(TARGDIR)/vers-includes
+
+#-------------------------------------------------------------------------------
 # clean
 #
 clean: stdclean
 
 .PHONY: clean
-
-#-------------------------------------------------------------------------------
-# tag
-#
-tag: $(addsuffix _tag,$(ALL_TOOLS))
-
-.PHONY: tag $(addsuffix _tag,$(ALL_TOOLS))
 
 #-------------------------------------------------------------------------------
 # vdb-dump
@@ -101,12 +99,9 @@ VDB_DUMP_OBJ = \
 	$(addsuffix .$(OBJX),$(VDB_DUMP_SRC))
 
 VDB_DUMP_LIB = \
-	-ssrapath \
 	-ssraschema \
 	-dalign-reader \
-	-daxf \
-	-dsraxf \
-	-dvxf \
+	$(READONLY_SCHEMA_LIBS) \
 	-lksrch \
 	-lvdb \
 	-lkdb \
@@ -115,11 +110,9 @@ VDB_DUMP_LIB = \
 	-lkapp \
 	-lkfg \
 	-lkfs \
+	-lkproc \
 	-lklib \
 	-lm
 
 $(BINDIR)/vdb-dump: $(VDB_DUMP_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(VDB_DUMP_LIB)
-
-vdb-dump_tag:
-	@ $(TOP)/build/tag-module.sh $(MODULE) vdb-dump $(VDB_DUMP_OBJ)

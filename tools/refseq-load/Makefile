@@ -42,20 +42,18 @@ ALL_TOOLS = \
 #-------------------------------------------------------------------------------
 # outer targets
 #
-vers-includes: $(addsuffix .vers.h,$(EXT_TOOLS))
-
 ifeq (win,$(OS))
 all std:
 	@ echo "not building refseq-load under Windows"
 else
-all std: makedirs vers-includes
+all std: vers-includes
 	@ $(MAKE_CMD) $(TARGDIR)/$@
 endif
 
-$(ALL_TOOLS): makedirs vers-includes
+$(ALL_TOOLS): vers-includes
 	@ $(MAKE_CMD) $(BINDIR)/$@
 
-.PHONY: vers-includes all std $(ALL_TOOLS)
+.PHONY: all std $(ALL_TOOLS)
 
 #-------------------------------------------------------------------------------
 # all
@@ -74,6 +72,13 @@ $(TARGDIR)/std: \
 .PHONY: $(TARGDIR)/std
 
 #-------------------------------------------------------------------------------
+# vers-includes
+#
+$(TARGDIR)/vers-includes: $(addsuffix .vers.h,$(EXT_TOOLS))
+
+.PHONY: $(TARGDIR)/vers-includes
+
+#-------------------------------------------------------------------------------
 # clean
 #
 clean: stdclean
@@ -88,8 +93,7 @@ tag: $(addsuffix _tag,$(ALL_TOOLS))
 .PHONY: tag $(addsuffix _tag,$(ALL_TOOLS))
 
 #-------------------------------------------------------------------------------
-# vdb-copy
-#  vdb copy tool
+# refseq-load
 #
 REFSEQ_LOAD_SRC = \
 	context \
@@ -99,7 +103,6 @@ REFSEQ_LOAD_OBJ = \
 	$(addsuffix .$(OBJX),$(REFSEQ_LOAD_SRC))
 
 REFSEQ_LOAD_LIB = \
-	-ssrapath \
 	-ssraschema \
 	-dwsraxf \
 	-dwvxf \
@@ -110,6 +113,7 @@ REFSEQ_LOAD_LIB = \
 	-lwkdb \
 	-lkapp \
 	-lvfs \
+	-ssrapath \
 	-lkrypto \
 	-lkfg \
 	-lkfs \

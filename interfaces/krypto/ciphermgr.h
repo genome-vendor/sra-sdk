@@ -40,13 +40,13 @@
 #endif
 
 #ifdef __cplusplus
-extern "C" {}
+extern "C" {
 #endif
 
 /* enabled/disable a set of in-house clean;y written aes ciphers. some optimize
  * for certain c processors */
 
-#define USE_NCBI_AES 0
+#define USE_NCBI_AES 1
 
 
 /*--------------------------------------------------------------------------
@@ -70,16 +70,13 @@ rc_t CC KCipherManagerRelease (const KCipherManager *self);
 /* MakeCipher
  */
 typedef uint32_t kcipher_type;
-enum ekcipher_type
+enum
 {
-    kcipher_AES,         /* Rijndael aes_core.c portable */
-#if USE_NCBI_AES
-    kcipher_AES_ncbi,    /* clean AES written for NCBI specifically from the  */
-    kcipher_AES_ncbi_xmm, /* xmm vector version version */
-    kcipher_AES_ncbi_ni, /* 64 bit AES-NI version */
-#endif
+    kcipher_null, /* no encryption = just a copy */
+    kcipher_AES,
     kcipher_count
 };
+
 
 KRYPTO_EXTERN
 rc_t CC KCipherManagerMakeCipher (const KCipherManager * self,

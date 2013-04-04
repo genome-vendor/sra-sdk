@@ -31,6 +31,10 @@
 #include <kdb/extern.h>
 #endif
 
+#ifndef _h_insdc_sra_
+#include <insdc/sra.h>
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -106,6 +110,8 @@ struct CCReportInfoBlock
 
 typedef rc_t ( CC *CCReportFunc ) ( const CCReportInfoBlock *info, void *data );
 
+/* a flag for level parameter */
+#define CC_INDEX_ONLY 0x80000000
 
 /*--------------------------------------------------------------------------
  * KDatabase
@@ -118,7 +124,8 @@ KDB_EXTERN rc_t CC KDatabaseConsistencyCheck ( struct KDatabase const *self,
  * KTable
  */
 KDB_EXTERN rc_t CC KTableConsistencyCheck ( struct KTable const *self,
-    uint32_t depth, uint32_t level, CCReportFunc report, void *data );
+    uint32_t depth, uint32_t level, CCReportFunc report, void *data,
+    INSDC_SRA_platform_id platform);
 
 
 /*--------------------------------------------------------------------------

@@ -33,14 +33,23 @@ shift
 
 # binary compiler
 CC="$1"
-shift
+shift 
 
 # everything except windows is fine as-is
-if [ "$OS" != "win" ]
-then
+if [[ "$OS" != "win" && "$OS" != "rwin" ]]
+then 
     echo "$CC $*"
     $CC $*
     exit $?
+fi
+
+if [[ "$OS" == "rwin" ]]
+then # for rwin, $CC is a multi-word string; extract server location data from it:
+#                $(TOP)/build/run_remotely.sh $(PROXY_TOOL) $(RHOST) $(RPORT) $(RHOME) $(LHOME) $(TOP) $(SCHEMA_EXE)
+    PARMS=($CC)
+    RHOME=${PARMS[4]}
+    LHOME=${PARMS[5]}
+    TOP=${PARMS[6]}
 fi
 
 # state
@@ -48,6 +57,17 @@ unset ARGS
 unset DEPENDENCIES
 unset DEPTARG
 unset TARG
+
+function convert_path
+{
+    if [[ "$OS" != "rwin" ]]
+    then
+        convert_path_result="$(cygpath -w $1)"
+    else
+        convert_path_result="$RHOME${1#$LHOME}"
+        convert_path_result="$(echo $convert_path_result | tr '/' '\\')"
+    fi
+}
 
 # process parameters for windows
 while [ $# -ne 0 ]
@@ -62,8 +82,8 @@ do
             shift
         fi
         TARG="$ARG"
-        ARG="$(cygpath -w $ARG)"
-        ARGS="$ARGS -o$ARG"
+        convert_path $ARG
+        ARGS="$ARGS -o${convert_path_result}"
         ;;
 
     -I*)
@@ -73,8 +93,9 @@ do
             ARG="$2"
             shift
         fi
-        ARG="$(cygpath -w $ARG)"
-        ARGS="$ARGS -I$ARG"
+        
+        convert_path $ARG
+        ARGS="$ARGS -I${convert_path_result}"
         ;;
 
     -T*)
@@ -86,13 +107,13 @@ do
         fi
         DEPTARG="$ARG"
         DEPENDENCIES=1
-        ARG="$(cygpath -w $ARG)"
-        ARGS="$ARGS -T$ARG"
+        convert_path $ARG
+        ARGS="$ARGS -T${convert_path_result}"
         ;;
 
     *)
-        ARG="$(cygpath -w $1)"
-        ARGS="$ARGS $ARG"
+        convert_path $1
+        ARGS="$ARGS ${convert_path_result}"
         ;;
 
     esac
@@ -102,11 +123,12 @@ do
 done
 
 echo "$CC $ARGS"
-if ! $CC $ARGS
+$CC $ARGS
+STATUS=$?
+if [[ ${STATUS} != 0 ]]
 then
-    STATUS=$?
     rm -f $TARG $DEPTARG
-    exit $?
+    exit ${STATUS}
 fi
 
 if [ $DEPENDENCIES -eq 1 ]

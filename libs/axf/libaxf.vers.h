@@ -1,1 +1,0 @@
-#define LIBAXF_VERS 0x01000007

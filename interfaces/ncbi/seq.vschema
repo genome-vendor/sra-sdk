@@ -358,9 +358,6 @@ table NCBI:tbl:base_space #2.0.3
  *  nucleotide sequences in color space
  */
 
-/* TBD - does this function need to know something about
- *  whether a read is forward or reverse?
- */
 extern function
 INSDC:x2na:bin NCBI:dna_from_color #1 ( INSDC:x2cs:bin color_bin,
      INSDC:coord:zero read_start, INSDC:coord:len read_len,
@@ -693,6 +690,7 @@ table NCBI:tbl:phred_quality #1.0.1 = NCBI:tbl:phred_quality_nocol #1.0.1
  *  2.0.2 - added input of text encodings
  *  2.0.3 - base explicitly upon sequence #1.0.1
  *  2.0.4 - change compression from izip to zip
+ *  2.0.5 - change from zip to delta_average_zip
  */
 table NCBI:tbl:phred_quality #2.0.4 = INSDC:tbl:sequence #1.0.1
 {
@@ -709,6 +707,9 @@ table NCBI:tbl:phred_quality #2.0.4 = INSDC:tbl:sequence #1.0.1
         | ( INSDC:quality:phred ) < B8 > diff < 64 > ( in_qual_text_phred_64 );
 
     // physical storage
+/*** next line is  for future change in production, but we have to wait until supporting code is released to the public ***/
+// physical column < INSDC:quality:phred > delta_average_zip_encoding .QUALITY = in_qual_phred;
+/*** NB *** MUST change table version to 2.0.5 and propagate to all derived tables ***/
     physical column < INSDC:quality:phred > zip_encoding .QUALITY = in_qual_phred;
 
     // feed to compressed statistics

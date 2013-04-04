@@ -799,7 +799,7 @@ rc_t KPTrieIndexFind_v2 ( const KPTrieIndex_v2 *self,
 #if V2FIND_RETURNS_SPAN
     uint32_t *span,
 #endif
-    int ( CC * custom_cmp ) ( const void *item, const PBSTNode *n, void *data ), void *data )
+    int ( CC * custom_cmp ) ( const void *item, const PBSTNode *n, void *data ), void *data, bool convertFromV1 )
 {
     rc_t rc;
 
@@ -823,7 +823,7 @@ rc_t KPTrieIndexFind_v2 ( const KPTrieIndex_v2 *self,
             size_t usize;
 
             /* detect conversion from v1 */
-            if ( self -> id_bits == 0 )
+            if ( convertFromV1 && self -> id_bits == 0 )
             {
                 /* v1 stored tree will have just a 32-bit spot id as data */
                 uint32_t id;
@@ -2420,7 +2420,7 @@ rc_t KTrieIndexFind_v2 ( const KTrieIndex_v2 *self,
 #if V2FIND_RETURNS_SPAN
     uint32_t *span,
 #endif
-    int ( CC * custom_cmp ) ( const void *item, const PBSTNode *n, void *data ), void *data )
+    int ( CC * custom_cmp ) ( const void *item, const PBSTNode *n, void *data ), void *data, bool convertFromV1 )
 {
     /* search within in-core index */
     if ( self -> count != 0 )
@@ -2468,7 +2468,7 @@ rc_t KTrieIndexFind_v2 ( const KTrieIndex_v2 *self,
 #if V2FIND_RETURNS_SPAN
                                     span,
 #endif
-                                    custom_cmp, data );
+                                    custom_cmp, data, convertFromV1 );
     }
 
     return RC ( rcDB, rcIndex, rcSelecting, rcString, rcNotFound );
@@ -2485,7 +2485,7 @@ struct KTrieIndexProjectData_v2
 static
 bool CC KTrieIndexProjectScan_v2 ( TNode *n, void *data )
 {
-    KTrieIndexProjectData_v2 *pb = data;
+    KTrieIndexProjectData_v2 *pb = (KTrieIndexProjectData_v2 *)data;
     const KTrieIdxNode_v2_s2 *node = ( const KTrieIdxNode_v2_s2* ) n;
 
     if ( pb -> id >= node -> start_id &&

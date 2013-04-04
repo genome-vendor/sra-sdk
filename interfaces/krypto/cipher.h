@@ -31,12 +31,17 @@
 
 typedef struct KCipher KCipher;
 
-KRYPTO_EXTERN rc_t CC KCipherAddref (const KCipher * self);
+KRYPTO_EXTERN 
+rc_t CC KCipherAddref (const KCipher * self);
+
 KRYPTO_EXTERN rc_t CC KCipherRelease (const KCipher * self);
+
 KRYPTO_EXTERN rc_t CC KCipherBlockSize (const KCipher * self, size_t * bytes);
+
 KRYPTO_EXTERN rc_t CC KCipherSetEncryptKey (KCipher * self,
                                             const void * user_key,
                                             size_t user_key_size);
+
 KRYPTO_EXTERN rc_t CC KCipherSetDecryptKey (KCipher * self,
                                             const void * user_key,
                                             size_t user_key_size);
@@ -56,14 +61,18 @@ KRYPTO_EXTERN
  rc_t CC KCipherSetDecryptIVec (KCipher * self, const void * ivec);
 
 
+typedef void (*cipher_ctr_func)(void * ivec);
+
+KRYPTO_EXTERN rc_t CC KCipherSetEncryptCtrFunc (KCipher * self, cipher_ctr_func func);
+
+KRYPTO_EXTERN rc_t CC KCipherSetDecryptCtrFunc (KCipher * self, cipher_ctr_func func);
+
 /*
  * 'in' can equal 'out'
  */
-KRYPTO_EXTERN 
-rc_t CC KCipherEncrypt (const KCipher * self, const void * in, void * out);
+KRYPTO_EXTERN rc_t CC KCipherEncrypt (KCipher * self, const void * in, void * out);
 
-KRYPTO_EXTERN
-rc_t CC KCipherDecrypt (const KCipher * self, const void * in, void * out);
+KRYPTO_EXTERN rc_t CC KCipherDecrypt (KCipher * self, const void * in, void * out);
 
 
 /* ====================
@@ -104,11 +113,10 @@ rc_t CC KCipherDecrypt (const KCipher * self, const void * in, void * out);
  * Two local byte arrays are defined on the stack of 1024 bytes or 8192 bits.
  */
 KRYPTO_EXTERN rc_t CC KCipherEncryptECB (KCipher * self, const void * in, void * out,
-                                         size_t len);
+                                         uint32_t block_count);
 
-KRYPTO_EXTERN
-rc_t CC KCipherDecryptECB (KCipher * self, const void * in, void * out,
-                           size_t len);
+KRYPTO_EXTERN rc_t CC KCipherDecryptECB (KCipher * self, const void * in, void * out,
+                                         uint32_t block_count);
 
 /* ----------
  * Cipher-Block Chaining
@@ -116,13 +124,11 @@ rc_t CC KCipherDecryptECB (KCipher * self, const void * in, void * out,
  * PT = DEC ((FB = CT), DK)
  *
  */
-KRYPTO_EXTERN
-rc_t CC KCipherEncryptCBC (KCipher * self, const void * in, void * out,
-                           size_t len);
+KRYPTO_EXTERN rc_t CC KCipherEncryptCBC (KCipher * self, const void * in, void * out,
+                                         uint32_t block_count);
 
-KRYPTO_EXTERN
-rc_t CC KCipherDecryptCBC (KCipher * self, const void * in, void * out,
-                           size_t len);
+KRYPTO_EXTERN rc_t CC KCipherDecryptCBC (KCipher * self, const void * in, void * out,
+                                         uint32_t block_count);
 
 /* ----------
  * Propagating cipher-block chaining
@@ -141,15 +147,21 @@ rc_t CC KCipherDecryptCBC (KCipher * self, const void * in, void * out,
  *
  * Not implemented as the openssl does something different
  */
-#if 0
 KRYPTO_EXTERN
 rc_t CC KCipherEncryptCFB (KCipher * self, const void * in, void * out,
-                           size_t len, uint32_t * bits);
+                           uint32_t block_count);
 
 KRYPTO_EXTERN
 rc_t CC KCipherDecryptCFB (KCipher * self, const void * in, void * out,
-                           size_t len, uint32_t * bits);
-#endif
+                           uint32_t block_count);
+
+KRYPTO_EXTERN
+rc_t CC KCipherEncryptPCFB (KCipher * self, const void * in, void * out,
+                            uint32_t block_count);
+
+KRYPTO_EXTERN
+rc_t CC KCipherDecryptPCFB (KCipher * self, const void * in, void * out,
+                            uint32_t block_count);
 
 /* ----------
  * Output Feedback
@@ -160,15 +172,13 @@ rc_t CC KCipherDecryptCFB (KCipher * self, const void * in, void * out,
  *
  * Not implemented as the openssl does something different
  */
-#if 0
 KRYPTO_EXTERN
 rc_t CC KCipherEncryptOFB (KCipher * self, const void * in, void * out,
-                           size_t len, uint32_t * bits);
+                           uint32_t block_count);
 
 KRYPTO_EXTERN
 rc_t CC KCipherDecryptOFB (KCipher * self, const void * in, void * out,
-                           size_t len, uint32_t * bits);
-#endif
+                           uint32_t block_count);
 
 /* ----------
  * Counter
@@ -180,14 +190,15 @@ rc_t CC KCipherDecryptOFB (KCipher * self, const void * in, void * out,
  *
  * nonce is a function that given an iv generates the next iv
  *
- * This is not yet implemented as it is not fully defined.  The openssl version
- * seems wrong.
  */
-#if 0
-KRYPTO_EXTERN rc_t CC KCipherEncryptCTR (KCipher * self, const void * in,
-                                         void * out, 
-                                         void(*nonce)(void*iv), void * iv);
-#endif
+KRYPTO_EXTERN
+rc_t CC KCipherEncryptCTR (KCipher * self, const void * in,
+                           void * out, uint32_t block_count);
+KRYPTO_EXTERN
+rc_t CC KCipherDecryptCTR (KCipher * self, const void * in,
+                           void * out, uint32_t block_count);
+
+
 
 
 #ifdef __cplusplus

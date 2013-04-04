@@ -70,6 +70,9 @@
  * VPhysical
  */
 
+static
+rc_t VPhysicalConvertStatic ( VPhysical *self );
+
 
 /* Whack
  */
@@ -78,6 +81,16 @@ void CC VPhysicalWhack ( void *item, void *ignore )
     VPhysical *self = item;
     if ( self > FAILED_PHYSICAL )
     {
+#if PROD_CACHE
+        /* detect close of static column */
+        if ( ! self -> read_only && self -> knode != NULL )
+        {
+            /* if the column is fairly large for metadata */
+            if ( KDataBufferBytes ( & self -> srow ) > 64 * 1024 )
+                /* convert it to a single blob */
+                VPhysicalConvertStatic ( self );
+        }
+#endif
         if ( ! self -> read_only )
         {
             rc_t rc;
@@ -670,7 +683,7 @@ rc_t VPhysicalConvertStatic ( VPhysical *self )
             {
                 /* get an encoded version of static blob */
                 VBlob *vblob;
-                rc = VProductionReadBlob ( self -> b2s, & vblob, sstart_id, 1 );
+                rc = VProductionReadBlob ( self -> b2s, & vblob, sstart_id, 1,NULL );
                 if ( rc == 0 )
                 {
                     /* write encoded blob to physical */
@@ -784,7 +797,7 @@ rc_t VPhysicalWrite ( VPhysical *self, int64_t id, uint32_t cnt )
 {
     /* read from page space */
     VBlob *vblob;
-    rc_t rc = VProductionReadBlob ( self -> in, & vblob, id , cnt);
+    rc_t rc = VProductionReadBlob ( self -> in, & vblob, id , cnt,NULL);
     if ( rc == 0 )
     {
         /* test for single row in blob */
@@ -859,7 +872,7 @@ rc_t VPhysicalWrite ( VPhysical *self, int64_t id, uint32_t cnt )
             {
                 TRACK_BLOB ( VBlobRelease, vblob );
                 ( void ) VBlobRelease ( vblob );
-                rc = VProductionReadBlob ( self -> b2s, & vblob, id, cnt );
+                rc = VProductionReadBlob ( self -> b2s, & vblob, id, cnt,NULL );
                 if ( rc == 0 )
                 {
                     /* write encoded blob to physical */

@@ -180,7 +180,7 @@ static void s_xmlGenericErrorDefaultFunc(void *ctx ATTRIBUTE_UNUSED,
     va_end(args);
 }
 
-static rc_t ReadFile(const KFile *src, char** aBuffer, uint64_t* aSize)
+static rc_t s_XmlReadFile(const KFile *src, char** aBuffer, uint64_t* aSize)
 {
     rc_t rc = 0;
     bool unknownFileSize = false;
@@ -244,7 +244,7 @@ rc_t KXMLMgrMakeDocRead(const KXMLMgr *self,
     if (self && src) {
         char* buffer = NULL;
         uint64_t size = 0;
-        rc = ReadFile(src, &buffer, &size);
+        rc = s_XmlReadFile(src, &buffer, &size);
         if (rc)
         {    return rc; }
         rc = KXMLMgrMakeDocReadFromMemory(self, result, buffer, size);

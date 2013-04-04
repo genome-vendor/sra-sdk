@@ -33,10 +33,14 @@
 #include <klib/printf.h>
 #include <klib/log.h>
 #include <klib/rc.h>
+#include <vdb/vdb-priv.h>
 #include <sra/sradb.h>
 #include <sra/pacbio.h>
 #include <os-native.h>
 #include <sysalloc.h>
+
+/* for platforms */
+#include <insdc/sra.h>
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -89,30 +93,26 @@ const char *vdcd_get_hole_status_txt( const uint32_t id )
     return( SRA_PB_HS_9 );
 }
 
-const char SRA_PF_0[] = { "SRA_PLATFORM_UNDEFINED" };
-const char SRA_PF_1[] = { "SRA_PLATFORM_454" };
-const char SRA_PF_2[] = { "SRA_PLATFORM_ILLUMINA" };
-const char SRA_PF_3[] = { "SRA_PLATFORM_ABSOLID" };
-const char SRA_PF_4[] = { "SRA_PLATFORM_COMPLETE_GENOMICS" };
-const char SRA_PF_5[] = { "SRA_PLATFORM_HELICOS" };
-const char SRA_PF_6[] = { "SRA_PLATFORM_PACBIO_SMRT" };
-const char SRA_PF_7[] = { "SRA_PLATFORM_ION_TORRENT" };
-const char SRA_PF_8[] = { "unknown platform" };
-
 const char *vdcd_get_platform_txt( const uint32_t id )
 {
+#define CASE( id ) \
+    case id : return # id; break
+
     switch( id )
     {
-        case 0  : return( SRA_PF_0 ); break;
-        case 1  : return( SRA_PF_1 ); break;
-        case 2  : return( SRA_PF_2 ); break;
-        case 3  : return( SRA_PF_3 ); break;
-        case 4  : return( SRA_PF_4 ); break;
-        case 5  : return( SRA_PF_5 ); break;
-        case 6  : return( SRA_PF_6 ); break;
-        case 7  : return( SRA_PF_7 ); break;
+        CASE ( SRA_PLATFORM_UNDEFINED );
+        CASE ( SRA_PLATFORM_454 );
+        CASE ( SRA_PLATFORM_ILLUMINA );
+        CASE ( SRA_PLATFORM_ABSOLID );
+        CASE ( SRA_PLATFORM_COMPLETE_GENOMICS );
+        CASE ( SRA_PLATFORM_HELICOS );
+        CASE ( SRA_PLATFORM_PACBIO_SMRT );
+        CASE ( SRA_PLATFORM_ION_TORRENT );
+        CASE ( SRA_PLATFORM_SANGER );
     }
-    return( SRA_PF_8 );
+#undef CASE
+
+    return "unknown platform";
 }
 
 const char SRA_RT_0[] = { SRA_NAME  ( READ_TYPE_TECHNICAL ) };
@@ -287,11 +287,11 @@ p_col_def vdcd_init_col( const char* name, const size_t str_limit )
     p_col_def res = NULL;
     if ( name == NULL ) return res;
     if ( name[0] == 0 ) return res;
-    res = (p_col_def)calloc( 1, sizeof( col_def ) );
+    res = ( p_col_def )calloc( 1, sizeof( col_def ) );
     if ( res != NULL )
     {
         res->name = string_dup_measure ( name, NULL );
-        vds_make( &(res->content), str_limit, DUMP_STR_INC );
+        vds_make( &( res->content ), str_limit, DUMP_STR_INC );
     }
     return res;
 }
@@ -300,7 +300,7 @@ void vdcd_destroy_col( p_col_def col_def )
 {
     if ( col_def == NULL ) return;
     if ( col_def->name ) free( col_def->name );
-    vds_free( &(col_def->content) );
+    vds_free( &( col_def->content ) );
     free( col_def );
 }
 
@@ -316,7 +316,7 @@ bool vdcd_init( col_defs** defs, const size_t str_limit )
         (*defs)->max_colname_chars = 0;
         res = true;
     }
-    (*defs)->str_limit = str_limit;
+    ( *defs )->str_limit = str_limit;
     return res;
 }
 
@@ -347,8 +347,10 @@ static p_col_def vdcd_append_col( col_defs* defs, const char* name )
     return new_col;
 }
 
-bool vdcd_parse_string( col_defs* defs, const char* src )
+
+bool vdcd_parse_string( col_defs* defs, const char* src, const VTable *my_table )
 {
+    uint32_t count = 0;
     char colname[MAX_COL_NAME_LEN+1];
     size_t i_dest = 0;
     if ( defs == NULL ) return false;
@@ -375,8 +377,41 @@ bool vdcd_parse_string( col_defs* defs, const char* src )
         colname[i_dest]=0;
         vdcd_append_col( defs, colname );
     }
-    return ( VectorLength( &(defs->cols) ) > 0 );
+    count = VectorLength( &(defs->cols) ) > 0;
+    if ( count > 0 && my_table != NULL )
+    {
+        const VCursor *my_cursor;
+        rc_t rc = VTableCreateCursorRead( my_table, &my_cursor );
+        DISP_RC( rc, "VTableCreateCursorRead() failed" );
+        if ( rc == 0 )
+        {
+            uint32_t found = 0;
+            uint32_t idx;
+            for ( idx = 0; idx < count && rc == 0; ++idx )
+            {
+                col_def *col = ( col_def * )VectorGet( &(defs->cols), idx );
+                if ( col != NULL )
+                {
+                    rc = VCursorAddColumn( my_cursor, &(col->idx), col->name );
+                    DISP_RC( rc, "VCursorAddColumn() failed" );
+                    if ( rc == 0 )
+                    {
+                        rc = VCursorDatatype( my_cursor, col->idx,
+                                  &(col->type_decl), &(col->type_desc) );
+                        DISP_RC( rc, "VCursorDatatype() failed" );
+                        if ( rc == 0 )
+                            found++;
+                    }
+                }
+            }
+            count = found;
+            rc = VCursorRelease( my_cursor );
+            DISP_RC( rc, "VCursorRelease() failed" );
+        }
+    }
+    return ( count > 0 );
 }
+
 
 bool vdcd_extract_from_table( col_defs* defs, const VTable *my_table )
 {
@@ -398,7 +433,7 @@ bool vdcd_extract_from_table( col_defs* defs, const VTable *my_table )
             if ( rc == 0 )
             {
                 uint32_t i;
-                for ( i=0; i<n; ++i )
+                for ( i = 0; i < n && rc ==0; ++i )
                 {
                     const char *col_name;
                     rc = KNamelistGet( names, i, &col_name );
@@ -420,10 +455,45 @@ bool vdcd_extract_from_table( col_defs* defs, const VTable *my_table )
                         }
                     }
                 }
-            col_defs_found = ( found > 0 );
+                col_defs_found = ( found > 0 );
             }
             rc = VCursorRelease( my_cursor );
             DISP_RC( rc, "VCursorRelease() failed" );
+        }
+        rc = KNamelistRelease( names );
+        DISP_RC( rc, "KNamelistRelease() failed" );
+    }
+    return col_defs_found;
+}
+
+
+bool vdcd_extract_from_phys_table( col_defs* defs, const VTable *my_table )
+{
+    bool col_defs_found = false;
+    KNamelist *names;
+    rc_t rc = VTableListPhysColumns( my_table, &names );
+    DISP_RC( rc, "VTableListPhysColumns() failed" );
+    if ( rc == 0 )
+    {
+        uint32_t n;
+        uint32_t found = 0;
+        rc = KNamelistCount( names, &n );
+        DISP_RC( rc, "KNamelistCount() failed" );
+        if ( rc == 0 )
+        {
+            uint32_t i;
+            for ( i = 0; i < n && rc == 0; ++i )
+            {
+                const char *col_name;
+                rc = KNamelistGet( names, i, &col_name );
+                DISP_RC( rc, "KNamelistGet() failed" );
+                if ( rc == 0 )
+                {
+                    vdcd_append_col( defs, col_name );
+                    found++;
+                }
+            }
+            col_defs_found = ( found > 0 );
         }
         rc = KNamelistRelease( names );
         DISP_RC( rc, "KNamelistRelease() failed" );

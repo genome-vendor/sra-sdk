@@ -129,10 +129,34 @@ VDB_EXTERN rc_t CC VTableOpenKTableUpdate ( struct VTable *self, struct KTable *
 
 #define VTableGetKTableRead VTableOpenKTableRead
 #define VTableGetKTableUpdate VTableOpenKTableUpdate
-    
-VDB_EXTERN rc_t CC VTableDropColumn(struct VTable *self, const char *name, ...);
-VDB_EXTERN rc_t CC VTableVDropColumn(struct VTable *self, const char *name, va_list args);
-    
+
+
+/* DropColumn
+ */
+VDB_EXTERN rc_t CC VTableDropColumn ( struct VTable *self, const char *name, ... );
+VDB_EXTERN rc_t CC VTableVDropColumn ( struct VTable *self, const char *name, va_list args );
+
+/* RenameColumn
+ */
+VDB_EXTERN rc_t CC VTableRenameColumn ( struct VTable *self, bool force,
+    const char *from, const char *to );
+
+/* ListPhysColumns
+ * ListSeededWritableColumns
+ *  avail: 2.4
+ */
+VDB_EXTERN rc_t CC VTableListPhysColumns ( struct VTable const *self, struct KNamelist **names );
+VDB_EXTERN rc_t CC VTableListSeededWritableColumns ( struct VTable *self,
+    struct KNamelist **names, struct KNamelist const *seed );
+
+
+/* HasStaticColumn
+ *  given a physical column name, report whether it exists
+ *  and is ( currently ) static
+ *  avail: 2.5
+ */
+VDB_EXTERN bool CC VTableHasStaticColumn ( struct VTable const *self, const char *name );
+
 
 /* VUntypedTableTest
  *  support for tables created before embedded schema
@@ -153,18 +177,41 @@ typedef bool ( CC * VUntypedTableTest )
  *  useful if table was opened using a later version of schema than
  *  was used for its creation.
  */
-rc_t VTableStoreSchema ( struct VTable *self );
+VDB_EXTERN rc_t VTableStoreSchema ( struct VTable *self );
 
 
 /*--------------------------------------------------------------------------
  * VCursor
  */
 
+
+/* CreateCursorView
+ *  creates a read-only cursor onto table
+ *  uses table schema as base
+ *  uses view described in viewspec as view
+ *
+ *  AVAILABILITY: version 2.3
+ *
+ *  for pre-vdb-2.3 tables, defaults to CreateCursorRead, ignoring
+ *  schema specification
+ *
+ *  "curs" [ OUT ] - return parameter for newly created cursor
+ *
+ *  "viewspec" [ IN ] - NUL terminated string describing the view schema
+ */
+VDB_EXTERN rc_t CC VTableCreateCursorView ( struct VTable const *self,
+    struct VCursor const **curs, const char *viewspec );
+
 /* PermitPostOpenAdd
  *  allows columns to be added to open cursor
  *  for write cursor, the effect lasts until the first row commit
  */
 VDB_EXTERN rc_t CC VCursorPermitPostOpenAdd ( struct VCursor const *self );
+/*  SuspendTriggers
+ *  blocks resolution of schema-based triggers
+ *
+ */
+VDB_EXTERN rc_t CC VCursorSuspendTriggers ( struct VCursor const *self );
 
 /*  VCursorGetSchema
  *  returns current schema of the open cursor
@@ -184,6 +231,8 @@ VDB_EXTERN rc_t CC VCursorPageIdRange ( struct VCursor const *self,
     uint32_t idx, int64_t id, int64_t *first, int64_t *last );
 
 
+VDB_EXTERN rc_t CC VCursorLinkedCursorGet(const struct VCursor *cself,const char *tbl, struct VCursor const **curs);
+VDB_EXTERN rc_t CC VCursorLinkedCursorSet(const struct VCursor *cself,const char *tbl, struct VCursor const *curs);
 
 
 /*--------------------------------------------------------------------------

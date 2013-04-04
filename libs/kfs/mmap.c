@@ -658,7 +658,7 @@ LIB_EXPORT rc_t CC KMMapMakeMaxRead ( const KMMap **mm, const KFile *f )
         return KMMapMakeRgnRead ( mm, f, 0, 1500 * 1024 * 1024 );
 
     /* 64-bit or beyond */
-    return KMMapMakeRgnRead ( mm, f, 0,  ( ( size_t ) 8 ) * 1024 * 1024 * 1024 );
+    return KMMapMakeRgnRead ( mm, f, 0,  ( ( size_t ) 48 ) * 1024 * 1024 * 1024 );
 }
 
 LIB_EXPORT rc_t CC KMMapMakeMaxUpdate ( KMMap **mm, KFile *f )
@@ -672,8 +672,8 @@ LIB_EXPORT rc_t CC KMMapMakeMaxUpdate ( KMMap **mm, KFile *f )
             eof = 1500 * 1024 * 1024;
 
         /* 64-bit or beyond */
-        if ( sizeof mm == 8 && eof > ( ( size_t ) 8 ) * 1024 * 1024 * 1024 )
-            eof = ( ( size_t ) 8 ) * 1024 * 1024 * 1024;
+        if ( sizeof mm == 8 && eof > ( ( size_t ) 48 ) * 1024 * 1024 * 1024 )
+            eof = ( ( size_t ) 48 ) * 1024 * 1024 * 1024;
 
         rc = KMMapMakeRgnUpdate ( mm, f, 0, ( size_t ) eof );
     }

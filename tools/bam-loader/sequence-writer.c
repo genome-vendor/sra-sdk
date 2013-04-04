@@ -164,6 +164,8 @@ rc_t SequenceWriteRecord(Sequence *self,
     if (!G.no_real_output) {
         if (self->tbl == NULL) {
             int csoption = (color ? ewseq_co_ColorSpace : 0);
+
+	    if(G.hasTI) csoption |= ewseq_co_TI;
             
             rc = TableWriterSeq_Make(&self->tbl, self->db,
                                      csoption | ewseq_co_NoLabelData | ewseq_co_SpotGroup, G.QualQuantizer);
@@ -184,7 +186,7 @@ rc_t SequenceDoneWriting(Sequence *self)
     return TableWriterSeq_TmpKeyStart(self->tbl);
 }
 
-rc_t SequenceReadKey(const Sequence *cself, int64_t row, uint32_t *keyId)
+rc_t SequenceReadKey(const Sequence *cself, int64_t row, uint64_t *keyId)
 {
     return TableWriterSeq_TmpKey(cself->tbl, row, keyId);
 }
@@ -224,7 +226,8 @@ rc_t SequenceRecordResize(SequenceRecord *self,
     rc_t rc;
     
     sz = seqLen * (sizeof(self->seq[0]) + sizeof(self->qual[0])) +
-         numreads * (sizeof(self->readStart[0]) +
+         numreads * (sizeof(self->ti) +
+                     sizeof(self->readStart[0]) +
                      sizeof(self->readLen[0]) +
                      sizeof(self->aligned[0]) + 
                      sizeof(self->orientation[0]) +
@@ -237,10 +240,10 @@ rc_t SequenceRecordResize(SequenceRecord *self,
         return rc;
     self->numreads = numreads;
     
-    self->readStart = (uint32_t *)storage->base;
+    self->ti = (uint64_t *)storage->base;
+    self->readStart = (uint32_t *)&self->ti[numreads];
     self->readLen = (uint32_t *)&self->readStart[numreads];
-    self->ti = (uint32_t *)&self->readLen[numreads];
-    self->aligned = (bool *)&self->ti[numreads];
+    self->aligned = (bool *)&self->readLen[numreads];
     self->orientation = (uint8_t *)&self->aligned[numreads];
     self->is_bad = (uint8_t *)&self->orientation[numreads];
     self->alignmentCount = (uint8_t *)&self->is_bad[numreads];
@@ -274,6 +277,7 @@ rc_t SequenceRecordInit(SequenceRecord *self, unsigned numreads, unsigned readLe
         seqlen += readLen[i];
     }
     self->numreads = numreads;
+    memset(self->cskey, 'T', numreads);
     return 0;
 }
 
@@ -319,12 +323,11 @@ rc_t SequenceRecordAppend(SequenceRecord *self,
     memmove(self->is_bad,           &((uint8_t const *)self->storage.base)[is_bad],            numreads * sizeof(self->is_bad[0]));
     memmove(self->orientation,      &((uint8_t const *)self->storage.base)[orientation],       numreads * sizeof(self->orientation[0]));
     memmove(self->aligned,          &((uint8_t const *)self->storage.base)[aligned],           numreads * sizeof(self->aligned[0]));
-    memmove(self->ti,               &((uint8_t const *)self->storage.base)[ti],                numreads * sizeof(self->ti[0]));
     memmove(self->readLen,          &((uint8_t const *)self->storage.base)[readLen],           numreads * sizeof(self->readLen[0]));
-    memmove(self->readStart,        &((uint8_t const *)self->storage.base)[readStart],         numreads * sizeof(self->readStart[0]));
+    memmove(self->ti,               &((uint8_t const *)self->storage.base)[ti],                numreads * sizeof(self->ti[0]));
     
-    memcpy(&self->readLen[numreads],        other->readLen,         other->numreads * sizeof(self->readLen[0]));
     memcpy(&self->ti[numreads],             other->ti,              other->numreads * sizeof(self->ti[0]));
+    memcpy(&self->readLen[numreads],        other->readLen,         other->numreads * sizeof(self->readLen[0]));
     memcpy(&self->aligned[numreads],        other->aligned,         other->numreads * sizeof(self->aligned[0]));
     memcpy(&self->orientation[numreads],    other->orientation,     other->numreads * sizeof(self->orientation[0]));
     memcpy(&self->is_bad[numreads],         other->is_bad,          other->numreads * sizeof(self->is_bad[0]));

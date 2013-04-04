@@ -77,6 +77,16 @@ KFS_EXTERN rc_t CC KBufFileMakeRead ( struct KFile const ** buf,
 KFS_EXTERN rc_t CC KBufFileMakeWrite ( struct KFile ** buf,
     struct KFile * original, bool update, size_t bsize );
 
+
+
+
+KFS_EXTERN rc_t CC KBufReadFileMakeRead ( const struct KFile ** bp,
+     const struct KFile * original, size_t bsize );
+
+KFS_EXTERN rc_t CC KBufWriteFileMakeWrite ( struct KFile ** bp,
+     struct KFile * original, size_t bsize );
+
+
 #ifdef __cplusplus
 }
 #endif

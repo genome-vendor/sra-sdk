@@ -36,6 +36,7 @@ SUBDIRS = \
 	klib \
 	kproc \
 	kfs \
+	kns \
 	kxml \
 	kfg \
 	krypto \
@@ -48,7 +49,10 @@ SUBDIRS = \
 	sra \
 	sraxf \
 	align \
-	axf
+	axf \
+	wgsxf \
+	ktst \
+	loader
 
 default: $(SUBDIRS)
 
@@ -106,6 +110,17 @@ $(SUBDIRS_TAG):
 
 .PHONY: tag $(SUBDIRS_TAG)
 
+#-------------------------------------------------------------------------------
+# runtests
+#
+SUBDIRS_RUNTESTS = $(addsuffix _runtests, kfg vxf)
+
+runtests: std $(SUBDIRS_RUNTESTS)
+
+$(SUBDIRS_RUNTESTS):
+	@ $(MAKE) -C $(subst _runtests,,$@) runtests
+
+.PHONY: runtests $(SUBDIRS_RUNTESTS)
 
 #-------------------------------------------------------------------------------
 # pass-through

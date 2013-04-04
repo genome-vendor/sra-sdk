@@ -47,7 +47,7 @@ rc_t CC align_restore_read_impl ( void *data, const VXformInfo *info, int64_t ro
     VRowResult *rslt, uint32_t argc, const VRowData argv [] )
 {
     rc_t rc;
-    int mmi,roi,rri,di;
+    int mmi,roi,rri,di,bi;
     const INSDC_4na_bin	*ref_read 	= argv[0].u.data.base;
     const uint32_t	ref_read_len 	= argv[0].u.data.elem_count;
     const uint8_t	*has_mismatch	= argv[1].u.data.base;
@@ -94,11 +94,12 @@ rc_t CC align_restore_read_impl ( void *data, const VXformInfo *info, int64_t ro
     rslt -> elem_count = dst_len;
     dst = rslt -> data -> base;
     /**** MAIN RESTORATION LOOP ***/
-    for(mmi=roi=rri=di=0, rl = 1; di < dst_len; di++,rri++,rl++){
-        if(has_ref_offset[di]){
+    for(mmi=roi=rri=di=bi=0, rl = 1; di < dst_len; di++,rri++,rl++,bi++){
+        if(has_ref_offset[di] && bi >= 0){ /** bi can only become negative on Bs; skip has_ref_offset if Bs are not exhausted ***/
             if(roi >= ref_offset_len)
                 return RC(rcXF, rcFunction, rcExecuting, rcData, rcInconsistent);
             rri += ref_offset[roi]; /** can lead to negative rri ***/
+	    bi = ref_offset[roi];
             roi++;
         }
         if(has_mismatch[di]){

@@ -38,6 +38,7 @@ struct KMDataNodeNamelist;
 #include "kdbfmt-priv.h"
 
 #include <kdb/meta.h>
+#include <kdb/namelist.h>
 #include <klib/container.h>
 #include <klib/pbstree.h>
 #include <klib/namelist.h>
@@ -67,7 +68,7 @@ struct KMDataNodeNamelist;
 #include <assert.h>
 
 #define KMETADATAVERS 2
-#define NODE_SIZE_LIMIT ( 1 * 1024 * 1024 )
+#define NODE_SIZE_LIMIT ( 25 * 1024 * 1024 )
 #define NODE_CHILD_LIMIT ( 100 * 1024 )
 
 
@@ -397,7 +398,7 @@ bool CC KMDataNodeInflate_v1 ( PBSTNode *n, void *data )
     }
 
     pb -> rc = RC ( rcDB, rcMetadata, rcConstructing, rcMemory, rcExhausted );
-    free ( n );
+    free ( b );
     return true;
 }
 
@@ -570,7 +571,7 @@ bool CC KMDataNodeInflate ( PBSTNode *n, void *data )
         BSTreeWhack ( & b -> attr, KMAttrNodeWhack, NULL );
     }
 
-    free ( n );
+    free ( b );
     return true;
 }
 
@@ -2671,6 +2672,7 @@ rc_t KMetadataMake ( KMetadata **metap,
 
         free ( meta );
     }
+    * metap = NULL;
     return rc;
 }
 
@@ -2781,11 +2783,11 @@ rc_t KDBManagerOpenMetadataReadInt ( KDBManager *self,
                     * metap = meta;
                     return 0;
                 }
+
+                KMetadataRelease ( meta );
             }
 
 /*             rc = RC ( rcDB, rcMgr, rcOpening, rcMetadata, rcExists ); */
-
-            KMetadataRelease ( meta );
         }
     }
     
@@ -3512,7 +3514,7 @@ void CC KMDataNodeGrabName ( BSTNode *n, void *data )
     list -> namelist [ list -> count ++ ] = ( ( const KMDataNode* ) n ) -> name;
 }
 
-LIB_EXPORT rc_t CC KMDataNodeListChild ( const KMDataNode *self, KNamelist **names )
+LIB_EXPORT rc_t CC KMDataNodeListChildren ( const KMDataNode *self, KNamelist **names )
 {
     rc_t rc;
     unsigned int count;

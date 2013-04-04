@@ -43,6 +43,8 @@
 #include <klib/rc.h>
 #include <sysalloc.h>
 
+#include "os-native.h"
+
 /* old Sun includes won't define PATH_MAX */
 
 #ifndef __XOPEN_OR_POSIX
@@ -59,11 +61,6 @@
 #include <errno.h>
 #include <assert.h>
 
-/* turn on dladdr for GNU and Darwin */
-#if ! defined _GNU_SOURCE && ! defined _DARWIN_C_SOURCE
-#define _GNU_SOURCE
-#define _DARWIN_C_SOURCE
-#endif
 #include <dlfcn.h>
 
 
@@ -293,7 +290,7 @@ LIB_EXPORT rc_t CC KDyldHomeDirectory ( const KDyld *self, const KDirectory **di
         {
             Dl_info info;
             memset ( & info, 0, sizeof info );
-            if ( dladdr ( ( const void* ) func, & info ) == 0 )
+            if ( dladdr ( ( void* ) func, & info ) == 0 )
                 rc = RC ( rcFS, rcDylib, rcSearching, rcFunction, rcNotFound );
             else
             {
@@ -468,9 +465,10 @@ rc_t KDylibSetLogging ( const KDylib *self )
 {
     rc_t ( CC * set_formatter ) ( KFmtWriter writer, KLogFmtFlags flags, void *data );
     rc_t ( CC * set_writer ) ( KWrtWriter writer, void *data );
+    rc_t ( CC * set_level ) ( KLogLevel lvl );
 
     /* set the current logging level */
-    rc_t ( CC * set_level ) ( KLogLevel lvl ) = dlsym ( self -> handle, "KLogLevelSet" );
+    set_level = ( rc_t ( * ) ( KLogLevel ) ) dlsym ( self -> handle, "KLogLevelSet" );
     if ( set_level != NULL )
     {
         KLogLevel lvl = KLogLevelGet ();
@@ -478,37 +476,37 @@ rc_t KDylibSetLogging ( const KDylib *self )
     }
 
     /* determine current library logging */
-    set_writer = dlsym ( self -> handle, "KOutHandlerSet" );
+    set_writer = ( rc_t ( * ) ( KWrtWriter, void* ) ) dlsym ( self -> handle, "KOutHandlerSet" );
     if ( set_writer != NULL ) {
         const KWrtHandler* handler = KOutHandlerGet ();
         ( * set_writer ) ( handler -> writer, handler -> data );
     }
 
-    set_formatter = dlsym ( self -> handle, "KLogLibFmtHandlerSet" );
+    set_formatter = ( rc_t ( * ) ( KFmtWriter, KLogFmtFlags, void* ) ) dlsym ( self -> handle, "KLogLibFmtHandlerSet" );
     if ( set_formatter != NULL ) {
         KLogFmtFlags flags = KLogLibFmtFlagsGet ();
         const KFmtHandler* fmt_handler = KLogFmtHandlerGet ();
         ( * set_formatter ) ( fmt_handler -> formatter, flags, fmt_handler -> data );
     }
-    set_writer = dlsym ( self -> handle, "KLogLibHandlerSet" );
+    set_writer = ( rc_t ( * ) ( KWrtWriter, void* ) ) dlsym ( self -> handle, "KLogLibHandlerSet" );
     if ( set_writer != NULL ) {
         const KWrtHandler* handler = KLogLibHandlerGet ();
         ( * set_writer ) ( handler -> writer, handler -> data );
     }
 
-    set_formatter = dlsym ( self -> handle, "KStsLibFmtHandlerSet" );
+    set_formatter = ( rc_t ( * ) ( KFmtWriter, KLogFmtFlags, void* ) ) dlsym ( self -> handle, "KStsLibFmtHandlerSet" );
     if ( set_formatter != NULL ) {
         KStsFmtFlags flags = KStsLibFmtFlagsGet ();
         const KFmtHandler* fmt_handler = KStsFmtHandlerGet ();
         ( * set_formatter ) ( fmt_handler -> formatter, flags, fmt_handler -> data );
     }
-    set_writer = dlsym ( self -> handle, "KStsLibHandlerSet" );
+    set_writer = ( rc_t ( * ) ( KWrtWriter, void* ) ) dlsym ( self -> handle, "KStsLibHandlerSet" );
     if ( set_writer != NULL ) {
         const KWrtHandler* handler = KStsLibHandlerGet ();
         ( * set_writer ) ( handler -> writer, handler -> data );
     }
 #if _DEBUGGING
-    set_writer = dlsym ( self -> handle, "KDbgHandlerSet" );
+    set_writer = ( rc_t ( * ) ( KWrtWriter, void* ) ) dlsym ( self -> handle, "KDbgHandlerSet" );
     if ( set_writer != NULL ) {
         const KWrtHandler* handler = KDbgHandlerGet ();
         ( * set_writer ) ( handler -> writer, handler -> data );
@@ -849,7 +847,8 @@ rc_t KDlsetWhack ( KDlset *self )
     return 0;
 }
 
-
+#define STRINGIZE(s) #s
+#define LIBNAME(pref, name, suff) STRINGIZE(pref) name STRINGIZE(suff)
 /* MakeSet
  *  load a dynamic library
  *
@@ -857,7 +856,7 @@ rc_t KDlsetWhack ( KDlset *self )
  */
 LIB_EXPORT rc_t CC KDyldMakeSet ( const KDyld *self, KDlset **setp )
 {
-    rc_t rc;
+    rc_t rc = 0;
 
     if ( setp == NULL )
         rc = RC ( rcFS, rcDylib, rcConstructing, rcParam, rcNull );
@@ -877,8 +876,20 @@ LIB_EXPORT rc_t CC KDyldMakeSet ( const KDyld *self, KDlset **setp )
                 VectorInit ( & set -> ord, 0, 16 );
                 KRefcountInit ( & set -> refcount, 1, "KDlset", "make", "dlset" );
 #if ! ALWAYS_ADD_EXE
-                * setp = set;
-                return 0;
+                {   
+                    KDylib *jni;
+                    const char* libname = LIBNAME(LIBPREFIX, "vdb_jni.", SHLIBEXT);
+                    if ( KDyldLoadLib ( ( KDyld* ) self, & jni, libname ) == 0 )
+                    {
+                        rc = KDlsetAddLib ( set, jni );
+                        KDylibRelease ( jni );
+                    }
+                    if (rc == 0)
+                    {
+                        * setp = set;
+                        return 0;
+                    }
+                }
 #else
                 {
                     KDylib *exe;
@@ -894,9 +905,8 @@ LIB_EXPORT rc_t CC KDyldMakeSet ( const KDyld *self, KDlset **setp )
                         }
                     }
                 }
-
-                KDlsetRelease ( set );
 #endif
+                KDlsetRelease ( set );
             }
         }
 

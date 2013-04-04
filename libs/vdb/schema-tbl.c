@@ -52,6 +52,9 @@
 /* make implicit physical expressions explicit on output */
 #define DUMP_EXPLICIT_PHYS_MEMBERS 0
 
+/* temporary v1 schema modification */
+#define ALLOW_DEFAULT_VIEW_DECL 1
+
 
 /*--------------------------------------------------------------------------
  * SColumn
@@ -444,6 +447,10 @@ bool CC STableOverridesClone ( void *item, void *data )
 void CC STableWhack ( void *item, void *ignore )
 {
     STable *self = item;
+
+    if ( self -> dflt_view != NULL )
+        StringWhack ( self -> dflt_view );
+
 #if SLVL >= 8
     VectorWhack ( & self -> col, SColumnWhack, NULL );
     VectorWhack ( & self -> cname, SNameOverloadWhack, NULL );
@@ -2205,6 +2212,42 @@ rc_t untyped_tbl_expr ( KSymTable *tbl, KTokenSource *src, KToken *t,
     return rc;
 }
 
+#if SLVL >= 8
+static
+rc_t default_view_decl ( KSymTable *tbl, KTokenSource *src, KToken *t,
+    const SchemaEnv *env, VSchema *self, STable *table )
+{
+    rc_t rc;
+    bool string_too_long;
+
+    if ( next_token ( tbl, src, t ) -> id != eString )
+        return KTokenExpected ( t, klogErr, "default view declaration" );
+
+    string_too_long = false;
+    if ( t -> str . size >= 236 + 2 )
+    {
+        KTokenExpected ( t, klogWarn, "default view declaration less than 236 characters" );
+        string_too_long = true;
+    }
+
+    rc = expect ( tbl, src, t, eSemiColon, ";", true );
+    if ( rc == 0 && ! string_too_long )
+    {
+        String decl = t -> str;
+        ++ decl . addr;
+        decl . size -= 2;
+        decl . len -= 2;
+
+        if ( table -> dflt_view != NULL )
+            StringWhack ( table -> dflt_view );
+
+        rc = StringCopy ( & table -> dflt_view, & decl );
+    }
+
+    return rc;
+}
+#endif
+
 /*
  * table-local-decl   = [ 'virtual' ] 'column' <column-decl>
  *                    | 'physical' [ 'column' ] <physical-decl>
@@ -2220,6 +2263,14 @@ rc_t table_local_decl ( KSymTable *tbl, KTokenSource *src, KToken *t,
     {
 #if SLVL >= 8
     case kw_default:
+        if ( env -> default_view_decl )
+        {
+            KToken t2;
+            if ( next_token ( tbl, src, & t2 ) -> id == kw_view )
+                return default_view_decl ( tbl, src, t, env, self, table );
+             KTokenSourceReturn ( src, & t2 );
+        }
+        /* no break */
     case kw_extern:
     case kw_column:
     case kw_readonly:
@@ -2808,14 +2859,13 @@ rc_t table_declaration ( KSymTable *tbl, KTokenSource *src, KToken *t,
     rc_t rc;
     void *ignore;
 
-    STable *table = malloc ( sizeof * table );
+    STable *table = calloc ( 1, sizeof * table );
     if ( table == NULL )
     {
         rc = RC ( rcVDB, rcSchema, rcParsing, rcMemory, rcExhausted );
         return KTokenRCExplain ( t, klogInt, rc );
     }
 
-    memset ( table, 0, sizeof * table );
     rc = table_decl ( tbl, src, t, env, self, table );
     if ( rc == 0 )
     {

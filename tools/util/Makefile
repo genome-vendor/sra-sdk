@@ -37,6 +37,7 @@ EXT_TOOLS = \
 	kdbmeta \
 	vdb-lock \
 	vdb-unlock \
+	test-sra \
 	vdb-passwd
 
 ALL_TOOLS = \
@@ -46,15 +47,13 @@ ALL_TOOLS = \
 #-------------------------------------------------------------------------------
 # outer targets
 #
-vers-includes: $(addsuffix .vers.h,$(EXT_TOOLS))
-
-all std: makedirs vers-includes
+all std: vers-includes
 	@ $(MAKE_CMD) $(TARGDIR)/$@
 
-$(ALL_TOOLS): makedirs vers-includes
+$(ALL_TOOLS): vers-includes
 	@ $(MAKE_CMD) $(BINDIR)/$@
 
-.PHONY: vers-includes all std $(ALL_TOOLS)
+.PHONY: all std $(ALL_TOOLS)
 
 #-------------------------------------------------------------------------------
 # all
@@ -71,6 +70,13 @@ $(TARGDIR)/std: \
 	$(addprefix $(BINDIR)/,$(EXT_TOOLS))
 
 .PHONY: $(TARGDIR)/std
+
+#-------------------------------------------------------------------------------
+# vers-includes
+#
+$(TARGDIR)/vers-includes: $(addsuffix .vers.h,$(EXT_TOOLS))
+
+.PHONY: $(TARGDIR)/vers-includes
 
 #-------------------------------------------------------------------------------
 # clean
@@ -99,6 +105,11 @@ RCEXPLAIN_OBJ = \
 
 RCEXPLAIN_LIB = \
 	-skapp \
+	-svfs \
+	-skfg \
+	-skrypto \
+	-skfs \
+	-sksproc \
 	-sklib
 
 $(BINDIR)/rcexplain: $(RCEXPLAIN_OBJ)
@@ -117,12 +128,13 @@ KDBMETA_OBJ = \
 KDBMETA_LIB = \
 	-ssrapath \
 	-skapp \
-	-swkdb \
-	-svfs \
-	-skrypto \
+	-lwkdb \
+	-lvfs \
 	-lkfg \
-	-skfs \
-	-sklib
+	-lkrypto \
+	-lkfs \
+	-lkproc \
+	-lklib
 
 $(BINDIR)/kdbmeta: $(KDBMETA_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(KDBMETA_LIB)
@@ -147,8 +159,9 @@ VDB_LOCK_LIB = \
 	-lkrypto \
 	-lkfg \
 	-lkfs \
+	-lkproc \
 	-lklib \
-	-lkproc
+	-lm
 
 $(BINDIR)/vdb-lock: $(VDB_LOCK_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(VDB_LOCK_LIB)
@@ -173,12 +186,41 @@ VDB_UNLOCK_LIB = \
 	-lkrypto \
 	-lkfg \
 	-lkfs \
+	-lkproc \
 	-lklib \
-	-lkproc
+	-lm
 
 $(BINDIR)/vdb-unlock: $(VDB_UNLOCK_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(VDB_UNLOCK_LIB)
 
+#-------------------------------------------------------------------------------
+# test-sra: print config, resolve sra, check dependencies
+#
+
+T_SRC = \
+	test-sra
+
+T_OBJ = \
+	$(addsuffix .$(OBJX),$(T_SRC))
+
+T_LIB = \
+	-dalign-reader \
+	$(READONLY_SCHEMA_LIBS) \
+	-dksrch \
+	-lsradb \
+	-lvdb \
+	-lkdb \
+	-lkapp \
+	-lvfs \
+	-lkrypto \
+	-lkfg \
+	-lkfs \
+	-lkproc \
+	-lklib \
+	-lm
+
+$(BINDIR)/test-sra: $(T_OBJ)
+	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(T_LIB)
 
 #----------------------------------------------------------------
 # vdb-passwd
@@ -193,10 +235,11 @@ VDB_PASSWD_OBJ = \
 VDB_PASSWD_LIB = \
 	-skapp \
 	-lvfs \
-	-lkrypto \
 	-lkfg \
+	-lkrypto \
 	-lkfs \
-	-lklib \
+	-sksproc \
+	-lklib
 
 $(BINDIR)/vdb-passwd: $(VDB_PASSWD_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(VDB_PASSWD_LIB)

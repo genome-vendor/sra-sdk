@@ -29,11 +29,16 @@
 #include <krypto/extern.h>
 #include <krypto/ciphermgr.h>
 #include <krypto/cipher.h>
-#include <krypto/cipher-priv.h>
+
+#include "cipher-priv.h"
+
+#include <kproc/lock.h>
 
 #include <klib/rc.h>
 #include <klib/refcount.h>
 #include <klib/debug.h>
+
+#include <atomic.h>
 
 #include <stdlib.h>
 #include <assert.h>
@@ -53,22 +58,17 @@ static const char kciphermanager_classname [] = "KCipherManager";
  * KCipherManager
  */
 /* currently expected to be a singleton and not use a vtable but
- * be fully fleashed out here */
+ * be fully fleshed out here */
 static 
 KCipherManager * singleton = NULL;
+
 
 struct KCipherManager
 {
     KRefcount refcount;
 
-    /* reference counting is from the cipher to the manager
-     * not form the manager to the cipher
-     *
-     * when we decide to support more than AES and especially when we
-     * decide to allow foreign block ciphers we'll need a better
-     * structure here...
-     */
-    const KBlockCipher * block_ciphers [kcipher_count];
+    KLock * lock;
+
 };
 
 
@@ -94,15 +94,16 @@ rc_t KCipherManagerAlloc (KCipherManager ** ppobj)
 static
 rc_t KCipherManagerInit (KCipherManager * self)
 {
-    uint32_t index;
+    rc_t rc;
 
-    KRefcountInit (&self->refcount, 1, kciphermanager_classname, "init",
-                   "singleton");
+    rc = KLockMake (&self->lock);
+    if (rc == 0)
+    {
+        KRefcountInit (&self->refcount, 1, kciphermanager_classname, "init",
+                       "singleton");
+    }
 
-    for (index = 0; index < kcipher_count; ++index)
-        self->block_ciphers[index] = NULL;
-
-    return 0;
+    return rc;
 }
 
 
@@ -117,23 +118,21 @@ LIB_EXPORT rc_t CC KCipherManagerDestroy ( KCipherManager *self )
         rc = RC ( rcKrypto, rcMgr, rcDestroying, rcSelf, rcNull );
     else
     {
-        assert (self == singleton);
+        if (self == singleton)
+        {
+            KCipherManager * reread;
+
+            reread = atomic_test_and_set_ptr ((void*volatile*)&singleton, NULL, self);
+
+            /* ignore results: just going for guaranteed atomicity though might not need it */
+        }
 
         /* no return value */
         KRefcountWhack (&self->refcount, kciphermanager_classname);
 
-        {
-            unsigned ix;
-            
-            for (ix = 0; ix < kcipher_count; ++ix)
-                if (self->block_ciphers[ix])
-                {
-                    KBlockCipherRelease (self->block_ciphers[ix]);
-                    self->block_ciphers[ix] = NULL;
-                }
-        }
+        rc = KLockRelease (self->lock);
+
         free (self);
-        singleton = NULL;
     }
     return rc;
 }
@@ -204,7 +203,10 @@ LIB_EXPORT rc_t CC KCipherManagerMake (KCipherManager ** mgr)
 
     if (mgr == NULL)
         return RC (rcKrypto, rcMgr, rcConstructing, rcSelf, rcNull);
+
     *mgr = NULL;
+
+make_race_retry:
 
     if (singleton)
     {
@@ -217,108 +219,30 @@ LIB_EXPORT rc_t CC KCipherManagerMake (KCipherManager ** mgr)
     }
     else
     {
-        rc = KCipherManagerAlloc (&singleton);
+        KCipherManager * self;
+
+        rc = KCipherManagerAlloc (&self);
         if (rc == 0)
         {
-            rc = KCipherManagerInit (singleton);
+            rc = KCipherManagerInit (self);
             if (rc == 0)
             {
-                *mgr = singleton;
+                KCipherManager * reread;
+
+                reread = atomic_test_and_set_ptr ((void*volatile*)&singleton, self, NULL);
+
+                if (reread)
+                {
+                    KCipherManagerDestroy (self);
+                    goto make_race_retry;
+                }
+
+                *mgr = self;
                 return 0;
             }
-
-            KCipherManagerDestroy (singleton);
-            singleton = NULL;
-        }
-    }
-    return rc;
-}
-
-static
-rc_t KCipherManagerMakeBlockCipher (const KCipherManager * self,
-                                    const KBlockCipher ** bcipher,
-                                    kcipher_type type)
-{
-    rc_t rc = 0;
-
-    assert (self);
-    assert (bcipher);
-
-    *bcipher = NULL;
-
-    if (type >= kcipher_count)
-        rc = RC (rcKrypto, rcMgr, rcConstructing, rcParam, rcInvalid);
-
-    else
-    {
-        const KBlockCipher * c_block_cipher;
-
-        c_block_cipher = self->block_ciphers[type];
-
-        if (c_block_cipher == NULL)
-        {
-            KBlockCipher * block_cipher;
-            switch (type)
+            else
             {
-            default:
-                return RC (rcKrypto, rcMgr, rcConstructing, rcParam, rcInvalid);
-
-            case kcipher_AES:
-                rc = KAESCipherAlloc (&block_cipher);
-                if (rc == 0)
-                {
-                    rc = KAESCipherInit (block_cipher, self);
-                    if (rc == 0)
-                    {
-                        ((KCipherManager*)self)->block_ciphers[type] = block_cipher;
-                        c_block_cipher = block_cipher;
-                    }
-                    else
-                        free (block_cipher);
-                }
-                break;
-#if USE_NCBI_AES
-            case kcipher_AES_ncbi_ni:
-#if USE_AES_NI
-                rc = KAESNCBIniCipherAlloc (&block_cipher);
-                if (rc == 0)
-                {
-                    rc = KAESNCBIniCipherInit (block_cipher, self);
-                    if (rc == 0)
-                    {
-                        ((KCipherManager*)self)->block_ciphers[type] = block_cipher;
-                        c_block_cipher = block_cipher;
-                    }
-                    else
-                        free (block_cipher);
-                }
-                break;
-#endif
-            case kcipher_AES_ncbi:
-                rc = KAESNCBICipherAlloc (&block_cipher);
-                if (rc == 0)
-                {
-                    rc = KAESNCBICipherInit (block_cipher, self);
-                    if (rc == 0)
-                    {
-                        ((KCipherManager*)self)->block_ciphers[type] = block_cipher;
-                        c_block_cipher = block_cipher;
-                    }
-                    else
-                        free (block_cipher);
-                }
-                break;
-#endif
-            }
-        }
-
-        if (rc == 0)
-        {
-            rc = KBlockCipherAddRef (c_block_cipher);
-            if (rc == 0)
-            {
-                *bcipher = c_block_cipher;
-                return 0;
+                KCipherManagerDestroy (self);
             }
         }
     }
@@ -326,32 +250,20 @@ rc_t KCipherManagerMakeBlockCipher (const KCipherManager * self,
 }
 
 
-static
+static __inline__
 rc_t KCipherManagerMakeCipherInt (const KCipherManager *self,
-                                  const KBlockCipher * pbc,
-                                  KCipher ** pcipher)
+                                  KCipher ** pcipher,
+                                  kcipher_type type)
 {
     KCipher * pc;
     rc_t rc;
 
     assert (self);
-    assert (pbc);
     assert (pcipher);
 
-    *pcipher = NULL;
+    rc = KCipherMake (&pc, type);
 
-    rc = KCipherAlloc (&pc, pbc);
-    if (rc == 0)
-    {
-        rc = KCipherInit (pc, pbc);
-    
-        if (rc == 0)
-        {
-            *pcipher = pc;
-            return 0;
-        }
-        KBlockCipherRelease (pbc);
-    }
+    *pcipher = rc ? NULL : pc;
 
     return rc;
 }
@@ -362,7 +274,6 @@ rc_t CC KCipherManagerMakeCipher (const KCipherManager * self,
                                   struct KCipher ** pcipher,
                                   kcipher_type type)
 {
-    const KBlockCipher * pbc;
     rc_t rc;
     
     if (self == NULL)
@@ -371,12 +282,10 @@ rc_t CC KCipherManagerMakeCipher (const KCipherManager * self,
     if (pcipher == NULL)
         return RC (rcKrypto, rcMgr, rcConstructing, rcParam, rcNull);
 
-    rc = KCipherManagerMakeBlockCipher (self, &pbc, type);
-    if (rc == 0)
-    {
-        rc = KCipherManagerMakeCipherInt (self, pbc, pcipher);
-        KBlockCipherRelease (pbc);
-    }
+    *pcipher = NULL;
+
+    rc = KCipherManagerMakeCipherInt (self, pcipher, type);
+
     return rc;
 }
 

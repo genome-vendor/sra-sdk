@@ -47,7 +47,6 @@
 #include <stdlib.h>
 #include <assert.h>
 
-#define MLIMIT ( 512 * 1024 * 1024 )
 
 /*--------------------------------------------------------------------------
  * VDBManager
@@ -85,14 +84,8 @@ LIB_EXPORT rc_t CC VDBManagerMakeUpdate ( VDBManager **mgrp,  KDirectory *wd )
                         rc = VDBManagerConfigPaths ( mgr, true );
                         if ( rc == 0 )
                         {
-                            const VDBMem *mem;
                             mgr -> user = NULL;
                             mgr -> user_whack = NULL;
-                            DLListInit ( & mgr -> mpool );
-                            mgr -> plimit = MLIMIT / sizeof mem -> page;
-                            mgr -> mlimit = MLIMIT / sizeof mem -> page;
-                            mgr -> pcount = 0;
-                            mgr -> mcount = 0;
                             KRefcountInit ( & mgr -> refcount, 1, "VDBManager", "make-update", "vmgr" );
                             * mgrp = mgr;
                             return 0;

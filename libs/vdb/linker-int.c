@@ -55,6 +55,8 @@ extern VTRANSFACT_DECL ( vdb_merge );
 extern VTRANSFACT_DECL ( vdb_split );
 extern VTRANSFACT_DECL ( vdb_transpose );
 extern VTRANSFACT_DECL ( vdb_detranspose );
+extern VTRANSFACT_DECL ( vdb_delta_average );
+extern VTRANSFACT_DECL ( vdb_undelta_average );
 extern VTRANSFACT_DECL ( meta_read );
 extern VTRANSFACT_DECL ( meta_value );
 extern VTRANSFACT_DECL ( meta_attr_read );
@@ -207,6 +209,8 @@ rc_t VLinkerInitFactoriesRead ( VLinker *self,  KSymTable *tbl, const SchemaEnv 
         { vdb_split, "vdb:split" },
         { vdb_transpose, "vdb:transpose" },
         { vdb_detranspose, "vdb:detranspose" },
+        { vdb_delta_average, "vdb:delta_average" },
+        { vdb_undelta_average, "vdb:undelta_average" },
         { meta_read, "meta:read" },
         { meta_value, "meta:value" },
         { meta_attr_read, "meta:attr:read" },

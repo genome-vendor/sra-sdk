@@ -34,10 +34,12 @@
 #include <klib/namelist.h>
 #include <klib/log.h>
 #include <klib/rc.h>
+#include <klib/printf.h>
 #include <sysalloc.h>
 
 #include <limits.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <assert.h>
 
@@ -203,23 +205,30 @@ rc_t KDatabaseMake ( KDatabase **dbp, const KDirectory *dir, const char *path )
  *  wd-native character set giving path to database
  */
 static
-rc_t KDBManagerVOpenDBReadInt ( const KDBManager *self,
-    const KDatabase **dbp, const KDirectory *wd,
-    const char *path, va_list args )
+rc_t KDBManagerVOpenDBReadInt ( const KDBManager *self, const KDatabase **dbp,
+                                const KDirectory *wd, bool try_srapath,
+                                const char *path, va_list args )
 {
-    /* generate absolute path to db */
+    rc_t rc;
+
+    /* MUST use vsnprintf because the documented behavior of "path"
+       is that of stdc library's printf, not vdb printf */
     char dbpath [ 4096 ];
-    rc_t rc = KDirectoryVResolvePath ( wd, true,
-        dbpath, sizeof dbpath, path, args );
-    if ( rc == 0 )
+    int z = ( args == NULL ) ?
+        snprintf ( dbpath, sizeof dbpath, path ):
+        vsnprintf ( dbpath, sizeof dbpath, path, args );
+    if ( z < 0 || ( size_t ) z >= sizeof dbpath )
+        rc = RC ( rcDB, rcMgr, rcOpening, rcPath, rcExcessive );
+    else
     {
-        KDatabase *db;
         const KDirectory *dir;
 
         /* open the directory if its a database */
-	rc = KDBOpenPathTypeRead ( wd, dbpath, &dir, kptDatabase, NULL );
+        rc = KDBOpenPathTypeRead ( self, wd, dbpath, &dir, kptDatabase, NULL, try_srapath );
         if ( rc == 0 )
         {
+            KDatabase *db;
+
             /* allocate a new guy */
             rc = KDatabaseMake ( & db, dir, dbpath );
             if ( rc == 0 )
@@ -232,7 +241,6 @@ rc_t KDBManagerVOpenDBReadInt ( const KDBManager *self,
             KDirectoryRelease ( dir );
         }
     }
-    
     return rc;
 }
 
@@ -273,7 +281,7 @@ LIB_EXPORT rc_t CC KDBManagerVOpenDBRead ( const KDBManager *self,
     if ( self == NULL )
         return RC ( rcDB, rcMgr, rcOpening, rcSelf, rcNull );
 
-    return KDBManagerVOpenDBReadInt ( self, db, self -> wd, path, args );
+    return KDBManagerVOpenDBReadInt ( self, db, self -> wd, true, path, args );
 }
 
 LIB_EXPORT rc_t CC KDatabaseVOpenDBRead ( const KDatabase *self,
@@ -295,7 +303,7 @@ LIB_EXPORT rc_t CC KDatabaseVOpenDBRead ( const KDatabase *self,
     if ( rc == 0 )
     {
         rc = KDBManagerVOpenDBReadInt ( self -> mgr, dbp,
-            self -> dir, path, NULL );
+            self -> dir, false, path, NULL );
         if ( rc == 0 )
         {
             KDatabase *db = ( KDatabase* ) * dbp;
@@ -433,7 +441,7 @@ LIB_EXPORT bool CC KDatabaseIsAlias ( const KDatabase *self, uint32_t type,
             return false;
         }
 
-        rc = KDBVMakeSubPath ( self -> dir, path, sizeof path, ns, len, name, NULL );
+        rc = KDBMakeSubPath ( self -> dir, path, sizeof path, ns, len, name );
         if ( rc == 0 )
         {
             switch ( KDirectoryPathType ( self -> dir, path ) )
@@ -629,18 +637,29 @@ LIB_EXPORT rc_t CC KDatabaseModDate ( const KDatabase *self, KTime_t *mtime )
 /* List
  *  create database listings
  */
-static
-bool CC KDatabaseListFilter ( const KDirectory *dir, const char *name, void *data )
+struct FilterData
 {
-    return ( KDBOpenPathTypeRead ( dir, name, NULL, (( long int ) data ), NULL ) == 0 );
+    const KDBManager * mgr;
+    int type;
+};
+
+static
+bool CC KDatabaseListFilter ( const KDirectory *dir, const char *name, void *data_ )
+{
+    struct FilterData * data = data_;
+    return ( KDBOpenPathTypeRead ( data->mgr, dir, name, NULL, data->type, NULL, false ) == 0 );
 }
 
 LIB_EXPORT rc_t CC KDatabaseListDB ( const KDatabase *self, KNamelist **names )
 {
     if ( self != NULL )
     {
+        struct FilterData data;
+        data.mgr = self->mgr;
+        data.type = kptDatabase;
+
         return KDirectoryVList ( self -> dir,
-            names, KDatabaseListFilter, ( void* ) kptDatabase, "db", NULL );
+            names, KDatabaseListFilter, &data, "db", NULL );
     }
 
     if ( names != NULL )
@@ -653,8 +672,12 @@ LIB_EXPORT rc_t CC KDatabaseListTbl ( struct KDatabase const *self, KNamelist **
 {
     if ( self != NULL )
     {
+        struct FilterData data;
+        data.mgr = self->mgr;
+        data.type = kptTable;
+
         return KDirectoryVList ( self -> dir,
-            names, KDatabaseListFilter, ( void* ) kptTable, "tbl", NULL );
+            names, KDatabaseListFilter, &data, "tbl", NULL );
     }
 
     if ( names != NULL )
@@ -667,8 +690,12 @@ LIB_EXPORT rc_t CC KDatabaseListIdx ( struct KDatabase const *self, KNamelist **
 {
     if ( self != NULL )
     {
+        struct FilterData data;
+        data.mgr = self->mgr;
+        data.type = kptIndex;
+
         return KDirectoryVList ( self -> dir,
-            names, KDatabaseListFilter, ( void* ) kptIndex, "idx", NULL );
+            names, KDatabaseListFilter, &data, "idx", NULL );
     }
 
     if ( names != NULL )

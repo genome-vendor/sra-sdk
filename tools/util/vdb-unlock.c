@@ -117,8 +117,9 @@ rc_t CC KMain ( int argc, char *argv [] )
                 else
                 {
                     VDBManager *mgr;
-                    char full [ 4096 ];
 
+#if TOOLS_USE_SRAPATH != 0
+                    char full [ 4096 ];
                     SRAPath *sra_path;
                     rc = SRAPathMake ( & sra_path, NULL );
                     if ( rc == 0 )
@@ -131,6 +132,7 @@ rc_t CC KMain ( int argc, char *argv [] )
                         }
                         SRAPathRelease ( sra_path );
                     }
+#endif
 
                     rc = VDBManagerMakeUpdate ( & mgr, NULL );
                     if ( rc != 0 )

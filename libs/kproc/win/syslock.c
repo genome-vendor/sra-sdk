@@ -27,6 +27,7 @@
 #include <kproc/extern.h>
 
 #include "syslock-priv.h"
+#include <kproc/timeout.h>
 #include <kproc/lock.h>
 #include <klib/rc.h>
 #include <sysalloc.h>
@@ -110,6 +111,7 @@ LIB_EXPORT rc_t CC KLockAddRef ( const KLock *cself )
     return 0;
 }
 
+
 LIB_EXPORT rc_t CC KLockRelease ( const KLock *cself )
 {
     KLock *self = ( KLock* ) cself;
@@ -151,12 +153,13 @@ LIB_EXPORT rc_t CC KLockAcquire ( KLock *self )
     return RC ( rcPS, rcLock, rcLocking, rcNoObj, rcUnknown );
 }
 
+
 LIB_EXPORT rc_t CC KLockTimedAcquire ( KLock *self, timeout_t *tm )
 {
     if ( self == NULL )
         return RC ( rcPS, rcLock, rcLocking, rcSelf, rcNull );
 
-    switch ( WaitForSingleObject ( self -> mutex, tm != NULL ? tm -> mS : 0 ) )
+    switch ( WaitForSingleObject( self -> mutex, tm != NULL ? tm -> mS : 0 ) )
     {
     case WAIT_ABANDONED:
     case WAIT_OBJECT_0:
@@ -175,6 +178,7 @@ LIB_EXPORT rc_t CC KLockTimedAcquire ( KLock *self, timeout_t *tm )
 
     return RC ( rcPS, rcLock, rcLocking, rcNoObj, rcUnknown );
 }
+
 
 /* Unlock
  *  releases lock

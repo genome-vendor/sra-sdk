@@ -47,17 +47,6 @@ $(SUBDIRS) test:
 .PHONY: default $(SUBDIRS) test
 
 #-------------------------------------------------------------------------------
-# static vs. dynamic
-#
-static:
-	@ touch "$(CURDIR)/build/STATIC"
-
-dynamic:
-	@ rm -f "$(CURDIR)/build/STATIC"
-
-.PHONY: static dynamic
-
-#-------------------------------------------------------------------------------
 # all
 #
 SUBDIRS_ALL = $(addsuffix _all,$(SUBDIRS))
@@ -89,27 +78,45 @@ SUBDIRS_CLEAN = $(addsuffix _clean,$(SUBDIRS_ALL))
 clean: $(SUBDIRS_CLEAN)
 
 $(SUBDIRS_CLEAN):
-	@ $(MAKE) -C $(subst _all_clean,,$@) clean
+	@ $(MAKE) -s -C $(subst _all_clean,,$@) clean
 
 .PHONY: clean $(SUBDIRS_CLEAN)
 
 
 #-------------------------------------------------------------------------------
+# runtests
+#
+SUBDIRS_RUNTESTS = $(addsuffix _runtests, libs tools test)
+
+runtests: std $(SUBDIRS_RUNTESTS)
+
+$(SUBDIRS_RUNTESTS):
+	@ $(MAKE) -C $(subst _runtests,,$@) runtests
+
+.PHONY: runtests $(SUBDIRS_RUNTESTS)
+
+#-------------------------------------------------------------------------------
 # pass-through targets
 #
-COMPILERS = GCC ICC VC++
-ARCHITECTURES = i386 x86_64
-CONFIG = debug profile release
+COMPILERS = GCC VC++ CLANG
+ARCHITECTURES = i386 x86_64 sparc32 sparc64
+CONFIG = debug profile release static dynamic
+PUBLISH = scm pubtools
+REPORTS = bindir targdir osdir config compilers architecture architectures
 PASSTHRUS = \
-	out bindir \
+	out \
 	CC $(COMPILERS) \
 	$(ARCHITECTURES) \
-	$(CONFIG)
+	$(CONFIG) $(PUBLISH)
 
 $(PASSTHRUS):
-	@ $(MAKE) TOP=$(CURDIR) -f build/Makefile.env $@
+	@ $(MAKE) -s TOP=$(CURDIR) -f build/Makefile.env $@
+	@ $(MAKE) -s TOP=$(CURDIR) -f build/Makefile.env rebuild-dirlinks config
 
-.PHONY: $(PASSTHRUS)
+$(REPORTS):
+	@ $(MAKE) -s TOP=$(CURDIR) -f build/Makefile.env $@
+
+.PHONY: $(PASSTHRUS) $(REPORTS)
 
 
 #-------------------------------------------------------------------------------

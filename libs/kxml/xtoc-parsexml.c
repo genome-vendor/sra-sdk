@@ -32,6 +32,8 @@
 #include <klib/out.h>
 #include <klib/rc.h> /* RC */
 
+#include "os-native.h"
+
 #include <assert.h>
 #include <stdio.h> /* printf */
 #include <stdlib.h> /* free */
@@ -181,7 +183,11 @@ rc_t CC StrToKTime(const char* str, KTime_t* t)
             char buffer [ 64 ];
 
             struct tm gmt;
+#if SUN
+	    gmt = * gmtime ( & t2 );
+#else
             gmtime_r ( & t2, & gmt );
+#endif
             rc = string_printf ( buffer, sizeof buffer, & len
                 , "%04d-%02d-%02dT%02d:%02d:%02dZ"
                 , gmt . tm_year + 1900

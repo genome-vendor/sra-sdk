@@ -31,6 +31,7 @@
 #include <klib/data-buffer.h>
 #include <klib/container.h>
 #include <klib/checksum.h>
+#include <klib/text.h>
 #include <kfs/mmap.h>
 #include <kfs/file.h>
 #include <kdb/manager.h>
@@ -58,112 +59,173 @@
 #include <ctype.h>
 #include <assert.h>
 
-struct ReferenceMgr {
-    const TableWriterRef* writer;
-    const KDirectory* dir;
-    BSTree tree;
-    uint32_t options;
-    const RefSeqMgr* rmgr;
-    VDatabase* db;
-    size_t cache;
-    uint32_t num_open_max;
-    uint32_t num_open;
-    uint64_t usage;
-    uint32_t max_seq_len;
-    /* last seq end */
-    int64_t ref_rowid;
-    int32_t compress_buf[64 * 1024];
-    /* must be last element of struct! */
-    uint8_t seq_buf[TableWriterRefSeq_MAX_SEQ_LEN];
+/*
+ * ReferenceSeq objects:
+ *  ReferenceSeq objects may be unattached, i.e. they might not yet represent an
+ *  actual sequence.
+ *
+ *  ReferenceSeq objects may be attached, i.e. they represent a sequence from
+ *  either RefSeq or a fasta file.
+ *
+ *  A ReferenceSeq object may be refered to by more than one id, but a
+ *  ReferenceSeq object has only one canonical id.
+ *
+ *  More than one ReferenceSeq object may be associated with the same seqId.
+ *
+ *  More than one ReferenceSeq object may be attached to the same sequence.
+ *  This will cause the REFERENCE table to have more than one copy of the
+ *  sequence.
+ *
+ *  ReferenceSeq objects may be created from the config file.  These objects
+ *  will have an id, a seqId, but no fastaSeqId.  These are unattached.
+ *
+ *  ReferenceSeq objects may be created from explicit fasta files.  These
+ *  objects will have a fastaSeqId, but *** NO id OR seqId ***. These are
+ *  attached.
+ *
+ *  ReferenceSeq objects may be created on the fly by requesting an id that
+ *  isn't already in the collection.  These objects will have the requested id.
+ *
+ * When a reference is requested (by id):
+ *  Resolve the id to a ReferenceSeq object.
+ *  If the object is unattached, attach it to a sequence.
+ *  If the sequence is not yet written to the REFERENCE table, write it to the
+ *  REFERENCE table.  NAME gets id; SEQID gets seqId unless seqId is null, then
+ *  SEQID gets id.
+ *
+ * Resolving id's to ReferenceSeq objects:
+ *  Search the id index and if the found object is attached, return it.
+ *  Search the identifiers in the fastaSeqIds or seqIds.
+ *  If different objects were found from both searches, use sequence length and
+ *  MD5 to break the tie (if both match then use RefSeq).  If no sequence length
+ *  or MD5 then fail.
+ *  If no objects were found from either search, then create a new unattached
+ *  ReferenceSeq object.
+ *  If the object's id is null, set it to the id.
+ *  It the object was not found in the id index, add it.
+ *
+ * Attaching ReferenceSeq objects to sequences:
+ *  Search RefSeq for seqId.
+ *  Else search RefSeq for id.
+ *  Else search for seqId in the loaded fasta files.
+ *  Else search data directory for id.fasta or id.fa; load it or fail.
+ *  Else search data directory for seqId.fasta or seqId.fa; load it or fail.
+ *  Else fail.
+ *  If failed, mark the object as dead.
+ *
+ *
+ *
+ * Config file:
+ *  The config file consists of lines containing whitespace (preferably tab)
+ *  seperated fields.  The fields are:
+ *      NAME (unique)
+ *      SEQID
+ *      extra (optional)
+ *
+ *  There is one ReferenceSeq object created per record in the config file.
+ *  NAME is stored in id; SEQID is stored in seqId; if extra contains the word
+ *  'circular' (case-insensitive), true is stored in circular.  These
+ *  ReferenceSeq object are created in the unattached state, i.e. not attached
+ *  to a fasta file or a RefSeq library object.
+ *
+ * Fasta files:
+ *  Fasta file consists of one of more sequences.  A sequence in a fasta file
+ *  consists of a seqid line followed by lines containing the bases of the
+ *  sequence.  A seqid line starts with '>' and the next word (whitespace
+ *  delimited) is the seqid.  The seqid may consist of '|' delimited identifiers
+ *  (this is purposely vague).  The fasta seqid is stored in fastaSeqId.
+ *
+ * Fasta files may be loaded explicitly:
+ *  When a fasta file is loaded explicitly, a new ReferenceSeq object is created
+ *  (with id == NULL) for each sequence found in the file.
+ *
+ * Fasta files may be loaded implicitly:
+ *  When an id can't be found in the set of ReferenceSeq objects and can't be
+ *  found as an accession by RefSeq, an attempt is made to load a fasta file
+ *  named <id>.fasta or <id>.fa in the directory given to the constructor.  If
+ *  this succeeds, a new ReferenceSeq object with the given id is attached to
+ *  the sequence.  In this situation, to avoid ambiquity, there can be only one
+ *  sequence in the fasta file.
+ *
+ */
+
+enum ReferenceSeqType {
+    rst_unattached,
+    rst_local,
+    rst_refSeqById,
+    rst_refSeqBySeqId,
+    rst_dead
 };
 
 struct ReferenceSeq {
-    BSTNode dad;
-    const ReferenceMgr* mgr;
-    bool local;
-    char* id;
-    char* accession;
-    bool circular;
-    union {
-        struct {
-            const KMMap* map;
-            uint64_t file_size;
-            const uint8_t* fasta_start;
-            const uint8_t* fasta_end;
-            uint64_t line_sz;
-            uint8_t md5[16];
-        } local;
-        struct {
-            const RefSeq* o;
-            uint64_t usage;
-        } refseq;
-    } u;
+    ReferenceMgr *mgr;
+    char *id;
+    char *seqId;
+    char *fastaSeqId;
     /* ref table position */
     int64_t start_rowid;
     /* total reference length */
     INSDC_coord_len seq_len;
+    int type;
+    bool circular;
+    uint8_t md5[16];
+    union {
+        struct {
+            KDataBuffer buf;
+            uint8_t const *data;
+        } local;
+        RefSeq const *refseq;
+    } u;
 };
 
+struct ReferenceMgr {
+    TableWriterRef const *writer;
+    KDirectory const *dir;
+    RefSeqMgr const *rmgr;
+    VDatabase *db;
+    ReferenceSeq *refSeq;
+    
+    int64_t ref_rowid;
+    
+    size_t cache;
+    
+    uint32_t options;
+    uint32_t num_open_max;
+    uint32_t num_open;
+    uint32_t max_seq_len;
+    
+    KDataBuffer compress;
+    KDataBuffer seq;
+    KDataBuffer refSeqs;
+    KDataBuffer refSeqsById;
+};
+
+typedef struct key_id_t {
+    char const *key;
+    int64_t id;
+} key_id_t;
+
 static
-int CC ReferenceSeq_Cmp(const void *item, const BSTNode *n)
+int CC key_id_cmp(const void *arg1, const void *arg2, void *data)
 {
-    return strcasecmp((const char*)item, ((const ReferenceSeq*)n)->id);
+    key_id_t const *a = arg1;
+    key_id_t const *b = arg2;
+    
+    return strcmp(a->key, b->key);
 }
 
 static
-int CC ReferenceSeq_Sort(const BSTNode *item, const BSTNode *n)
+void CC ReferenceSeq_Whack(ReferenceSeq *self)
 {
-    return ReferenceSeq_Cmp(((const ReferenceSeq*)item)->id, n);
-}
-
-static
-void CC ReferenceSeq_Unused( BSTNode *node, void *data )
-{
-    ReferenceSeq* n = (ReferenceSeq*)node;
-    ReferenceSeq** d = (ReferenceSeq**)data;
-
-    if( !n->local && n->u.refseq.o != NULL ) {
-        if( *d == NULL || (*d)->u.refseq.usage > n->u.refseq.usage ) {
-            *d = n;
-        }
+    if (self->type == rst_local) {
+        KDataBufferWhack(&self->u.local.buf);
     }
-}
-
-static
-rc_t ReferenceSeq_Alloc(ReferenceSeq** self, const char* id, size_t id_sz, const char* accession, size_t accession_sz)
-{
-    rc_t rc = 0;
-    ReferenceSeq* obj;
-    uint32_t sz = id_sz + 1 + accession_sz + 1;
-
-    if( self == NULL || id == NULL || id_sz == 0 || accession == NULL || accession_sz == 0 ) {
-        rc = RC(rcAlign, rcIndex, rcConstructing, rcParam, rcNull);
-    } else if( (obj = calloc(1,  sizeof(*obj) + sz + (sizeof(size_t) - (sz % sizeof(size_t))))) == NULL ) {
-        rc = RC(rcAlign, rcIndex, rcConstructing, rcMemory, rcExhausted);
-    } else {
-        obj->id = (char*)&obj[1];
-        obj->accession = obj->id;
-        obj->accession += id_sz + 1;
-        memcpy(obj->id, id, id_sz);
-        memcpy(obj->accession, accession, accession_sz);
-        *self = obj;
+    else if (self->type == rst_refSeqById || self->type == rst_refSeqBySeqId) {
+        RefSeq_Release(self->u.refseq);
     }
-    return rc;
-}
-
-static
-void CC ReferenceSeq_Whack(BSTNode *n, void *data)
-{
-    ReferenceSeq* self = (ReferenceSeq*)n;
-    if( self->local ) {
-        KMMapRelease(self->u.local.map);
-        if( self->u.local.line_sz == 0 ) {
-            free((uint8_t*)self->u.local.fasta_start);
-        }
-    } else {
-        RefSeq_Release(self->u.refseq.o);
-    }
-    free(self);
+    free(self->id);
+    free(self->seqId);
+    free(self->fastaSeqId);
 }
 
 struct OpenConfigFile_ctx {
@@ -195,11 +257,13 @@ bool OpenConfigFile(char const server[], char const volume[], void *Ctx)
 }
 
 static
-rc_t FindAndOpenConfigFile(const RefSeqMgr* rmgr, KDirectory const *dir, KFile const **kfp, char const conf[])
+rc_t FindAndOpenConfigFile(RefSeqMgr const *const rmgr,
+                           KDirectory const *const dir,
+                           KFile const **const kfp, char const conf[])
 {
     rc_t rc = KDirectoryOpenFileRead(dir, kfp, conf);
     
-    if(rc) {
+    if (rc) {
         struct OpenConfigFile_ctx ctx;
 
         ctx.name = conf;
@@ -215,427 +279,1456 @@ rc_t FindAndOpenConfigFile(const RefSeqMgr* rmgr, KDirectory const *dir, KFile c
     return rc;
 }
 
+enum comparison_weights {
+    no_match        = 0,
+    substring_match = (1u << 0),
+    expected_prefix = (1u << 1),
+    exact_match     = (1u << 2),
+    seq_len_match   = (1u << 3),
+    md5_match       = (1u << 4)
+};
+
 static
-rc_t ReferenceMgr_Conf(const RefSeqMgr* rmgr, BSTree* tree, KDirectory const *dir, char const conf[])
+unsigned str_weight(char const str[], char const qry[], unsigned const qry_len)
 {
-    rc_t rc = 0;
-    const KFile* kf = NULL;
-
-    assert(tree != NULL);
-    assert(dir != NULL);
-
-    if( conf != NULL &&
-        (rc = FindAndOpenConfigFile(rmgr, dir, &kf, conf)) == 0 ) {
-        const KMMap* mm;
-        size_t page_sz;
-        const char* str;
-
-        if( (rc = KMMapMakeRead(&mm, kf)) == 0 ) {
-            if( (rc = KMMapSize(mm, &page_sz)) == 0 && page_sz > 0 &&
-                (rc = KMMapAddrRead(mm, (const void**)&str)) == 0 ) {
-                const char* end = str + page_sz;
-                while( rc == 0 && str < end ) {
-                    const char* id, *accession;
-                    size_t id_sz = 0, accession_sz = 0;
-
-                    while( str < end && (str[0] == '\n' || str[0] == '\r') ) {
-                        str++;
-                    }
-                    if( str >= end ) {
-                        break;
-                    }
-                    id = str;
-                    while( str < end && !isspace(str[0]) ) {
-                        str++; id_sz++;
-                    }
-                    while( str < end && (str[0] == ' ' || str[0] == '\t') ) {
-                        str++;
-                    }
-                    accession = str;
-                    while( str < end && !isspace(str[0]) ) {
-                        str++; accession_sz++;
-                    }
-                    if( id_sz == 0 || accession_sz == 0 ) {
-                        rc = RC(rcAlign, rcIndex, rcConstructing, rcFileFormat, rcInvalid);
-                        break;
-                    }
-                    /* skip to eol */
-                    while( str < end && str[0] != '\n' && str[0] != '\r' ) {
-                        str++;
-                    }
-                    if( RefSeqMgr_Exists(rmgr, accession, accession_sz, NULL) == 0 ) {
-                        ReferenceSeq* tmp;
-                        if( (rc = ReferenceSeq_Alloc(&tmp, id, id_sz, accession, accession_sz)) == 0 ) {
-                            if( (rc = BSTreeInsertUnique(tree, &tmp->dad, NULL, ReferenceSeq_Sort)) != 0 ) {
-                                ReferenceSeq_Whack(&tmp->dad, NULL);
-                                break;
-                            }
-                            tmp->local = false;
-                            ALIGN_DBG("RefSeq translation added '%s' -> '%s'", tmp->id, tmp->accession);
-                        }
-                    } else {
-                        /* skips unknown references, later may be picked up as local files */
-                        (void)PLOGMSG(klogWarn, (klogWarn, "RefSeq table '$(acc)' for '$(id)' was not found",
-                                                           "acc=%.*s,id=%.*s", accession_sz, accession, id_sz, id));
-                    }
+    char const *const fnd = strcasestr(str, qry);
+    unsigned wt = no_match;
+    
+    if (fnd) {
+        unsigned const fnd_len = strlen(fnd);
+        unsigned const fndlen = (fnd_len > qry_len && fnd[qry_len] == '|') ? qry_len : fnd_len;
+        
+        if (fndlen == qry_len && (fnd == str || fnd[-1] == '|')) {
+            wt |= substring_match;
+            
+            if (fnd == str) {
+                if (fnd[fndlen] == '\0')
+                    wt |= exact_match;
+            }
+            else {
+                /* check for expected prefices */
+                char const *ns = fnd - 1;
+                
+                while (ns != str && ns[-1] != '|')
+                    --ns;
+                
+                if (   memcmp(ns, "ref|", 4) == 0
+                    || memcmp(ns, "emb|", 4) == 0
+                    || memcmp(ns, "dbg|", 4) == 0
+                    || memcmp(ns, "tpg|", 4) == 0
+                    || memcmp(ns, "tpe|", 4) == 0
+                    || memcmp(ns, "tpd|", 4) == 0
+                    || memcmp(ns, "gpp|", 4) == 0
+                    || memcmp(ns,  "gb|", 3) == 0
+                    )
+                {
+                    wt |= expected_prefix;
                 }
             }
-            KMMapRelease(mm);
+        }
+    }
+    return wt;
+}
+
+static
+rc_t ReferenceMgr_AddId(ReferenceMgr *const self, char const ID[],
+                        ReferenceSeq const *const obj)
+{
+    char *id = string_dup( ID, string_size( ID ) );
+    unsigned const last_id = self->refSeqsById.elem_count;
+    
+    if (id) {
+        rc_t rc = KDataBufferResize(&self->refSeqsById, last_id + 1);
+        
+        if (rc == 0) {
+            key_id_t *kid = &((key_id_t *)self->refSeqsById.base)[last_id];
+            
+            kid->key = id;
+            kid->id = obj - self->refSeq;
+            
+            ksort(self->refSeqsById.base, self->refSeqsById.elem_count, sizeof(key_id_t), key_id_cmp, NULL);
+        }
+        else
+            free(id);
+        
+        return rc;
+    }
+    else
+        return RC(rcAlign, rcIndex, rcInserting, rcMemory, rcExhausted);
+}
+
+static
+key_id_t *ReferenceMgr_FindId(ReferenceMgr const *const self, char const id[])
+{
+    key_id_t qry;
+    
+    qry.key = id;
+    qry.id = 0;
+    
+    return kbsearch(&qry, self->refSeqsById.base,
+                    self->refSeqsById.elem_count,
+                    sizeof(qry), key_id_cmp, NULL);
+}
+
+static
+rc_t ReferenceMgr_NewReferenceSeq(ReferenceMgr *const self, ReferenceSeq **const rslt)
+{
+    unsigned const last_rs = self->refSeqs.elem_count;
+    rc_t rc = KDataBufferResize(&self->refSeqs, last_rs + 1);
+    
+    if (rc) return rc;
+    self->refSeq = self->refSeqs.base;
+    
+    *rslt = &self->refSeq[last_rs];
+    memset(&self->refSeq[last_rs], 0, sizeof(self->refSeq[0]));
+    self->refSeq[last_rs].mgr = self;
+
+    return 0;
+}
+
+static
+int CC config_cmp(void const *A, void const *B, void *Data)
+{
+    struct {
+        unsigned id;
+        unsigned seqId;
+        unsigned extra;
+        unsigned extralen;
+    } const *const a = A;
+    struct {
+        unsigned id;
+        unsigned seqId;
+        unsigned extra;
+        unsigned extralen;
+    } const *const b = B;
+    char const *const data = Data;
+    
+    return strcmp(&data[a->id], &data[b->id]);
+}
+
+static
+rc_t ReferenceMgr_ProcessConf(ReferenceMgr *const self, char Data[], unsigned const len)
+{
+    rc_t rc;
+    unsigned i;
+    unsigned j;
+    struct {
+        unsigned id;
+        unsigned seqId;
+        unsigned extra;
+        unsigned extralen;
+    } *data, tmp;
+    KDataBuffer buf;
+    
+    memset(&buf, 0, sizeof(buf));
+    buf.elem_bits = sizeof(data[0]) * 8;
+    
+    for (j = i = 0; i < len; ++j) {
+        unsigned lineEnd;
+        unsigned id;
+        unsigned acc;
+        unsigned ii;
+        
+        for (lineEnd = i; lineEnd != len; ++lineEnd) {
+            int const ch = Data[lineEnd];
+            
+            if (ch == '\n')
+                break;
+            if (ch == '\r')
+                break;
+        }
+        if (i == lineEnd) {
+            ++i;
+            continue;
+        }
+        Data[lineEnd] = '\0';
+        for (id = i; id != lineEnd; ++id) {
+            int const ch = Data[id];
+            
+            if (!isspace(ch))
+                break;
+        }
+        for (ii = id; ii != lineEnd; ++ii) {
+            int const ch = Data[ii];
+            
+            if (isspace(ch)) {
+                Data[ii++] = '\0';
+                break;
+            }
+        }
+        for (acc = ii; acc < lineEnd; ++acc) {
+            int const ch = Data[acc];
+            
+            if (!isspace(ch))
+                break;
+        }
+        if (acc >= lineEnd)
+            return RC(rcAlign, rcFile, rcReading, rcFormat, rcInvalid);
+        
+        for (ii = acc; ii != lineEnd; ++ii) {
+            int const ch = Data[ii];
+            
+            if (isspace(ch)) {
+                Data[ii++] = '\0';
+                break;
+            }
+        }
+        tmp.id = id;
+        tmp.seqId = acc;
+        tmp.extra = ii;
+        tmp.extralen = lineEnd > ii ? lineEnd - ii : 0;
+        
+        if ((rc = KDataBufferResize(&buf, buf.elem_count + 1)) != 0) return rc;
+        data = buf.base;
+        
+        data[buf.elem_count-1] = tmp;
+        i = lineEnd + 1;
+    }
+    
+    /* check unique */
+    ksort(data, buf.elem_count, sizeof(data[0]), config_cmp, Data);
+    for (i = 1; i < buf.elem_count; ++i) {
+        if (strcmp(&Data[data[i-1].id], &Data[data[i].id]) == 0)
+            return RC(rcAlign, rcIndex, rcConstructing, rcItem, rcExists);
+    }
+
+    for (i = 0; i != buf.elem_count; ++i) {
+        unsigned const extralen = data[i].extralen;
+        char const *const id    = &Data[data[i].id];
+        char const *const seqId = &Data[data[i].seqId];
+        char const *const extra = extralen ? &Data[data[i].extra] : NULL;
+        bool circular = false;
+        ReferenceSeq *rs;
+        
+        if (extra && extralen >= 8) {
+            char const *const circ = strcasestr(extra, "circular");
+            
+            circular = circ && (circ == extra || isspace(circ[-1])) &&
+                       (circ[8] == '\0' || isspace(circ[8]));
+        }
+        if ((rc = ReferenceMgr_NewReferenceSeq(self, &rs)) != 0) return rc;
+        
+        rs->id = string_dup( id, string_size( id ) );
+        if ( rs->id == NULL )
+            return RC(rcAlign, rcFile, rcReading, rcMemory, rcExhausted);
+
+        rs->seqId = string_dup( seqId, string_size( seqId ) );
+        if ( rs->seqId == NULL )
+            return RC(rcAlign, rcFile, rcReading, rcMemory, rcExhausted);
+        
+        rs->circular = circular;
+    }
+    KDataBufferWhack(&buf);
+    return 0;
+}
+
+static
+rc_t ReferenceMgr_Conf(ReferenceMgr *const self, char const conf[])
+{
+    rc_t rc;
+    const KFile* kf = NULL;
+
+    if (conf == NULL)
+        return 0;
+    
+    rc = FindAndOpenConfigFile(self->rmgr, self->dir, &kf, conf);
+    if (rc == 0) {
+        uint64_t sz;
+        KDataBuffer buf;
+        
+        rc = KFileSize(kf, &sz);
+        assert(rc == 0);
+        if (sz == 0)
+            (void)PLOGMSG(klogWarn, (klogWarn, "Configuration file '$(file)' is empty", "file=%s", conf));
+        else {
+            rc = KDataBufferMakeBytes(&buf, sz + 1);
+            if (rc == 0) {
+                size_t nread;
+                
+                rc = KFileReadAll(kf, 0, buf.base, sz, &nread);
+                if (rc == 0) {
+                    assert(nread == sz);
+                    ((char *)buf.base)[sz] = '\n'; /* make sure that last line is terminated */
+                    rc = ReferenceMgr_ProcessConf(self, buf.base, sz + 1);
+                }
+                KDataBufferWhack(&buf);
+            }
         }
         KFileRelease(kf);
     }
     return rc;
 }
 
-LIB_EXPORT rc_t CC ReferenceMgr_Make(const ReferenceMgr** cself, VDatabase* db, const VDBManager* vmgr,
-                                     const uint32_t options, const char* conf, const char* path,
-                                     uint32_t max_seq_len, size_t cache, uint32_t num_open)
+static
+rc_t ReferenceMgr_FastaFile_GetSeqIds(KDataBuffer *const buf, char const data[], uint64_t const len)
 {
-    rc_t rc = 0;
-    KDirectory* dir = NULL;
-    ReferenceMgr* obj = NULL;
-    uint32_t wopt = 0;
+    uint64_t pos;
+    int st = 0;
     
-    wopt |= (options & ewrefmgr_co_allREADs) ? ewref_co_SaveRead : 0;
-    wopt |= (options & ewrefmgr_co_Coverage) ? ewref_co_Coverage : 0;
-
-    if( max_seq_len == 0 ) {
-        max_seq_len = sizeof(obj->seq_buf);
-    }
-    if( cself == NULL ) {
-        rc = RC(rcAlign, rcIndex, rcConstructing, rcParam, rcNull);
-    } else if( (obj = calloc(1, sizeof(*obj) + max_seq_len - sizeof(obj->seq_buf))) == NULL ) {
-        rc = RC(rcAlign, rcIndex, rcConstructing, rcMemory, rcExhausted);
-
-    } else if( (rc = KDirectoryNativeDir(&dir)) == 0 ) {
-        BSTreeInit(&obj->tree);
-        obj->options = options;
-        obj->cache = cache;
-        obj->num_open_max = num_open;
-        obj->max_seq_len = max_seq_len;
-        if( rc == 0 && db != NULL && (rc = VDatabaseAddRef(db)) == 0 ) {
-            obj->db = db;
+    for (pos = 0; pos < len; ++pos) {
+        int const ch = data[pos];
+        
+        if (st == 0) {
+            if (ch == '>') {
+                uint64_t const n = buf->elem_count;
+                rc_t rc = KDataBufferResize(buf, n + 1);
+                
+                if (rc)
+                    return rc;
+                ((uint64_t *)buf->base)[n] = pos;
+                st = 1;
+            }
         }
-        if( rc == 0 ) {
-            if( path == NULL ) {
-                if( (rc = KDirectoryAddRef(dir)) == 0 ) {
-                    obj->dir = dir;
+        else if (ch == '\r' || ch == '\n') 
+            st = 0;
+    }
+    return 0;
+}
+
+static
+rc_t ReferenceMgr_ImportFasta(ReferenceMgr *const self, ReferenceSeq *obj, KDataBuffer *const buf)
+{
+    unsigned seqId;
+    unsigned seqIdLen;
+    unsigned ln;
+    unsigned src;
+    unsigned dst;
+    unsigned start=0;
+    char *const data = buf->base;
+    unsigned const len = buf->elem_count;
+    rc_t rc;
+    MD5State mds;
+    
+    memset(obj, 0, sizeof(*obj));
+    obj->mgr = self;
+    
+    if (len == 0)
+        return 0;
+    assert(data[0] == '>');
+    
+    for (ln = 1; ln != len; ++ln) {
+        int const ch = data[ln];
+        
+        if (ch == '\r' || ch == '\n') {
+            data[ln] = '\0';
+            start = ln + 1;
+            break;
+        }
+    }
+    for (seqId = 1; seqId != ln; ++seqId) {
+        if (!isspace(data[seqId]))
+            break;
+    }
+    for (seqIdLen = 0; seqId + seqIdLen < ln; ++seqIdLen) {
+        if (isspace(data[seqId + seqIdLen])) {
+            ln = seqId + seqIdLen;
+            data[ln] = '\0';
+            break;
+        }
+    }
+    if (seqIdLen == 0)
+        return RC(rcAlign, rcFile, rcReading, rcData, rcInvalid);
+    
+    obj->fastaSeqId = string_dup( &data[ seqId ], string_size( &data[ seqId ] ) );
+    if ( obj->fastaSeqId == NULL )
+        return RC(rcAlign, rcFile, rcReading, rcMemory, rcExhausted);
+    
+    MD5StateInit(&mds);
+    for (dst = src = start; src != len; ++src) {
+        int const ch = toupper(data[src]);
+        
+        if (isspace(ch))
+            continue;
+        
+        if (strchr(INSDC_4na_map_CHARSET, ch) == NULL && ch != 'X')
+            return RC(rcAlign, rcFile, rcReading, rcData, rcInvalid);
+        
+        data[dst] = ch == 'X' ? 'N' : ch;
+        MD5StateAppend(&mds, data + dst, 1);
+        ++dst;
+    }
+    MD5StateFinish(&mds, obj->md5);
+    rc = KDataBufferSub(buf, &obj->u.local.buf, start, dst - start);
+    if (rc == 0) {
+        obj->type = rst_local;
+        obj->seq_len = dst - start;
+    }
+    else
+        obj->type = rst_dead;
+    return rc;
+}
+
+#define READ_CHUNK_SIZE (1024 * 1024)
+
+static
+rc_t ReferenceMgr_ImportFastaFile(ReferenceMgr *const self, KFile const *kf,
+                                  ReferenceSeq *rslt)
+{
+    uint64_t file_size;
+    rc_t rc = KFileSize(kf, &file_size);
+    
+    if (rc == 0) {
+        KDataBuffer fbuf;
+        
+        rc = KDataBufferMake(&fbuf, 8, file_size);
+        if (rc == 0) {
+            fbuf.elem_count = 0;
+            do {
+                size_t const readable = file_size - fbuf.elem_count;
+                size_t const to_read = readable > READ_CHUNK_SIZE ? READ_CHUNK_SIZE : readable;
+                size_t nread = 0;
+                
+                rc = KFileRead(kf, fbuf.elem_count, &((uint8_t *)fbuf.base)[fbuf.elem_count], to_read, &nread);
+                if (rc != 0 || nread == 0)
+                    break;
+                fbuf.elem_count += nread;
+            } while (fbuf.elem_count < file_size);
+            if (rc == 0) {
+                char const *const base = fbuf.base;
+                KDataBuffer seqIdBuf;
+                
+                memset(&seqIdBuf, 0, sizeof(seqIdBuf));
+                seqIdBuf.elem_bits = sizeof(file_size) * 8;
+                
+                rc = ReferenceMgr_FastaFile_GetSeqIds(&seqIdBuf, base, file_size);
+                if (rc == 0) {
+                    uint64_t const *const seqIdOffset = seqIdBuf.base;
+                    unsigned const seqIds = seqIdBuf.elem_count;
+                    unsigned i;
+                    KDataBuffer sub;
+                    
+                    if (rslt) {
+                        if (seqIds > 1)
+                            rc = RC(rcAlign, rcFile, rcReading, rcItem, rcUnexpected);
+                        
+                        memset(&sub, 0, sizeof(sub));
+                        KDataBufferSub(&fbuf, &sub, seqIdOffset[0], file_size - seqIdOffset[0]);
+                        rc = ReferenceMgr_ImportFasta(self, rslt, &sub);
+                        KDataBufferWhack(&sub);
+                    }
+                    else
+                        for (i = 0; i != seqIds; ++i) {
+                            uint64_t const ofs = seqIdOffset[i];
+                            uint64_t const nxt = (i < seqIds - 1) ? seqIdOffset[i + 1] : file_size;
+                            uint64_t const len = nxt - ofs;
+                            ReferenceSeq tmp;
+                            ReferenceSeq *new_seq;
+                            
+                            memset(&sub, 0, sizeof(sub));
+                            KDataBufferSub(&fbuf, &sub, ofs, len);
+                            rc = ReferenceMgr_ImportFasta(self, &tmp, &sub);
+                            KDataBufferWhack(&sub);
+                            if (rc) break;
+                            
+                            rc = ReferenceMgr_NewReferenceSeq(self, &new_seq);
+                            if (rc) break;
+                            
+                            *new_seq = tmp;
+                        }
                 }
-            } else {
-                rc = KDirectoryOpenDirRead(dir, &obj->dir, false, path);
+                KDataBufferWhack(&seqIdBuf);
             }
-            if( rc == 0 ) {
-                rc = RefSeqMgr_Make(&obj->rmgr, vmgr, 0, cache, num_open);
-            }
+            KDataBufferWhack(&fbuf);
         }
-        if (rc == 0 && (rc = ReferenceMgr_Conf(obj->rmgr, &obj->tree, obj->dir, conf)) != 0 ) {
-            (void)PLOGERR(klogErr, (klogErr, rc, "failed to open configuration $(file)", "file=%s/%s", path ? path : ".", conf));
-        }
-    }
-    KDirectoryRelease(dir);
-    if( rc == 0 ) {
-        *cself = obj;
-        ALIGN_DBG("conf %s, local path '%s'", conf ? conf : "", path ? path : "");
-    } else {
-        ReferenceMgr_Release(obj, false, NULL, false);
-        ALIGN_DBGERR(rc);
     }
     return rc;
 }
 
-#define ID_CHUNK_SZ 32
-typedef struct TChunk_struct {
-    struct TChunk_struct* next;
-    int64_t id[ID_CHUNK_SZ];
-} TChunk;
+static
+rc_t OpenFastaFile(KFile const **const kf,
+                   KDirectory const *const dir,
+                   char const base[],
+                   unsigned const len)
+{
+    char fname_a[4096];
+    char *fname_h = NULL;
+    char *fname = fname_a;
+    rc_t rc;
+    
+    if (len + 7 >= sizeof(fname_a)) {
+        fname_h = malloc(len + 7);
+        if (fname_h)
+            fname = fname_h;
+        else
+            return RC(rcAlign, rcFile, rcOpening, rcMemory, rcExhausted);
+    }
+    memcpy(fname, base, len);
+    memcpy(fname + len, ".fasta", 7);
+    
+    rc = KDirectoryOpenFileRead(dir, kf, fname);
+    if (rc) {
+        fname[len + 3] = '\0'; /* base.fasta -> base.fa */
+        
+        rc = KDirectoryOpenFileRead(dir, kf, fname);
+    }
+    free(fname_h);
+    return rc;
+}
+
+#if 1
+void ReferenceSeq_Dump(ReferenceSeq const *const rs, unsigned const i, key_id_t const *const key_id_array, unsigned const m)
+{
+    static char const *types[] = {
+        "'unattached'",
+        "'fasta'",
+        "'RefSeq-by-id'",
+        "'RefSeq-by-seqid'",
+        "'dead'"
+    };
+    unsigned j;
+    
+    ALIGN_CF_DBGF(("{ "));
+    ALIGN_CF_DBGF(("type: %s, ", (rs->type < 0 || rs->type > rst_dead) ? "null" : types[rs->type]));
+    
+    if (rs->id)
+        ALIGN_CF_DBGF(("id: '%s', ", rs->id));
+    else
+        ALIGN_CF_DBGF(("id: null, "));
+    
+    if (rs->seqId)
+        ALIGN_CF_DBGF(("seqId: '%s', ", rs->seqId));
+    else
+        ALIGN_CF_DBGF(("seqId: null, "));
+    
+    if (rs->fastaSeqId)
+        ALIGN_CF_DBGF(("fastaSeqId: '%s', ", rs->fastaSeqId));
+    else
+        ALIGN_CF_DBGF(("fastaSeqId: null, "));
+    
+    ALIGN_CF_DBGF(("seq-len: %u, ", rs->seq_len));
+    ALIGN_CF_DBGF(("circular: %s, ", rs->circular ? "true" : "false"));
+    
+    if (rs->md5) {
+        ALIGN_CF_DBGF(("md5: '"));
+        for (j = 0; j != 16; ++j)
+            ALIGN_CF_DBGF(("%02X", rs->md5[j]));
+        ALIGN_CF_DBGF(("', "));
+    }
+    else
+        ALIGN_CF_DBGF(("md5: null, "));
+    
+    
+    ALIGN_CF_DBGF(("keys: [ "));
+    for (j = 0; j != m; ++j) {
+        key_id_t const *const kid = &key_id_array[j];
+        
+        if (kid->id == i)
+            ALIGN_CF_DBGF(("'%s', ", kid->key));
+    }
+    ALIGN_CF_DBGF(("] }"));
+}
+
+void ReferenceMgr_DumpConfig(ReferenceMgr const *const self)
+{
+    unsigned const n = self->refSeqs.elem_count;
+    unsigned const m = self->refSeqsById.elem_count;
+    key_id_t const *const key_id_array = self->refSeqsById.base;
+    unsigned i;
+    
+    ALIGN_CF_DBGF(("config: [\n"));
+    for (i = 0; i != n; ++i) {
+        ALIGN_CF_DBGF(("\t"));
+        ReferenceSeq_Dump(&self->refSeq[i], i, key_id_array, m);
+        ALIGN_CF_DBGF((",\n"));
+    }
+    ALIGN_CF_DBGF(("]\n"));
+}
+#endif
+
+static
+rc_t ReferenceMgr_TryFasta(ReferenceMgr *const self, ReferenceSeq *const seq,
+                           char const id[], unsigned const idLen)
+{
+    KFile const *kf = NULL;
+    rc_t rc;
+    
+    rc = OpenFastaFile(&kf, self->dir, id, idLen);
+    
+    if (rc == 0) {
+        rc = ReferenceMgr_ImportFastaFile(self, kf, seq);
+        KFileRelease(kf);
+    }
+    return rc;
+}
+
+static
+rc_t ReferenceSeq_GetRefSeqInfo(ReferenceSeq *const self)
+{
+    rc_t rc;
+    uint8_t const *md5;
+    
+    assert(self != NULL);
+    assert(self->type == rst_refSeqById || self->type == rst_refSeqBySeqId);
+    
+    if ((rc = RefSeq_Circular(self->u.refseq, &self->circular)) != 0)
+        return rc;
+    if ((rc = RefSeq_SeqLength(self->u.refseq, &self->seq_len)) != 0)
+        return rc;
+    if ((rc = RefSeq_MD5(self->u.refseq, &md5)) != 0)
+        return rc;
+    
+    memcpy(self->md5, md5, 16);
+    return 0;
+}
+
+static
+rc_t ReferenceSeq_Attach(ReferenceMgr *const self, ReferenceSeq *const rs)
+{
+    unsigned const seqid_len = rs->seqId ? strlen(rs->seqId) : 0;
+    unsigned const id_len = rs->id ? strlen(rs->id) : 0;
+    rc_t rc = 0;
+    KFile const *kf = NULL;
+    
+    assert(rs->type == rst_unattached);
+    assert(id_len != 0 || seqid_len != 0);
+    
+    if (seqid_len) {
+        if (RefSeqMgr_Exists(self->rmgr, rs->seqId, seqid_len, NULL) == 0) {
+            rc = RefSeqMgr_GetSeq(self->rmgr, &rs->u.refseq, rs->seqId, seqid_len);
+            if (rc == 0) {
+                rs->type = rst_refSeqBySeqId;
+                rc = ReferenceSeq_GetRefSeqInfo(rs);
+            }
+            return rc;
+        }
+    }
+    if (id_len) {
+        if (RefSeqMgr_Exists(self->rmgr, rs->id, id_len, NULL) == 0) {
+            rc = RefSeqMgr_GetSeq(self->rmgr, &rs->u.refseq, rs->id, id_len);
+            if (rc == 0) {
+                rs->type = rst_refSeqById;
+                rc = ReferenceSeq_GetRefSeqInfo(rs);
+            }
+            return rc;
+        }
+    }
+    if (id_len) {
+        rc = OpenFastaFile(&kf, self->dir, rs->id, id_len);
+        if (rc && seqid_len)
+            rc = OpenFastaFile(&kf, self->dir, rs->seqId, seqid_len);
+    }
+    else
+        rc = OpenFastaFile(&kf, self->dir, rs->seqId, seqid_len);
+    
+    if (kf) {
+        ReferenceSeq tmp;
+        
+        rc = ReferenceMgr_ImportFastaFile(self, kf, &tmp);
+        KFileRelease(kf);
+        if (rc == 0) {
+            tmp.id = rs->id;
+            tmp.seqId = rs->seqId;
+            tmp.circular = rs->circular;
+            
+            *rs = tmp;
+        }
+        return rc;
+    }
+    return 0;
+}
+
+static
+rc_t ReferenceMgr_OpenSeq(ReferenceMgr *const self, ReferenceSeq **const rslt,
+                          char const id[],
+                          unsigned const seq_len,
+                          uint8_t const md5[16])
+{
+    unsigned const idLen = strlen(id);
+    key_id_t const *const fnd = ReferenceMgr_FindId(self, id);
+    
+    assert(rslt != NULL);
+    *rslt = NULL;
+    if (fnd) {
+        if (self->refSeq[fnd->id].type == rst_dead)
+            return RC(rcAlign, rcIndex, rcSearching, rcItem, rcInvalid);
+        *rslt = &self->refSeq[fnd->id];
+        return 0;
+    }
+    else {
+        unsigned const n = self->refSeqs.elem_count;
+        unsigned i;
+        ReferenceSeq *seq = NULL;
+        rc_t rc = 0;
+        
+        /* try to find by id; this should work most of the time */
+        for (i = 0; i != n; ++i) {
+            ReferenceSeq *const rs = &self->refSeq[i];
+
+            if (rs->type == rst_dead)
+                continue;
+            
+            if (rs->id && strcmp(rs->id, id) == 0) {
+                seq = rs;
+                break;
+            }
+        }
+        if (seq == NULL) {
+            /* try to find by seqId */
+            for (i = 0; i != n; ++i) {
+                ReferenceSeq *const rs = &self->refSeq[i];
+                
+                if (rs->type == rst_dead)
+                    continue;
+                
+                if (rs->seqId && strcasecmp(rs->seqId, id) == 0) {
+                    seq = rs;
+                    break;
+                }
+            }
+        }
+        if (seq == NULL) {
+            /* try to find id within fasta seqIds */
+            unsigned best_wt = 0;
+            unsigned best = n;
+            
+            for (i = 0; i != n; ++i) {
+                ReferenceSeq const *const rs = &self->refSeq[i];
+                
+                if (rs->fastaSeqId) {
+                    unsigned wt = str_weight(rs->fastaSeqId, id, idLen);
+                    
+                    if (wt != no_match) {
+                        if (seq_len && rs->seq_len == seq_len)
+                            wt |= seq_len_match;
+                        if (md5 && memcmp(rs->md5, md5, 16) == 0)
+                            wt |= md5_match;
+                    }
+                    if (best_wt < wt) {
+                        best_wt = wt;
+                        best = i;
+                    }
+                }
+            }
+            if (best < n)
+                seq = &self->refSeq[best];
+        }
+        if (seq == NULL) {
+            /* try id.fasta or id.fa */
+            rc = ReferenceMgr_NewReferenceSeq(self, &seq);
+            if (rc) return rc;
+            rc = ReferenceMgr_TryFasta(self, seq, id, idLen);
+            if (GetRCState(rc) == rcNotFound && GetRCObject(rc) == rcPath)
+                rc = 0;
+            else if (rc) return rc;
+        }
+        else if (seq->type == rst_unattached) {
+            /* expect to get here most of the time
+             *
+             * ReferenceSeq_Attach tries to get reference:
+             *  from RefSeqMgr:
+             *   by seqId
+             *   by id
+             *  from self->dir (data directory)
+             *   id.fasta
+             *   id.fa
+             *   seqId.fasta
+             *   seqId.fa
+             */
+            rc = ReferenceSeq_Attach(self, seq);
+            if (rc) return rc;
+            
+            if (seq->type == rst_unattached && seq->seqId != NULL) {
+                /* attach didn't work for id; try to find seqId within fasta seqIds */
+                unsigned const seqIdLen = strlen(seq->seqId);
+                unsigned best_wt = 0;
+                unsigned best = n;
+                
+                for (i = 0; i != n; ++i) {
+                    ReferenceSeq const *const rs = &self->refSeq[i];
+                    
+                    if (rs->type == rst_local && rs->fastaSeqId) {
+                        unsigned wt = str_weight(rs->fastaSeqId, seq->seqId, seqIdLen);
+                        
+                        if (wt != no_match) {
+                            if (seq_len && rs->seq_len == seq_len)
+                                wt |= seq_len_match;
+                            if (md5 && memcmp(rs->md5, md5, 16) == 0)
+                                wt |= md5_match;
+                        }
+                        if (best_wt < wt) {
+                            best_wt = wt;
+                            best = i;
+                        }
+                    }
+                }
+                if (best < n) {
+                    char *const tmp_id = seq->id;
+                    char *const tmp_seqId = seq->seqId;
+                    bool const tmp_circ = seq->circular;
+                    
+                    *seq = self->refSeq[best];
+                    seq->id = tmp_id;
+                    seq->seqId = tmp_seqId;
+                    seq->fastaSeqId = NULL;
+                    seq->circular = tmp_circ;
+
+                    /* add another reference to the data buffer */
+                    rc = KDataBufferSub(&self->refSeq[best].u.local.buf, &seq->u.local.buf, 0, 0);
+                    if (rc) return rc;
+                }
+            }
+        }
+        assert(seq != NULL);
+        if (seq->type == rst_unattached) {
+            /* nothing has worked and nothing left to try */
+            seq->type = rst_dead;
+            rc = RC(rcAlign, rcFile, rcConstructing, rcId, rcNotFound);
+        }
+        else {
+            ReferenceSeq *alt = NULL;
+            
+            /* perform ambiguity check
+             *
+             * This search follows the same pattern as the main search but has
+             * more stringent conditions.  One hopes that it fails to find
+             * anything.
+             */
+            for (i = 0; i != n; ++i) {
+                ReferenceSeq *const rs = &self->refSeq[i];
+                
+                if (   rs->type != rst_dead
+                    && rs->type != rst_unattached
+                    && rs != seq
+                    && rs->id != NULL
+                    && strcmp(id, rs->id) == 0
+                    && (seq_len == 0 || seq_len == rs->seq_len))
+                {
+                    alt = rs;
+                    break;
+                }
+            }
+            if (alt == NULL) {
+                for (i = 0; i != n; ++i) {
+                    ReferenceSeq *const rs = &self->refSeq[i];
+                    
+                    if (   rs->type != rst_dead
+                        && rs->type != rst_unattached
+                        && rs != seq
+                        && rs->seqId != NULL
+                        && strcasecmp(id, rs->seqId) == 0
+                        && (seq_len == 0 || seq_len == rs->seq_len))
+                    {
+                        alt = rs;
+                        break;
+                    }
+                }
+            }
+            if (alt == NULL) {
+                unsigned best_wt = 0;
+                unsigned best = n;
+                
+                for (i = 0; i != n; ++i) {
+                    ReferenceSeq const *const rs = &self->refSeq[i];
+                    
+                    if (rs != seq && rs->fastaSeqId && rs != seq) {
+                        unsigned wt = str_weight(rs->fastaSeqId, id, idLen);
+                        
+                        if (wt != no_match) {
+                            if (seq_len && rs->seq_len == seq_len)
+                                wt |= seq_len_match;
+                            if (md5 && memcmp(rs->md5, md5, 16) == 0)
+                                wt |= md5_match;
+                        }
+                        if (best_wt < wt) {
+                            best_wt = wt;
+                            best = i;
+                        }
+                    }
+                }
+                if (best < n)
+                    alt = &self->refSeq[best];
+            }
+            /* try to knock the alternative out of consideration
+             * if it survives length and md5 tests, it is *really* likely to be
+             * a duplicate.
+             */
+            if (alt != NULL && seq_len != 0 && seq_len != alt->seq_len)
+                alt = NULL;
+            if (alt != NULL && md5 != NULL && memcmp(md5, alt->md5, 16) != 0)
+                alt = NULL;
+            if (alt != NULL) {
+                seq->type = rst_dead;
+                rc = RC(rcAlign, rcFile, rcConstructing, rcId, rcAmbiguous);
+            }
+        }
+        if ( seq->id == NULL )
+        {
+            seq->id = string_dup( id, string_size( id ) );
+            if ( seq->id == NULL )
+                return RC(rcAlign, rcFile, rcConstructing, rcMemory, rcExhausted);
+        }
+        /* finally, associate the id with the object and put it in the index */
+        {{
+            rc_t rc2 = ReferenceMgr_AddId(self, id, seq);
+            if (rc == 0)
+                rc = rc2;
+        }}
+        if (rc == 0)
+            *rslt = seq;
+        return rc;
+    }
+}
+
+LIB_EXPORT rc_t CC ReferenceMgr_SetCache(ReferenceMgr const *const self, size_t cache, uint32_t num_open)
+{
+    return RefSeqMgr_SetCache(self->rmgr, cache, num_open);
+}
+
+static
+rc_t OpenDataDirectory(KDirectory const **rslt, char const path[])
+{
+    KDirectory *dir;
+    rc_t rc = KDirectoryNativeDir(&dir);
+    
+    if (rc == 0) {
+        if (path) {
+            rc = KDirectoryOpenDirRead(dir, rslt, false, path);
+            KDirectoryRelease(dir);
+        }
+        else
+            *rslt = dir;
+    }
+    return rc;
+}
+
+LIB_EXPORT rc_t CC ReferenceMgr_Make(ReferenceMgr const **cself, VDatabase *db,
+                                     VDBManager const* vmgr,
+                                     const uint32_t options, char const conf[], char const path[],
+                                     uint32_t max_seq_len, size_t cache, uint32_t num_open)
+{
+    rc_t rc;
+    ReferenceMgr *self;
+    uint32_t wopt = 0;
+    
+    if (cself == NULL)
+        return RC(rcAlign, rcIndex, rcConstructing, rcParam, rcNull);
+    
+    wopt |= (options & ewrefmgr_co_allREADs) ? ewref_co_SaveRead : 0;
+    wopt |= (options & ewrefmgr_co_Coverage) ? ewref_co_Coverage : 0;
+
+    if (max_seq_len == 0)
+        max_seq_len = TableWriterRefSeq_MAX_SEQ_LEN;
+    
+    self = calloc(1, sizeof(*self));
+    if (self) {
+        rc = KDataBufferMakeBytes(&self->seq, max_seq_len);
+        if (rc == 0) {
+            self->compress.elem_bits = 32;
+            self->refSeqs.elem_bits = sizeof(ReferenceSeq) * 8;
+            self->refSeqsById.elem_bits = sizeof(key_id_t) * 8;
+            
+            self->options = options;
+            self->cache = cache;
+            self->num_open_max = num_open;
+            self->max_seq_len = max_seq_len;
+            if (db) VDatabaseAddRef(self->db = db);
+            rc = OpenDataDirectory(&self->dir, path);
+            if (rc == 0) {
+                rc = RefSeqMgr_Make(&self->rmgr, vmgr, 0, cache, num_open);
+                if (rc == 0) {
+                    rc = ReferenceMgr_Conf(self, conf);
+                    if (rc == 0) {
+                        *cself = self;
+                        ALIGN_DBG("conf %s, local path '%s'", conf ? conf : "", path ? path : "");
+                        return 0;
+                    }
+                    (void)PLOGERR(klogErr, (klogErr, rc, "failed to open configuration $(file)", "file=%s/%s", path ? path : ".", conf));
+                }
+            }
+        }
+        ReferenceMgr_Release(self, false, NULL, false);
+    }
+    else
+        rc = RC(rcAlign, rcIndex, rcConstructing, rcMemory, rcExhausted);
+
+    ALIGN_DBGERR(rc);
+
+    return rc;
+}
+
+#define ID_CHUNK_SZ 256
+
+typedef struct TChunk32_struct {
+    struct TChunk32_struct* next;
+    uint32_t id[ID_CHUNK_SZ]; /*** will only work with positive ids **/
+} TChunk32;
+
+typedef struct AlignId32List_struct {
+	TChunk32* head;
+	TChunk32* tail;
+	uint32_t  tail_qty;  /** number elements in the last chunk **/
+	uint32_t  chunk_qty; /** number of chunks */
+} AlignId32List;
+typedef struct AlignIdList_struct {
+	AlignId32List **sub_list;
+	uint32_t        sub_list_count; 
+} AlignIdList;
+
+static uint64_t AlignId32ListCount(AlignId32List *l)
+{ return (l->chunk_qty>0)?ID_CHUNK_SZ*(l->chunk_qty-1)+ l->tail_qty:0;}
+
+static uint64_t AlignIdListCount(AlignIdList *l)
+{
+	uint64_t ret=0;
+	if(l){
+		uint32_t i;
+		for(i=0;i<l->sub_list_count;i++){
+			if(l->sub_list[i]){
+				ret += AlignId32ListCount(l->sub_list[i]);
+			}
+		}
+	}
+	return ret;
+}
+static int int64_compare(const void *A, const void *B, void *ignore)
+{
+	return *(int64_t*)A -  *(int64_t*)B;
+}
+static uint64_t AlignIdListFlatCopy(AlignIdList *l,int64_t *buf,uint64_t num_elem,bool do_sort)
+{
+	uint64_t res=0;
+	uint32_t i,j;
+	AlignId32List* cl;
+	assert(l!=0);
+
+	if((cl = l->sub_list[0])!=NULL){
+		TChunk32* head  = cl->head;
+		while(head !=  cl->tail){
+			for(i=0;i<ID_CHUNK_SZ && res < num_elem;i++,res++){
+				buf[res] = head->id[i];
+			}
+			head = head->next;
+		}
+		for(i=0;i<cl->tail_qty && res < num_elem;i++,res++){
+			buf[res] = head->id[i];
+		}
+	}
+	for(j = 1; j< l->sub_list_count && res < num_elem;j++){
+		if((cl = l->sub_list[j])!=NULL){
+			TChunk32* head  = cl->head;
+			uint64_t  hi = ((uint64_t)j) << 32;
+			while(head !=  cl->tail){
+				for(i=0;i<ID_CHUNK_SZ && res < num_elem;i++,res++){
+					buf[res] = hi | head->id[i];
+				}
+				head = head->next;
+			}
+			for(i=0;i<cl->tail_qty && res < num_elem;i++,res++){
+				buf[res] = hi | head->id[i];
+			}
+		}
+	}
+	if(do_sort && res > 1) 
+		ksort(buf,res,sizeof(*buf),int64_compare,NULL);
+	return res;
+}
+
+static rc_t AlignId32ListAddId(AlignId32List *l,const uint32_t id)
+{
+	if(l->tail  == NULL){
+		l->head = l->tail = malloc(sizeof(*l->tail));
+		if(l->tail == NULL) return RC(rcAlign, rcTable, rcCommitting, rcMemory, rcExhausted);
+		l->chunk_qty =1;
+		l->tail_qty = 0;	
+	}
+	if(l->tail_qty == ID_CHUNK_SZ){/** chunk is full **/
+		l->tail->next = malloc(sizeof(*l->tail));
+		if(l->tail == NULL) return RC(rcAlign, rcTable, rcCommitting, rcMemory, rcExhausted);
+		l->tail = l->tail->next;
+		l->chunk_qty ++;
+		l->tail_qty = 0;	
+	}
+	l->tail->id[l->tail_qty++]=id;
+	return 0;
+}
+
+static rc_t AlignIdListAddId(AlignIdList *l,const int64_t id)
+{
+	uint32_t  sub_id,id32;
+	if(id < 0) return RC(rcAlign, rcTable, rcCommitting, rcId, rcOutofrange);
+	id32 = (uint32_t) id;
+	sub_id = id >> 32;
+	if(sub_id >= l->sub_list_count) return RC(rcAlign, rcTable, rcCommitting, rcId, rcOutofrange);
+	if(l->sub_list[sub_id] == NULL){
+		l->sub_list[sub_id] = calloc(1,sizeof(AlignId32List));
+		if(l->sub_list[sub_id] == NULL) return RC(rcAlign, rcTable, rcCommitting, rcMemory, rcExhausted);
+	}
+	return AlignId32ListAddId(l->sub_list[sub_id],id32);
+}
+
+static void AlignId32ListRelease(AlignId32List *l)
+{
+	if(l){
+		while(l->head != l->tail){
+			TChunk32* head = l->head;
+			l->head = l->head->next;
+			free(head);
+		}
+		free(l->head);
+		free(l);
+	}
+}
+static void AlignIdListRelease(AlignIdList *l)
+{
+        if(l){
+		uint32_t i;
+		for(i=0;i<l->sub_list_count;i++){
+			AlignId32ListRelease(l->sub_list[i]);
+		}
+		free(l->sub_list);
+		free(l);
+        }
+}
+
 
 typedef struct {
-    TChunk* head;
-    TChunk* tail;
-    uint8_t tail_qty; /* id count within tail */
-    uint32_t id_qty; /* id count overall */
-    uint32_t mismatches;
-    uint32_t indels;
-    uint8_t* hilo; /* array of max_seq_len */
+    AlignIdList*	idlist;
+    ReferenceSeqCoverage cover;
+    INSDC_coord_len bin_seq_len;
 } TCover;
 
 static
 void ReferenceMgr_TCoverRelease(TCover* c)
 {
-    TChunk* h = c->head;
-    while( h != NULL ) {
-        TChunk* n = h->next;
-        free(h);
-        h = n;
-    }
-    c->head = NULL;
+	if(c){
+		AlignIdListRelease(c->idlist);
+		c->idlist = NULL;
+	}
+}
+static 
+rc_t ReferenceMgr_TCoverSetMaxId(TCover* c,int64_t id)
+{
+	uint32_t  sub_id;
+	if(id < 0) return RC(rcAlign, rcTable, rcCommitting, rcId, rcOutofrange);
+	sub_id = id >> 32;
+	if(c->idlist == NULL){
+		c->idlist = calloc(1,sizeof(AlignIdList));
+		if(c->idlist==NULL) return RC(rcAlign, rcTable, rcCommitting, rcMemory, rcExhausted);
+		c->idlist->sub_list_count = sub_id+1;
+		c->idlist->sub_list = calloc(c->idlist->sub_list_count,sizeof(c->idlist->sub_list[0]));
+		if( c->idlist->sub_list == NULL) return RC(rcAlign, rcTable, rcCommitting, rcMemory, rcExhausted);
+	} else {
+		return RC(rcAlign, rcTable, rcCommitting, rcParam, rcUnexpected);
+	}
+	return 0;
 }
 
 static
-rc_t ReferenceMgr_ReCover(const ReferenceMgr* cself, uint64_t rows)
+rc_t CoverageGetSeqLen(ReferenceMgr const *const mgr, TCover data[], uint64_t const rows)
 {
-    rc_t rc = 0;
-    int i;
-    uint64_t new_rows = 0;
-    const TableWriterRefCoverage* cover_writer = NULL;
-
     TableReaderColumn acols[] =
     {
-        {0, "REF_ID", {NULL}, 0, 0},
-        {0, "REF_START", {NULL}, 0, 0},
-        {0, "REF_LEN", {NULL}, 0, 0},
-        {0, "(INSDC:dna:text)MISMATCH", {NULL}, 0, 0},
-        {0, "REF_OFFSET", {NULL}, 0, 0},
-        {0, "HAS_REF_OFFSET", {NULL}, 0, 0},
+        {0, "(INSDC:coord:len)SEQ_LEN", {NULL}, 0, 0},
         {0, NULL, {NULL}, 0, 0}
     };
-    const int64_t** al_ref_id = &acols[0].base.i64;
-    const INSDC_coord_zero** al_ref_start = &acols[1].base.coord0;
-    const INSDC_coord_len** al_ref_len = &acols[2].base.coord_len;
-    const TableReaderColumn* mismatch_len =  &acols[3];
-    const TableReaderColumn* ref_offset = &acols[4];
-    const TableReaderColumn* has_ref_offset = &acols[5];
-
-    /* TODO TO DO TBD change to work properly with mutiple reads in alignment table */
-
-    if( (rc = TableWriterRefCoverage_Make(&cover_writer, cself->db, 0)) == 0 ) {
-        /* order is important see ReferenceSeqCoverage struct */
-        const char* tbls[] = {"PRIMARY_ALIGNMENT", "SECONDARY_ALIGNMENT", "EVIDENCE_ALIGNMENT"};
-#define tbls_qty (sizeof(tbls)/sizeof(tbls[0]))
-        rc_t rc1 = 0;
-        int64_t ref_from = 1, rr;
-        struct {
-            int64_t* v;
-            size_t sz;
-            uint64_t q;
-        } ids[tbls_qty];
-
-        ALIGN_DBG("sizeof(TCover) %u, sizeof(TChunk) %u", sizeof(TCover), sizeof(TChunk));
-        memset(ids, 0, sizeof(ids));
-        while( rc == 0 && ref_from <= rows ) {
-            uint32_t i;
-            uint64_t ref_qty = rows;
-            TCover* data = NULL;
-            uint8_t* hilo;
-            /* allocate mem for up to ref_qty of reference coverage data up to 4Gb */
-#if ARCH_BITS == 32
-const uint32_t RECOVER_MAX_MEM = ( 1UL << 30 ); /* 1 GB */
-#else
-const uint64_t RECOVER_MAX_MEM = ( 4UL << 30 ); /* 4 GB */
-#endif
-            do {
-                data = NULL;
-                if( (ref_qty * (sizeof(*data) + cself->max_seq_len)) > RECOVER_MAX_MEM ||
-                    (data = calloc(ref_qty, sizeof(*data) + cself->max_seq_len)) == NULL ) {
-                    ref_qty = ref_qty / 10 * 9;
-                }
-                if( ref_qty < 1 ) {
-                    rc = RC(rcAlign, rcTable, rcCommitting, rcMemory, rcExhausted);
-                }
-                hilo = (uint8_t*)&data[ref_qty];
-            } while( rc == 0 && data == NULL );
-            /* grep through tables for coverage data */
-            ALIGN_DBG("covering REFERENCE rowid range [%ld:%ld]", ref_from, ref_from + ref_qty - 1);
-            for(i = 0; rc == 0 && i < tbls_qty; i++) {
-                const VTable* table = NULL;
-                const TableReader* reader = NULL;
-                int64_t al_from;
-                uint64_t al_qty;
-
-                ALIGN_DBG("covering REFERENCE with %s", tbls[i]);
-                if( (rc = VDatabaseOpenTableRead(cself->db, &table, tbls[i])) != 0 ) {
-                    if( GetRCObject(rc) == rcTable && GetRCState(rc) == rcNotFound ) {
-                        ALIGN_DBG("table %s was not found, ignored", tbls[i]);
-                        rc = 0;
-                        continue;
-                    } else {
-                        break;
-                    }
-                }
-                if( (rc = TableReader_Make(&reader, table, acols, cself->cache)) == 0 &&
-                    (rc = TableReader_IdRange(reader, &al_from, &al_qty)) == 0 ) {
-                    int64_t al_rowid;
-
-                    for(al_rowid = al_from; rc == 0 && al_rowid < al_from + al_qty; al_rowid++) {
-                        int64_t ref_r, al_ref_id_end;
-                        uint64_t j, seq_start = 0, refseq_start;
-
-                        if( (rc = TableReader_ReadRow(reader, al_rowid)) != 0 ) {
-                            break;
-                        }
-                        /* alignment can run across multiple reference chunks */
-                        al_ref_id_end = **al_ref_id + (**al_ref_start + **al_ref_len) / cself->max_seq_len;
-                        refseq_start = **al_ref_start;
-                        ALIGN_DBG("al row %ld has REF_ID [%ld,%ld], REF_START: %i, REF_LEN %u",
-                                   al_rowid, **al_ref_id, al_ref_id_end, **al_ref_start, **al_ref_len);
-                        for(ref_r = **al_ref_id; ref_r <= al_ref_id_end; ref_r++) {
-                            uint64_t refseq_len = cself->max_seq_len - refseq_start;
-                            if( seq_start + refseq_len > **al_ref_len ) {
-                                refseq_len = **al_ref_len - seq_start;
-                            }
-                            ALIGN_DBG("covered ref_id %ld [%ld,%ld]", ref_r, refseq_start, refseq_start + refseq_len);
-                            if( ref_r >= ref_from && ref_r < ref_from + ref_qty ) {
-                                uint64_t k = ref_r - ref_from;
-                                ALIGN_DBG("%ld is a match for %ld[%lu]", ref_r, ref_from + k, k);
-                                if( data[k].tail_qty == ID_CHUNK_SZ || data[k].head == NULL ) {
-                                    TChunk* x = malloc(sizeof(*(data[k].tail)));
-                                    while( x == NULL ) {
-                                        /* release last ref cover_writer record and retry */
-                                        ReferenceMgr_TCoverRelease(&data[--ref_qty]);
-                                        ALIGN_DBG("downsize covering REFERENCE rowid range [%ld:%ld] from %s",
-                                                  ref_from, ref_from + ref_qty - 1, tbls[i]);
-                                        if( ref_qty < 1 ) {
-                                            rc = RC(rcAlign, rcTable, rcCommitting, rcMemory, rcExhausted);
-                                            break;
-                                        } else if( ref_r >= ref_from + ref_qty ) {
-                                            break;
-                                        }
-                                    }
-                                    if( rc != 0 || x == NULL ) {
-                                        break;
-                                    }
-                                    if( data[k].head == NULL ) {
-                                        data[k].head = x;
-                                    } else {
-                                        data[k].tail->next = x;
-                                    }
-                                    x->next = NULL;
-                                    data[k].tail = x;
-                                    data[k].tail_qty = 0;
-                                    data[k].hilo = &hilo[cself->max_seq_len * k];
-                                }
-                                /* 2 bits designated src table */
-                                data[k].tail->id[data[k].tail_qty] = i;
-                                data[k].tail->id[data[k].tail_qty] <<= 62;
-                                data[k].tail->id[data[k].tail_qty] = al_rowid;
-                                data[k].tail_qty++;
-                                data[k].id_qty++;
-                                if( ref_r == **al_ref_id ) {
-                                    /* write those to 1st chunk only */
-                                    data[k].mismatches += mismatch_len->len;
-                                    data[k].indels += ref_offset->len;
-                                    if( ref_offset->len > 0 && has_ref_offset->base.buul[0] && ref_offset->base.i32[0] < 0 ) {
-                                        data[k].indels--;
-                                    }
-                                }
-                                for(j = refseq_start; j < refseq_start + refseq_len; j++) {
-                                    if( data[k].hilo[j] < UINT8_MAX ) {
-                                        data[k].hilo[j]++;
-                                    }
-                                }
-                            }
-                            seq_start += refseq_len;
-                            refseq_start = 0;
-                        }
-                        rc = rc ? rc : Quitting();
-                    }
-                }
-                TableReader_Whack(reader);
-                VTableRelease(table);
+    VTable const *tbl;
+    rc_t rc = VDatabaseOpenTableRead(mgr->db, &tbl, "REFERENCE");
+    
+    if (rc == 0) {
+        TableReader const *reader;
+        
+        rc = TableReader_Make(&reader, tbl, acols, 0);
+        if (rc == 0) {
+            uint64_t i;
+            
+            for (i = 0; i != rows; ++i) {
+                rc = TableReader_ReadRow(reader, i + 1);
+                if (rc == 0 && acols->len > 0)
+                    data[i].bin_seq_len = acols->base.coord_len[0];
             }
-            /* prep and write coverage data */
-            for(rr = 0; rc == 0 && rr < ref_qty; rr++) {
-                TChunk* x;
-                ReferenceSeqCoverage c;
-
-                ALIGN_DBGF(("ref rowid %ld:", ref_from + rr));
-                memset(&c, 0, sizeof(c));
-                x = data[rr].head;
-                while( rc == 0 && rr < ref_qty && x != NULL ) {
-                    uint32_t q = data[rr].tail == x ? data[rr].tail_qty : ID_CHUNK_SZ;
-                    for(i = 0; i < q; i++) {
-                        int t = (x->id[i] >> 62) & 0x3;
-#if _ARCH_BITS == 32
-                        x->id[i] &= 0x3FFFFFFFFFFFFFULL;
-#else
-                        x->id[i] &= 0x3FFFFFFFFFFFFFUL;
-#endif
-                        assert(t >= 0 && t < tbls_qty);
-                        ALIGN_DBGF((" %lu[%c][%i]", x->id[i], t));
-                        while( ids[t].sz <= ids[t].q ) {
-                            int64_t* n = realloc(ids[t].v, (ids[t].sz += ID_CHUNK_SZ) * sizeof(*ids[t].v));
-                            if( n == NULL ) {
-                                ReferenceMgr_TCoverRelease(&data[--ref_qty]);
-                                ALIGN_DBG("downsize covering REFERENCE rowid range [%ld:%ld]", ref_from, ref_from + ref_qty - 1);
-                                if( ref_qty < 1 ) {
-                                    rc = RC(rcAlign, rcTable, rcCommitting, rcMemory, rcExhausted);
-                                    break;
-                                } else if( rr >= ref_qty ) {
-                                    break;
-                                }
-                            } else {
-                                ids[t].v = n;
-                            }
-                        }
-                        if( rc != 0 || rr >= ref_qty ) {
-                            break;
-                        }
-                        ids[t].v[ids[t].q++] = x->id[i];
-                    }
-                    x = x->next;
-                }
-                ALIGN_DBGF(("\n"));
-                for(i = 0; rc == 0 && i < tbls_qty; i++) {
-                    c.ids[i].buffer = ids[i].v;
-                    c.ids[i].elements = ids[i].q;
-                    ALIGN_DBG(" %i qty %lu,", i, c.ids[i].elements);
-                }
-                if( rc == 0 ) {
-                    c.mismatches = data[rr].mismatches;
-                    c.indels = data[rr].indels;
-                    if( data[rr].hilo != NULL ) {
-                        memset(&c.low, 0xFF, sizeof(c.low));
-                        for(i = 0; i < cself->max_seq_len; i++) {
-                            if( c.high < data[rr].hilo[i] ) {
-                                c.high = data[rr].hilo[i];
-                            }
-                            if( c.low > data[rr].hilo[i] ) {
-                                c.low = data[rr].hilo[i];
-                            }
-                        }
-                    }
-                    rc = TableWriterRefCoverage_Write(cover_writer, ref_from + rr, &c);
-                }
-                ReferenceMgr_TCoverRelease(&data[rr]);
-            }
-            for(; rr < ref_qty; rr++) {
-                /* clean up in case of rc != 0 */
-                ReferenceMgr_TCoverRelease(&data[rr]);
-            }
-            free(data);
-            ref_from += ref_qty;
-            ref_qty = rows - ref_from + 1;
+            TableReader_Whack(reader);
         }
-        for(i = 0; i < tbls_qty; i++) {
-            free(ids[i].v);
-        }
-        rc1 = TableWriterRefCoverage_Whack(cover_writer, rc == 0, &new_rows);
-        rc = rc ? rc : rc1;
-        if( rc == 0 && rows != new_rows ) {
-            rc = RC(rcAlign, rcTable, rcCommitting, rcData, rcInconsistent);
-        }
+        VTableRelease(tbl);
     }
     return rc;
 }
 
-LIB_EXPORT rc_t CC ReferenceMgr_Release(const ReferenceMgr* cself, bool commit, uint64_t* rows, bool build_coverage)
+static
+rc_t ReferenceMgr_ReCover(const ReferenceMgr* cself, uint64_t ref_rows)
 {
     rc_t rc = 0;
-    if( cself != NULL ) {
-        uint64_t rr, *r = rows ? rows : &rr;
-        ReferenceMgr* self = (ReferenceMgr*)cself;
+    uint64_t new_rows = 0;
+    const TableWriterRefCoverage* cover_writer = NULL;
+    
+    TableReaderColumn acols[] =
+    {
+        {0, "REF_ID", {NULL}, 0, 0},
+        {0, "REF_START", {NULL}, 0, 0},
+        {0, "CIGAR_LONG",{NULL}, 0, 0},
+        {0, "REF_POS",{NULL}, 0, 0},
+        {0, NULL, {NULL}, 0, 0}
+    };
+    const int64_t** al_ref_id = &acols[0].base.i64;
+    const INSDC_coord_zero** al_ref_start = &acols[1].base.coord0;
+    const TableReaderColumn* cigar =  &acols[2];
+    const INSDC_coord_zero** al_ref_pos = &acols[3].base.coord0;
+    /* order is important see ReferenceSeqCoverage struct */
+    struct {
+        const char* nm;
+	    const char* col;
+        bool ids_only;
+    } tbls[] = { {"PRIMARY_ALIGNMENT", "PRIMARY_ALIGNMENT_IDS",false},
+        {"SECONDARY_ALIGNMENT", "SECONDARY_ALIGNMENT_IDS",false},
+        {"EVIDENCE_INTERVAL", "EVIDENCE_INTERVAL_IDS", true} };
+	int tbls_qty=(sizeof(tbls)/sizeof(tbls[0]));
+    rc_t rc1 = 0;
+    int64_t rr;
+    uint32_t i;
+    uint8_t* hilo=NULL;
+    TCover* data = NULL;
+    
+    /* allocate mem for ref_rows of reference coverage*/
+    if((data = calloc(ref_rows, (sizeof(*data) + cself->max_seq_len))) == NULL ) {
+		rc = RC(rcAlign, rcTable, rcCommitting, rcMemory, rcExhausted);
+    } else {
+		/** allocation for both data and hilo was done in 1 shot ***/
+		hilo = (uint8_t *)&data[ref_rows];
+        rc = CoverageGetSeqLen(cself, data, ref_rows);
+    }
+    /* grep through tables for coverage data */
+    ALIGN_R_DBG("covering REFERENCE rowid range [1:%ld]",ref_rows);
+    for(i = 0; rc == 0 && i < tbls_qty; i++) { /* TABLE LOOP STARTS */
+        const VTable* table = NULL;
+        const TableReader* reader = NULL;
+        int64_t al_from;
+        uint64_t al_qty;
+        
+        ALIGN_R_DBG("covering REFERENCE with %s", tbls[i].nm);
+        if( (rc = VDatabaseOpenTableRead(cself->db, &table, tbls[i].nm)) != 0 ) {
+            if( GetRCState(rc) == rcNotFound ) {
+                ALIGN_R_DBG("table %s was not found, ignored", tbls[i].nm);
+                rc = 0;
+                continue;
+            } else {
+                break;
+            }
+        }
+        if( (rc = TableReader_Make(&reader, table, acols, cself->cache)) == 0 &&
+           (rc = TableReader_IdRange(reader, &al_from, &al_qty)) == 0 ) {
+            int64_t al_rowid;
+            
+            for(al_rowid = al_from; rc == 0 && al_rowid < al_from + al_qty; al_rowid++) {
+                if( (rc = TableReader_ReadRow(reader, al_rowid)) != 0 ) {
+                    break;
+                }
+                rr    = **al_ref_id-1;
+                /**** Record ALIGNMENT_IDS ***/
+                if(   data[rr].idlist == NULL 
+                   && (rc = ReferenceMgr_TCoverSetMaxId(data+rr,al_from + al_qty))!=0){
+                    break; /*** out-of-memory ***/
+                }
+                if((rc = AlignIdListAddId(data[rr].idlist,al_rowid))!=0){
+                    break; /*** out-of-memory ***/
+                }
+                /**** Done alignment ids ***/
+                if( !tbls[i].ids_only ) { /*** work on statistics ***/
+                    char const *c = cigar->base.str;
+                    const char *c_end = c + cigar->len;
+                    int64_t const global_ref_pos = rr*cself->max_seq_len + **al_ref_start; /** global_ref_start **/
+                    int64_t const global_refseq_start = global_ref_pos -  **al_ref_pos;   /** global_ref_start of current reference **/
+                    unsigned const bin_no = global_ref_pos / cself->max_seq_len;
+                    TCover *const bin = &data[bin_no];
+                    uint8_t *const cov = &hilo[global_ref_pos];
+                    int64_t ref_offset = 0;
+                    int64_t max_ref_offset = 0;
+                    int64_t min_ref_offset = 0;
+                    int64_t j;
 
-        rc = TableWriterRef_Whack(self->writer, commit, r);
-        BSTreeWhack(&self->tree, ReferenceSeq_Whack, NULL);
+                    while (rc == 0 && c < c_end) {
+                        int op_len = strtol(c, (char **)&c, 10);
+                        int const op = *c++;
+                        
+                        switch (op){
+                        case 'I':/* extra bases in the read **/
+                            ++bin->cover.indels;
+                        case 'S':/* skip in the read */
+                            break;
+                        case 'B':/* back up in the sequence */
+                            if (ref_offset > op_len)
+                                ref_offset -= op_len;
+                            else
+                                ref_offset = 0;
+                            break;
+                        case 'D': /** delete in the reference ***/
+                            ++bin->cover.indels;
+                        case 'N': /** expected skip in the reference ***/
+                            ref_offset += op_len;
+                            break;
+                        case 'X':
+                            bin->cover.mismatches += op_len;
+                        case '=':
+                            ref_offset += op_len;
+                            break;
+                        default:
+                            rc = RC(rcAlign, rcTable, rcCommitting, rcData, rcUnrecognized);
+                        }
+                        if (min_ref_offset > ref_offset)
+                            min_ref_offset = ref_offset;
+                        if (max_ref_offset < ref_offset)
+                            max_ref_offset = ref_offset;
+                    }
+                    for (j = min_ref_offset; j < max_ref_offset; ++j) {
+                        unsigned const hl = cov[j];
+                        
+                        if (hl < UINT8_MAX)
+                            cov[j] = hl + 1;
+                    }
+                    /*** check if OVERLAPS are needed ***/
+                    {
+                        int64_t min_rr = (global_ref_pos + min_ref_offset)/cself->max_seq_len;
+                        int64_t max_rr = (global_ref_pos + max_ref_offset)/cself->max_seq_len;
+                        
+                        if(min_rr < 0) min_rr = 0;
+                        if(max_rr >= ref_rows) max_rr = ref_rows -1;
+                        
+                        assert(min_rr<= max_rr);
+                        
+                        if(min_rr < max_rr){
+                            int64_t  overlap_ref_pos; /** relative the beginning of the reference **/
+                            uint32_t overlap_ref_len = (global_ref_pos + max_ref_offset) % cself->max_seq_len ;
+                            
+                            min_rr++;
+                            if (global_ref_pos + min_ref_offset > global_refseq_start) {
+                                overlap_ref_pos = global_ref_pos + min_ref_offset - global_refseq_start;
+                            }
+                            else {
+                                overlap_ref_pos = 1;
+                            }
+                            for ( ; min_rr < max_rr; ++min_rr) {
+                                if (   data[min_rr].cover.overlap_ref_pos[i] == 0 /*** NOT SET***/
+                                    || overlap_ref_pos < data[min_rr].cover.overlap_ref_pos[i])
+                                {
+									data[min_rr].cover.overlap_ref_pos[i] = overlap_ref_pos;
+                                }
+                                data[min_rr].cover.overlap_ref_len[i] = cself->max_seq_len; /*** in between chunks get full length of overlap **/
+                            }
+                            if (   data[min_rr].cover.overlap_ref_pos[i] == 0
+                                || overlap_ref_pos < data[min_rr].cover.overlap_ref_pos[i])
+                            {
+								data[min_rr].cover.overlap_ref_pos[i] = overlap_ref_pos;
+                            }
+                            if (overlap_ref_len > data[min_rr].cover.overlap_ref_len[i])
+								data[min_rr].cover.overlap_ref_len[i] = overlap_ref_len;
+                        }
+                    }
+                } /**** DONE WITH WORK ON STATISTICS ***/
+                ALIGN_DBGERR(rc);
+                rc = rc ? rc : Quitting();
+            }
+		    /*** HAVE TO RELEASE **/
+		    TableReader_Whack(reader);
+		    VTableRelease(table);
+		    /*** NOW SAVE AND RELEASE THE COLUMN ***/
+		    if( (rc = TableWriterRefCoverage_MakeIds(&cover_writer, cself->db, tbls[i].col)) == 0 ) {
+                for(rr=0; rc ==0 &&  rr < ref_rows; rr ++){
+                    uint64_t num_elem = AlignIdListCount( data[rr].idlist);
+                    uint64_t num_elem_copied = 0;
+                    if(num_elem > 0 ){
+#define BUF_STACK_COUNT 128 * 1024
+                        int64_t buf_stack[BUF_STACK_COUNT];
+                        int64_t *buf_alloc = NULL;
+                        int64_t *buf = buf_stack;
+                        if(num_elem > BUF_STACK_COUNT){
+                            buf=buf_alloc=malloc(num_elem*sizeof(buf[0]));
+                            if(buf_alloc == NULL) 
+                                rc = RC(rcAlign, rcTable, rcCommitting, rcMemory, rcExhausted);
+                        }
+                        if(rc == 0){
+                            num_elem_copied = AlignIdListFlatCopy(data[rr].idlist,buf,num_elem,true);
+                            assert(num_elem == num_elem_copied);
+                        }
+                        ReferenceMgr_TCoverRelease(data+rr); /** release memory ***/
+                        if(rc == 0){
+                            rc = TableWriterRefCoverage_WriteIds(cover_writer, rr+1, buf,num_elem);
+                        }
+                        if(buf_alloc) free(buf_alloc);
+                    } else {
+                        rc = TableWriterRefCoverage_WriteIds(cover_writer, rr+1, NULL,0);
+                    }
+                }
+                if(rc == 0){
+                    rc = TableWriterRefCoverage_Whack(cover_writer, rc == 0, &new_rows);
+                    if( rc == 0  && ref_rows != new_rows ) {
+                        rc = RC(rcAlign, rcTable, rcCommitting, rcData, rcInconsistent);
+                    }
+                }
+                ALIGN_DBGERR(rc);
+		    }
+		} else {
+			TableReader_Whack(reader);
+			VTableRelease(table);
+		}
+	}/* TABLE LOOP ENDS **/
+    /* prep and write coverage data */
+	if(rc == 0) {
+        uint64_t k;
+        
+		rc = TableWriterRefCoverage_MakeCoverage(&cover_writer, cself->db, 0);
+		for (rr = 0, k = 0; rc == 0 && rr != ref_rows; ++rr, k += cself->max_seq_len) {
+            unsigned hi = 0;
+            unsigned lo = 255;
+            
+		    for (i = 0; i != data[rr].bin_seq_len; ++i) {
+                unsigned const depth = hilo[k + i];
+                
+                if (hi < depth) hi = depth;
+                if (lo > depth) lo = depth;
+		    }
+            data[rr].cover.high = hi;
+            data[rr].cover.low  = lo;
+		    rc = TableWriterRefCoverage_WriteCoverage(cover_writer,rr+1, &data[rr].cover);
+		}
+		free(data);
+		rc1 = TableWriterRefCoverage_Whack(cover_writer, rc == 0, &new_rows);
+		rc = rc ? rc : rc1;
+		if( rc == 0 && ref_rows != new_rows ) {
+		    rc = RC(rcAlign, rcTable, rcCommitting, rcData, rcInconsistent);
+		}
+	}
+    ALIGN_DBGERR(rc);
+	return rc;
+}
+
+LIB_EXPORT rc_t CC ReferenceMgr_Release(const ReferenceMgr *cself,
+                                        bool commit,
+                                        uint64_t *const Rows,
+                                        bool build_coverage)
+{
+    rc_t rc = 0;
+
+    if (cself != NULL) {
+        ReferenceMgr *const self = (ReferenceMgr *)cself;
+        uint64_t rows;
+        unsigned i;
+        
+        rc = TableWriterRef_Whack(self->writer, commit, &rows);
+        if (Rows) *Rows = rows;
         KDirectoryRelease(self->dir);
-        if( rc == 0 && build_coverage && commit ) {
+        
+        for (i = 0; i != self->refSeqsById.elem_count; ++i)
+            free((void *)((key_id_t *)self->refSeqsById.base)[i].key);
+        
+        for (i = 0; i != self->refSeqs.elem_count; ++i)
+            ReferenceSeq_Whack(&self->refSeq[i]);
+        
+        KDataBufferWhack(&self->compress);
+        KDataBufferWhack(&self->seq);
+        KDataBufferWhack(&self->refSeqs);
+        KDataBufferWhack(&self->refSeqsById);
+        
+        if (rc == 0 && build_coverage && commit)
+            rc = ReferenceMgr_ReCover(cself, rows);
+#if 0 
+        {
             VTable* t = NULL;
-            rc = ReferenceMgr_ReCover(cself, *r);
-            if( VDatabaseOpenTableUpdate(self->db, &t, "SECONDARY_ALIGNMENT") == 0 ) {
+            
+            if (VDatabaseOpenTableUpdate(self->db, &t, "SECONDARY_ALIGNMENT") == 0) {
                 VTableDropColumn(t, "TMP_MISMATCH");
+                VTableDropColumn(t, "TMP_HAS_MISMATCH");
             }
             VTableRelease(t);
         }
+#endif
         VDatabaseRelease(self->db);
         RefSeqMgr_Release(self->rmgr);
         free(self);
@@ -644,346 +1737,139 @@ LIB_EXPORT rc_t CC ReferenceMgr_Release(const ReferenceMgr* cself, bool commit, 
 }
 
 static
-rc_t ReferenceMgr_ImportFastaFile(const ReferenceMgr* cself, const KFile* kf, const char* id, ReferenceSeq** seq)
+rc_t ReferenceSeq_ReadDirect(ReferenceSeq *self,
+                             int offset,
+                             unsigned const len,
+                             bool read_circular,
+                             uint8_t buffer[],
+                             unsigned* written,
+                             bool force_linear)
 {
-    rc_t rc = 0;
-    const KMMap* map = NULL;
-    const uint8_t* addr;
-    size_t file_size;
-    MD5State md5;
-
-    assert(cself != NULL);
-    assert(kf != NULL);
-    if( seq != NULL ) {
-        assert(id != NULL);
-    }
-
-    if( (rc = KMMapMakeRead(&map, kf)) == 0 &&
-        (rc = KMMapAddrRead(map, (const void**)&addr)) == 0 && (rc = KMMapSize(map, &file_size)) == 0  ) {
-        ReferenceMgr* self = (ReferenceMgr*)cself;
-        const uint8_t* end = &addr[file_size];
-        ReferenceSeq* obj = NULL;
-        while( rc == 0 && addr < end ) {
-            size_t line_sz, line_no, bad_line_1st;
-            /* skip empty space between sequences */
-            while( addr < end && isspace(addr[0])) {
-                addr++;
-            }
-            if( addr < end && addr[0] == '>' ) {
-                const uint8_t* nl, *sp = addr;
-                while( sp < end && !isspace((++sp)[0]) );
-                nl = sp;
-                while( nl[0] != '\n' && nl[0] != '\r' && nl < end ) { nl++; }
-                while( (nl[0] == '\n' || nl[0] == '\r') && nl < end ) { nl++; }
-                if( sp >= end || nl >= end ) {
-                    rc = RC(rcAlign, rcFile, rcReading, rcFormat, rcInvalid);
-                } else if( id != NULL && obj != NULL) {
-                    /* call with id means only one seq per this file is expected */
-                    rc = RC(rcAlign, rcFile, rcReading, rcItem, rcUnexpected);
-                } else {
-                    const char* id2 = id;
-                    size_t id_sz;
-                    if( id == NULL ) {
-                        id2 = (const char*)(&addr[1]);
-                        id_sz = sp - addr - 1;
-                    } else {
-                        id_sz = strlen(id);
-                    }
-                    if( (rc = ReferenceSeq_Alloc(&obj, id2, id_sz, (const char*)&addr[1], sp - addr - 1)) == 0 &&
-                        (rc = KMMapAddRef(map)) == 0 ) {
-                        obj->local = true;
-                        obj->mgr = cself;
-                        obj->u.local.file_size = file_size;
-                        obj->u.local.map = map;
-                        obj->u.local.fasta_start = nl;
-                        obj->u.local.fasta_end = nl + 1;
-                        MD5StateInit(&md5);
-                    }
-                }
-                addr = nl;
-            } else if( addr < end ) {
-                rc = RC(rcAlign, rcFile, rcReading, rcFormat, rcInvalid);
-            }
-            line_sz = line_no = bad_line_1st = 0;
-            while( rc == 0 && addr < end ) {
-                /* read, validate and md5 the sequence */
-                if( addr[0] == '\n' || addr[0] == '\r' ) {
-                    addr++;
-                    line_no++;
-                    if( obj->u.local.line_sz == 0 ) {
-                        /* remember 1st line len */
-                        obj->u.local.line_sz = line_sz;
-                    } else if( line_sz != obj->u.local.line_sz ) {
-                        if( bad_line_1st == 0 ) {
-                            bad_line_1st = line_no;
-                        }
-                    }
-                    line_sz = 0;
-                } else if( addr[0] == '>' ) {
-                    break;
-                } else if( strchr(INSDC_4na_accept_CHARSET, addr[0]) == NULL ) {
-                    rc = RC(rcAlign, rcFile, rcReading, rcFormat, rcInvalid);
-                } else {
-                    INSDC_4na_bin c = addr[0];
-                    c = (c == '.') ? 'N' : toupper(c);
-                    line_sz++;
-                    MD5StateAppend(&md5, &c, 1);
-                    obj->seq_len++;
-                    obj->u.local.fasta_end = ++addr;
-                }
-            }
-            if( rc == 0 && obj != NULL ) {
-                ReferenceSeq* existing = NULL;
-                MD5StateFinish(&md5, obj->u.local.md5);
-                if( obj->u.local.line_sz == 0 ) {
-                    /* if line_sz still not set, set to last */
-                    obj->u.local.line_sz = line_sz;
-                }
-                if( obj->seq_len == 0 ) {
-                    rc = RC(rcAlign, rcFile, rcReading, rcItem, rcIncomplete);
-                } else if( (rc = BSTreeInsertUnique(&self->tree, &obj->dad, (BSTNode**)&existing, ReferenceSeq_Sort)) == 0 ) {
-                    ALIGN_DBG("RefSeq local fasta added '%s' -> '%s'", obj->id, obj->accession);
-                    if( bad_line_1st != 0 && bad_line_1st < line_no ) {
-                        uint8_t* x = malloc(obj->seq_len);
-                        /* need to make copy of malformed fasta to mem */
-                        ALIGN_DBG("making memcpy since format is broken for '%s'", obj->id);
-                        if( x == NULL ) {
-                            rc = RC(rcAlign, rcFile, rcReading, rcMemory, rcExhausted);
-                        } else {
-                            INSDC_coord_len l;
-                            obj->u.local.line_sz = 0;
-                            if( (rc = ReferenceSeq_Read(obj, 0, obj->seq_len, x, &l)) == 0 ) {
-                                assert( obj->seq_len == l );
-                                obj->u.local.fasta_start = x;
-                                obj->u.local.fasta_end = obj->u.local.fasta_start + obj->seq_len;
-                            } else {
-                                free(x);
-                            }
-                        }
-                    }
-                } else if( rc != 0 ) {
-                    if( existing != NULL ) {
-                        const uint8_t* rmd5;
-                        INSDC_coord_len len;
-                        
-                        rc = 0;
-                        if( existing->local ) {
-                            if( obj->seq_len != existing->seq_len ) {
-                                rc = RC(rcAlign, rcFile, rcReading, rcItem, rcDuplicate);
-                                ALIGN_DBG("%s length mismatch %u <> %u", obj->id, obj->seq_len, existing->seq_len);
-                            } else if( memcmp(obj->u.local.md5, existing->u.local.md5, sizeof(obj->u.local.md5)) != 0 ) {
-                                rc = RC(rcAlign, rcFile, rcReading, rcItem, rcDuplicate);
-                                ALIGN_DBG("%s local md5 mismatch", obj->id);
-                            }
-                        } else {
-                            const RefSeq* r = existing->u.refseq.o;
-                            if( r == NULL ) {
-                                rc = RefSeqMgr_GetSeq(cself->rmgr, &r, existing->accession, strlen(existing->accession));
-                            }
-                            if( rc != 0 ) {
-                                ALIGN_DBGERRP("%s refseq opening", rc, existing->id);
-                            } else if( (rc = RefSeq_SeqLength(r, &len)) == 0 && obj->seq_len != len ) {
-                                ALIGN_DBG("%s refseq and %s length mismatch", existing->id, obj->id);
-                                rc = RC(rcAlign, rcFile, rcReading, rcItem, rcDuplicate);
-                            } else if( (rc = RefSeq_MD5(r, &rmd5)) == 0 && memcmp(obj->u.local.md5, rmd5, sizeof(obj->u.local.md5)) != 0 ) {
-                                ALIGN_DBGF(("%s refseq and %s md5 mismatch '", existing->id, obj->id));
-                                for(len = 0; len < sizeof(obj->u.local.md5); len++) {
-                                    ALIGN_DBGF(("%02hx", obj->u.local.md5[len]));
-                                }
-                                ALIGN_DBGF(("' <> '"));
-                                for(len = 0; len < sizeof(obj->u.local.md5); len++) {
-                                    ALIGN_DBGF(("%02hx", rmd5[len]));
-                                }
-                                ALIGN_DBGF(("'\n"));
-                                rc = RC(rcAlign, rcFile, rcReading, rcItem, rcDuplicate);
-                            }
-                            if( r != existing->u.refseq.o ) {
-                                RefSeq_Release(r);
-                            }
-                        }
-                        ReferenceSeq_Whack(&obj->dad, NULL);
-                        if( rc == 0 ) {
-                            ALIGN_DBG("note: %s full duplicate", obj->id);
-                            obj = existing;
-                        }
-                    } else {
-                        ReferenceSeq_Whack(&obj->dad, NULL);
-                    }
-                }
-                if( rc == 0 && seq != NULL ) {
-                    *seq = obj;
-                }
-            }
-        }
-    }
-    KMMapRelease(map);
-    ALIGN_DBGERR(rc);
-    return rc;
-}
-
-static
-rc_t ReferenceSeq_ReadDirect(ReferenceSeq* self, INSDC_coord_zero offset, INSDC_coord_len len, bool read_circular,
-                             uint8_t* buffer, INSDC_coord_len* written)
-{
-    rc_t rc = 0;
-
     *written = 0;
-    if( len == 0 ) {
-    } else if( (rc = ReferenceSeq_ReOffset(self->circular || read_circular, self->seq_len, &offset)) != 0 ) {
-    } else if( self->local ) {
-        /* translate offset into file map dimensions */
-        const uint8_t* start = self->u.local.fasta_start + offset;
-        start += self->u.local.line_sz ? offset / self->u.local.line_sz : 0; /* add \n on each line */
-        assert(start < self->u.local.fasta_end);
-        do {
-            while( len > *written && start < self->u.local.fasta_end ) {
-                while( start < self->u.local.fasta_end && isspace(*start) ) {
-                    start++;
-                }
-                while( len > *written && start < self->u.local.fasta_end && !isspace(*start) ) {
-                    buffer[*written] = *start;
-                    *written = *written + 1;
-                    start++;
-                }
-            }
-            if( read_circular && start >= self->u.local.fasta_end ) {
-                start = self->u.local.fasta_start;
-            }
-        } while( len > *written && start < self->u.local.fasta_end );
-    } else {
-        /* we need to trim len to actual length of seq */
-        if( !read_circular && (offset + len) >= self->seq_len ) {
-            len = self->seq_len - offset;
+    if (len == 0)
+        return 0;
+    
+    if (read_circular || self->circular) {
+        if (offset < 0) {
+            unsigned const n = (-offset) / self->seq_len;
+            offset = (self->seq_len * (n + 1) + offset) % self->seq_len;
         }
-        if( rc == 0 && (rc = RefSeq_Read(self->u.refseq.o, offset, len, buffer, written)) == 0 ) {
-            self->u.refseq.usage = ++((ReferenceMgr*)self->mgr)->usage;
-        }
+        else if (offset > self->seq_len)
+            offset %= self->seq_len;
     }
-    ALIGN_DBGERR(rc);
-    return rc;
+    else if (offset >= self->seq_len)
+        return RC(rcAlign, rcType, rcReading, rcOffset, rcOutofrange);
+    
+    if (self->type == rst_local) {
+        uint8_t const *const src = self->u.local.buf.base;
+        unsigned dst_off = 0;
+        
+        while (dst_off < len) {
+            unsigned const writable = len - dst_off;
+            unsigned const readable = self->seq_len - offset;
+            unsigned const to_write = readable < writable ? readable : writable;
+            
+            memcpy(&buffer[dst_off], &src[offset], to_write);
+            *written += to_write;
+            if (!read_circular)
+                break;
+            offset = 0;
+            dst_off += to_write;
+        }
+        return 0;
+    }
+    else if (self->type == rst_refSeqById || self->type == rst_refSeqBySeqId) {
+        unsigned to_write = len;
+        
+        if (!self->circular || force_linear) {
+            unsigned const readable = self->seq_len - offset;
+            
+            if (to_write > readable)
+                to_write = readable;
+        }
+        return RefSeq_Read(self->u.refseq, offset, to_write, buffer, written);
+    }
+    return RC(rcAlign, rcType, rcReading, rcType, rcInvalid);
 }
 
 static
-rc_t CC ReferenceMgr_Find(const ReferenceMgr* cself, const char* id, ReferenceSeq** seq, const KFile** kf)
+rc_t ReferenceMgr_LoadSeq(ReferenceMgr *const self, ReferenceSeq *obj)
 {
-    rc_t rc = 0;
-
-    assert(cself != NULL && id != NULL && seq != NULL && kf != NULL);
-
-    *seq = (ReferenceSeq*)BSTreeFind(&cself->tree, id, ReferenceSeq_Cmp);
-    *kf = NULL;
-    if( *seq == NULL ) {
-        /* ask efSeqMgr */
-        size_t id_len = strlen(id);
-        if( RefSeqMgr_Exists(cself->rmgr, id, id_len, NULL) == 0 ) {
-            ReferenceSeq* obj;
-            if( (rc = ReferenceSeq_Alloc(&obj, id, id_len, id, id_len)) == 0 ) {
-                if( (rc = BSTreeInsertUnique((BSTree*)&cself->tree, &obj->dad, NULL, ReferenceSeq_Sort)) == 0 ) {
-                    *seq = obj;
-                    ALIGN_DBG("RefSeq added on-fly '%s' -> '%s'", (*seq)->id, (*seq)->accession);
-                } else {
-                    ReferenceSeq_Whack(&obj->dad, NULL);
-                }
-            }
-        } else {
-            /* try local file */
-            if( KDirectoryOpenFileRead(cself->dir, kf, "%s.fasta", id) == 0 ) {
-                ALIGN_DBG("RefSeq added from file %s.fasta", id);
-            } else if( KDirectoryOpenFileRead(cself->dir, kf, "%s.fa", id) == 0 ) {
-                ALIGN_DBG("RefSeq added from file %s.fa", id);
-            } else {
-                rc = RC(rcAlign, rcFile, rcOpening, rcFile, rcNotFound);
+    KDataBuffer readBuf;
+    rc_t rc = KDataBufferMake(&readBuf, 8, self->max_seq_len);
+    
+    if (rc == 0) {
+        char const *const id = obj->id;
+        char const *const seqId = obj->seqId ? obj->seqId : id;
+        TableWriterRefData data;
+        INSDC_coord_zero offset = 0;
+        
+        obj->start_rowid = self->ref_rowid + 1;
+        data.name.buffer = id;
+        data.name.elements = strlen(id);
+        data.read.buffer = readBuf.base;
+        data.seq_id.buffer = seqId;
+        data.seq_id.elements = strlen(seqId);
+        data.force_READ_write = obj->type == rst_local || (self->options & ewrefmgr_co_allREADs);
+        data.circular = obj->circular;
+        
+        if (self->writer == NULL) {
+            uint32_t wopt = 0;
+            
+            wopt |= (self->options & ewrefmgr_co_allREADs) ? ewref_co_SaveRead : 0;
+            wopt |= (self->options & ewrefmgr_co_Coverage) ? ewref_co_Coverage : 0;
+            if( (rc = TableWriterRef_Make(&self->writer, self->db, wopt)) == 0 ) {
+                TableWriterData mlen;
+                
+                mlen.buffer = &self->max_seq_len;
+                mlen.elements = 1;
+                rc = TableWriterRef_WriteDefaultData(self->writer, ewrefseq_cn_MAX_SEQ_LEN, &mlen);
             }
         }
+        while (rc == 0 && offset < obj->seq_len) {
+            unsigned row_len;
+            
+            rc = ReferenceSeq_ReadDirect(obj, offset, self->max_seq_len, false,
+                                         readBuf.base, &row_len, true);
+            if (rc != 0 || row_len == 0) break;
+            
+            data.read.elements = row_len;
+            rc = TableWriterRef_Write(self->writer, &data, NULL);
+            offset += row_len;
+            ++self->ref_rowid;
+        }
+        KDataBufferWhack(&readBuf);
     }
-    ALIGN_DBGERR(rc);
     return rc;
 }
 
-LIB_EXPORT rc_t CC ReferenceMgr_GetSeq(const ReferenceMgr* cself, const ReferenceSeq** seq, const char* id)
+LIB_EXPORT rc_t CC ReferenceMgr_GetSeq(ReferenceMgr const *const cself,
+                                       ReferenceSeq const **const seq,
+                                       char const id[])
 {
-    rc_t rc = 0;
-    ReferenceSeq* obj;
+    ReferenceMgr *const self = (ReferenceMgr *)cself;
     
-    if( cself == NULL || seq == NULL || id == NULL ) {
-        rc = RC(rcAlign, rcFile, rcConstructing, rcParam, rcNull);
-    } else {
-        ReferenceMgr* mgr = (ReferenceMgr*)cself;
-        const KFile* kf;
+    if  (self == NULL || seq == NULL || id == NULL )
+        return RC(rcAlign, rcFile, rcConstructing, rcParam, rcNull);
+    
+    *seq = NULL;
+    {
+        ReferenceSeq *obj;
+        rc_t rc = ReferenceMgr_OpenSeq(self, &obj, id, 0, NULL);
         
-        *seq = NULL;
-        rc = ReferenceMgr_Find(cself, id, &obj, &kf);
-        if( rc == 0 && obj == NULL ) {
-            /* it is local file */
-            rc = ReferenceMgr_ImportFastaFile(cself, kf, id, &obj);
-            KFileRelease(kf);
+        if (rc) return rc;
+        if (obj->start_rowid == 0) {
+            rc = ReferenceMgr_LoadSeq(self, obj);
+            if (rc) return rc;
         }
-        if( rc == 0 && !obj->local && obj->u.refseq.o == NULL ) {
-            if( cself->num_open_max > 0 && cself->num_open >= cself->num_open_max ) {
-                ReferenceSeq* old = NULL;
-                BSTreeForEach(&cself->tree, false, ReferenceSeq_Unused, &old);
-                if( old != NULL ) {
-                    RefSeq_Release(old->u.refseq.o);
-                    old->u.refseq.o = NULL;
-                    mgr->num_open--;
-                }
-            }
-            rc = RefSeqMgr_GetSeq(cself->rmgr, &obj->u.refseq.o, obj->accession, strlen(obj->accession));
-            obj->mgr = cself;
-            if( rc == 0 &&
-                (rc = RefSeq_Circular(obj->u.refseq.o, &obj->circular)) == 0 &&
-                (rc = RefSeq_SeqLength(obj->u.refseq.o, &obj->seq_len)) == 0 ) {
-                mgr->num_open++;
-            }
-        }
-        if( rc == 0 && obj->start_rowid == 0 ) {
-            /* append to the whole thing to REFERENCE table since we encounter it for the 1st time */
-            TableWriterRefData data;
-            INSDC_coord_len len = 0;
-            INSDC_coord_zero offset = 0;
-            obj->start_rowid = mgr->ref_rowid + 1;
-            data.name.buffer = obj->id;
-            data.name.elements = strlen(obj->id);
-            data.read.buffer = mgr->seq_buf;
-            data.seq_id.buffer = obj->accession;
-            data.seq_id.elements = strlen(obj->accession);
-            data.force_READ_write = obj->local || (cself->options & ewrefmgr_co_allREADs);
-            data.circular = obj->circular;
-            if (cself->writer == NULL) {
-                uint32_t wopt = 0;
-
-                wopt |= (mgr->options & ewrefmgr_co_allREADs) ? ewref_co_SaveRead : 0;
-                wopt |= (mgr->options & ewrefmgr_co_Coverage) ? ewref_co_Coverage : 0;
-                if( (rc = TableWriterRef_Make(&mgr->writer, mgr->db, wopt)) == 0 ) {
-                    TableWriterData mlen;
-                    mlen.buffer = &mgr->max_seq_len;
-                    mlen.elements = 1;
-                    rc = TableWriterRef_WriteDefaultData(mgr->writer, ewrefseq_cn_MAX_SEQ_LEN, &mlen);
-                }
-            }
-            if (rc == 0) {
-                do {
-                    if( (rc = ReferenceSeq_ReadDirect(obj, offset, mgr->max_seq_len, false,
-                                                      mgr->seq_buf, &len)) == 0 && len > 0 ) {
-                        data.read.elements = len;
-                        rc = TableWriterRef_Write(cself->writer, &data, NULL);
-                        offset += len;
-                        mgr->ref_rowid++;
-                    }
-                } while( rc == 0 && len > 0 && offset < obj->seq_len );
-            }
-        }
-    }
-    if( rc == 0 ) {
         *seq = obj;
-    } else {
-        ALIGN_DBGERR(rc);
     }
-    return rc;
+    return 0;
 }
 
 LIB_EXPORT rc_t CC ReferenceMgr_Verify(const ReferenceMgr* cself, const char* id, INSDC_coord_len seq_len, const uint8_t* md5)
 {
+#if 0
     rc_t rc = 0;
     ReferenceSeq* rseq;
     const KFile* kf;
@@ -1058,6 +1944,44 @@ LIB_EXPORT rc_t CC ReferenceMgr_Verify(const ReferenceMgr* cself, const char* id
         ALIGN_DBGERRP("%s verification", rc, id);
     }
     return rc;
+#else
+    if (cself == NULL || id == NULL)
+        return RC(rcAlign, rcFile, rcValidating, rcParam, rcNull);
+    {
+        ReferenceMgr *self = (ReferenceMgr *)cself;
+        ReferenceSeq *rseq;
+        rc_t rc = ReferenceMgr_OpenSeq(self, &rseq, id, seq_len, md5);
+        
+        if (rc) return rc;
+        if (rseq->seq_len != seq_len) {
+            rc = RC(rcAlign, rcFile, rcValidating, rcSize, rcUnequal);
+            ALIGN_DBGERRP("%s->%s SEQ_LEN verification", rc, id, rseq->seqId);
+        }
+        if (md5 && memcmp(md5, rseq->md5, sizeof(rseq->md5)) != 0 ) {
+            unsigned i;
+            
+            rc = RC(rcAlign, rcTable, rcValidating, rcChecksum, rcUnequal);
+            ALIGN_DBGERRP("%s->%s MD5 verification", rc, id, rseq->seqId);
+            ALIGN_DBGF((" found '"));
+            for(i = 0; i < sizeof(rseq->md5); i++) {
+                ALIGN_DBGF(("%02hx", rseq->md5[i]));
+            }
+            ALIGN_DBGF(("'  != requested '"));
+            for(i = 0; i < sizeof(rseq->md5); i++) {
+                ALIGN_DBGF(("%02hx", md5[i]));
+            }
+            ALIGN_DBGF(("'\n"));
+        } else {
+            ALIGN_DBG("%s->%s MD5 verification ok", id, rseq->seqId);
+        }
+        if( rc == 0 ) {
+            ALIGN_DBG("%s verification ok", id);
+        } else {
+            ALIGN_DBGERRP("%s verification", rc, id);
+        }
+        return rc;
+    }
+#endif
 }
 
 LIB_EXPORT rc_t CC ReferenceMgr_FastaPath(const ReferenceMgr* cself, const char* fasta_path)
@@ -1084,56 +2008,84 @@ LIB_EXPORT rc_t CC ReferenceMgr_FastaFile(const ReferenceMgr* cself, const KFile
     if( cself == NULL || file == NULL ) {
         return RC(rcAlign, rcFile, rcConstructing, rcParam, rcNull);
     }
-    return ReferenceMgr_ImportFastaFile(cself, file, NULL, NULL);
+    return ReferenceMgr_ImportFastaFile((ReferenceMgr *)cself, file, NULL);
 }
 
 static
-rc_t cigar2offset(uint32_t options, const void* cigar, uint32_t cigar_len, int32_t* out, uint32_t out_sz, uint32_t out_used,
+int extrace_cigar_op(char *op,
+                     uint32_t *op_len,
+                     char const *const cigar,
+                     uint32_t const cigar_len,
+                     uint32_t const offset,
+                     uint32_t const options,
+                     unsigned *const bin)
+{
+    static char const op_txt[] = "MIDNSHP=XB??????";
+    uint32_t i = offset;
+    
+    if (options & ewrefmgr_cmp_Binary) {
+        uint32_t c;
+        
+        memcpy(&c, cigar + i * 4, 4);
+        *bin = c & 0x0F;
+        *op = op_txt[c & 0x0F];
+        *op_len = c >> 4;
+    }
+    else {
+        uint32_t len = 0;
+        int ch;
+
+        while(i < cigar_len && (ch = cigar[i]) != '\0' && isdigit(ch)) {
+            len *= 10;
+            len += ch - '0';
+            ++i;
+        }
+        *bin = *op = ch;
+        *op_len = len;
+    }
+    return i - offset;
+}
+
+static
+rc_t cigar2offset(const uint32_t options, const void* cigar, uint32_t cigar_len, int32_t* out, uint32_t out_sz, uint32_t out_used,
                   INSDC_coord_len* seq_len, INSDC_coord_len* ref_len, INSDC_coord_len* max_ref_len)
 {
     rc_t rc = 0;
-    uint32_t i, last_match = 0, op_len, last_soft_len = 0;
-    unsigned char op;
-    static char const op_txt[] = "MIDNSHP=XB";
-
+    uint32_t i;
+    uint32_t last_match = 0;
+    uint32_t op_len;
+    uint32_t last_soft_len = 0;
+    uint32_t b_len = 0;
+    uint32_t last_op = cigar_len - 1;
+    char op;
+    unsigned op_bin;
+    
+    if ((options & ewrefmgr_cmp_Binary) == 0) {
+        for (i = 0; i < cigar_len; last_op = ++i) {
+            i += extrace_cigar_op(&op, &op_len, cigar, cigar_len, i, options, &op_bin);
+        }
+    }
+    
 #if _DEBUGGING
     ALIGN_C_DBGF(("%s:%u: ", __func__, __LINE__));
     if( options & ewrefmgr_cmp_Binary ) {
         ALIGN_C_DBGF(("bin cigar '"));
         for(i = 0; i < cigar_len; i++) {
-            const uint32_t* c = cigar;
-            op = c[i] & 0x0F;
-            op_len = c[i] >> 4;
-            ALIGN_C_DBGF(("%u%c", op_len, op < 10 ? op_txt[op] : '?'));
+            extrace_cigar_op(&op, &op_len, cigar, cigar_len, i, options, &op_bin);
+            ALIGN_C_DBGF(("%u%c", op_len, op));
         }
     } else {
         ALIGN_C_DBGF(("cigar '%.*s", cigar_len, cigar));
     }
     ALIGN_C_DBGF(("'[%u]\n", cigar_len));
 #endif
-
+    
     *seq_len = 0;
     *ref_len = 0;
     *max_ref_len = 0;
     memset(out, 0, out_used * sizeof(*out) * 2);
     for(i = 0; rc == 0 && i < cigar_len; i++) {
-        if( options & ewrefmgr_cmp_Binary ) {
-            const uint32_t* c = cigar;
-            op = c[i] & 0x0F;
-            if( op < 10 ) {
-                op = op_txt[op];
-            }
-            op_len = c[i] >> 4;
-        } else {
-            const unsigned char* c = cigar;
-            op_len = 0;
-            while( c[i] != '\0' && isdigit(c[i]) ) {
-                op_len *= 10;
-                op_len += c[i++] - '0';
-            }
-            /* avoid intersecting with 4-bit binary above */
-            op = c[i] <= 0x0F ? 0xFF : c[i];
-        }
+        i += extrace_cigar_op(&op, &op_len, cigar, cigar_len, i, options, &op_bin);
         if (op == 'P') {
             continue;
         }
@@ -1141,58 +2093,91 @@ rc_t cigar2offset(uint32_t options, const void* cigar, uint32_t cigar_len, int32
             last_soft_len = 0;
         }
         switch(op) {
-            case 'M':
-            case '=':
-            case 'X':
-                *seq_len += op_len;
-                *ref_len += op_len;
-                *max_ref_len += op_len;
+        case 'M':
+        case '=':
+        case 'X':
+            *seq_len += op_len;
+            *ref_len += op_len;
+            *max_ref_len += op_len;
+            if(b_len > op_len) {
+                b_len -= op_len;
+            }
+            else {
+                b_len=0;
                 last_match = *seq_len;
-                break;
-            case 'S':
-            case 'I':
-                last_soft_len += op_len;
-                *seq_len += op_len;
-                *max_ref_len += op_len;
-                if( last_match < out_sz ) {
+            }
+            break;
+        case 'S':
+        case 'I':
+            last_soft_len += op_len;
+            *max_ref_len += op_len;
+            *seq_len += op_len;
+            if (last_match < out_sz) {
+                if (i < last_op) {
+                    if (b_len > 0) {/** not right soft clip **/
+                        assert(out[last_match] < 0);
+                        out[last_match-out[last_match]] = 0x80000000;
+                    }
                     out[last_match] += -op_len;
-                } else {
-                    rc = RC(rcAlign, rcFile, rcProcessing, rcData, rcInconsistent);
                 }
-                break;
-            case 'B':
-                /* Complete Genomics CIGAR style specific:
-                   overlap between consecutive reads
-                   ex: sequence 6 bases: ACACTG, reference 2 bases: ACTG,
-                   cigar will be: 2M2B2M
-                   no need to move sequence position
-                */
-                if( last_match < out_sz ) {
-                    out[last_match] -= op_len;
-                } else {
-                    rc = RC(rcAlign, rcFile, rcProcessing, rcData, rcInconsistent);
+                if (b_len == 0) last_match = *seq_len;
+            } else {
+                rc = RC(rcAlign, rcFile, rcProcessing, rcData, rcInconsistent);
+            }
+            
+            break;
+        case 'B':
+            /* Complete Genomics CIGAR style specific:
+             overlap between consecutive reads
+             ex: sequence 6 bases: ACACTG, reference 2 bases: ACTG,
+             cigar will be: 2M2B2M
+             no need to move sequence position
+             */
+            if( last_match < out_sz ) {
+                if(b_len > 0 && i < cigar_len -1){/** not right soft clip **/
+                    assert(out[last_match] < 0);
+                    out[last_match-out[last_match]] = 0x80000000;
                 }
-                if( *ref_len < op_len ) {
-                    *ref_len = 0;
-                } else {
-                    *ref_len -= op_len;
-                }
-                *max_ref_len += op_len;
-                break;
-            case 'D':
-            case 'N':
-                if( last_match < out_sz ) {
-                    out[last_match] += op_len;
-                } else {
-                    rc = RC(rcAlign, rcFile, rcProcessing, rcData, rcInconsistent);
-                }
-                *ref_len += op_len;
-                *max_ref_len += op_len;
-                break;
-            case 'H':
-            default:
-                rc = RC(rcAlign, rcFile, rcProcessing, rcData, rcUnrecognized);
-                break;
+                out[last_match] -= op_len;
+            } else {
+                rc = RC(rcAlign, rcFile, rcProcessing, rcData, rcInconsistent);
+            }
+            if( *ref_len < op_len ) {
+                *ref_len = 0;
+            } else {
+                *ref_len -= op_len;
+            }
+            *max_ref_len += op_len;
+            b_len += op_len;
+            break;
+        case 'D':
+        case 'N':
+            if( last_match < out_sz ) {
+                out[last_match] += op_len;
+            } else if (last_match == out_sz && last_match > 0 ){ /*** delete at the end ***/
+                out[last_match-1] += op_len;
+            } else {
+                rc = RC(rcAlign, rcFile, rcProcessing, rcData, rcInconsistent);
+            }
+            *ref_len += op_len;
+            *max_ref_len += op_len;
+            break;
+        case 'H':
+            if ((options & ewrefmgr_co_AcceptHardClip) == 0)
+            {
+                rc = RC(rcAlign, rcFile, rcProcessing, rcData, rcInvalid);
+                (void)LOGERR(klogErr, rc, "Hard clipping of sequence data is not allowed");
+            }
+            break;
+        default:
+            rc = RC(rcAlign, rcFile, rcProcessing, rcData, rcUnrecognized);
+            if ((options & ewrefmgr_cmp_Binary) == 0)
+                (void)PLOGERR(klogErr, (klogErr, rc, "Invalid or unrecognized CIGAR operation '$(opcode)'", "opcode=%c", op));
+            else if (op != '?')
+                (void)PLOGERR(klogErr, (klogErr, rc, "Invalid or unrecognized CIGAR operation '$(opcode)' (binary code: $(opbin))", "opcode=%c,opbin=%u", op, op_bin));
+            else
+                (void)PLOGERR(klogErr, (klogErr, rc, "Invalid or unrecognized CIGAR operation (binary code: $(opbin))", "opbin=%u", op_bin));
+            break;
         }
     }
     if( !(options & ewrefmgr_cmp_Exact) && last_soft_len > 0 ) {
@@ -1213,11 +2198,28 @@ rc_t cigar2offset(uint32_t options, const void* cigar, uint32_t cigar_len, int32
     return rc;
 }
 
+static
+void ReferenceSeq_TranslateOffset_int(ReferenceSeq const *const cself,
+                                      INSDC_coord_zero const offset,
+                                      int64_t *const ref_id,
+                                      INSDC_coord_zero *const ref_start,
+                                      uint64_t *const global_ref_start)
+{
+    if (ref_id)
+        *ref_id = cself->start_rowid + offset / cself->mgr->max_seq_len;
+    
+    if (ref_start)
+        *ref_start = offset % cself->mgr->max_seq_len;
+    
+    if (global_ref_start)
+        *global_ref_start = (cself->start_rowid - 1) * cself->mgr->max_seq_len + offset;
+}
+
 LIB_EXPORT rc_t CC ReferenceMgr_Compress(const ReferenceMgr* cself, uint32_t options,
                                          const char* id, INSDC_coord_zero offset,
                                          const char* seq, INSDC_coord_len seq_len,
                                          const void* cigar, uint32_t cigar_len,
-                                         INSDC_coord_zero allele_offset, const char* allele, INSDC_coord_len allele_len,
+                                         INSDC_coord_zero allele_offset, const char* allele, INSDC_coord_len allele_len,INSDC_coord_zero offset_in_allele,
                                          const void* allele_cigar, uint32_t allele_cigar_len,
                                          TableWriterAlgnData* data)
 {
@@ -1228,17 +2230,20 @@ LIB_EXPORT rc_t CC ReferenceMgr_Compress(const ReferenceMgr* cself, uint32_t opt
         rc = RC(rcAlign, rcFile, rcProcessing, rcParam, rcNull);
     } else if( (rc = ReferenceMgr_GetSeq(cself, &refseq, id)) == 0 ) {
         rc = ReferenceSeq_Compress(refseq, options, offset, seq, seq_len, cigar, cigar_len,
-                                   allele_offset, allele, allele_len, allele_cigar, allele_cigar_len, data);
+                                   allele_offset, allele, allele_len,offset_in_allele,
+				   allele_cigar, allele_cigar_len, data);
         ReferenceSeq_Release(refseq);
     }
     ALIGN_C_DBGERR(rc);
     return rc;
 }
 
-LIB_EXPORT rc_t CC ReferenceSeq_Compress(const ReferenceSeq* cself, uint32_t options, INSDC_coord_zero offset,
+LIB_EXPORT rc_t CC ReferenceSeq_Compress(const ReferenceSeq* cself, const uint32_t options, INSDC_coord_zero offset,
                                          const char* seq, INSDC_coord_len seq_len,
                                          const void* cigar, uint32_t cigar_len,
-                                         INSDC_coord_zero allele_offset, const char* allele, INSDC_coord_len allele_len,
+                                         INSDC_coord_zero allele_offset, const char* allele,
+					 INSDC_coord_len allele_len,
+					 INSDC_coord_zero offset_in_allele,
                                          const void* allele_cigar, uint32_t allele_cigar_len,
                                          TableWriterAlgnData* data)
 {
@@ -1247,16 +2252,23 @@ LIB_EXPORT rc_t CC ReferenceSeq_Compress(const ReferenceSeq* cself, uint32_t opt
     if( cself == NULL || seq == NULL || cigar == NULL || cigar_len == 0 || data == NULL ||
         (!(allele == NULL && allele_len == 0 && allele_cigar == NULL && allele_cigar_len == 0) &&
          !(allele != NULL && allele_cigar != NULL && allele_cigar_len != 0)) ) {
-        rc = RC(rcAlign, rcFile, rcProcessing, rcParam, rcInvalid);
-    } else if( seq_len > sizeof(cself->mgr->compress_buf) / sizeof(cself->mgr->compress_buf[0]) ) {
-        rc = RC(rcAlign, rcFile, rcProcessing, rcBuffer, rcInsufficient);
-    } else if( (rc = ReferenceSeq_ReOffset(cself->circular, cself->seq_len, &offset)) == 0 ) {
+        return RC(rcAlign, rcFile, rcProcessing, rcParam, rcInvalid);
+    }
+    if (seq_len * 2 > cself->mgr->compress.elem_count) {
+        rc = KDataBufferResize(&cself->mgr->compress, seq_len * 2);
+        if (rc) return rc;
+    }
+    if ((rc = ReferenceSeq_ReOffset(cself->circular, cself->seq_len, &offset)) == 0 ) {
         INSDC_coord_len i, seq_pos = 0, allele_ref_end = 0, ref_len = 0, rl = 0, max_rl = 0;
         INSDC_coord_zero* read_start = &((INSDC_coord_zero*)(data->read_start.buffer))[data->ploidy];
         INSDC_coord_len* read_len = &((INSDC_coord_len*)(data->read_len.buffer))[data->ploidy];
         bool* has_ref_offset, *has_mismatch;
         int32_t* ref_offset;
-        uint8_t* mismatch, ref_buf[64 * 1024];
+        uint8_t* mismatch; 
+        uint8_t sref_buf[64 * 1024];
+        void *href_buf = NULL;
+        uint8_t *ref_buf = sref_buf;
+	int32_t  allele_off_buf[1024];
 #if _DEBUGGING
         uint64_t i_ref_offset_elements, i_mismatch_elements;
         char x[4096];
@@ -1268,7 +2280,8 @@ LIB_EXPORT rc_t CC ReferenceSeq_Compress(const ReferenceSeq* cself, uint32_t opt
             data->has_mismatch.elements = seq_len;
             data->mismatch.elements = 0;
             *read_start = 0;
-        } else {
+        }
+        else {
             data->has_ref_offset.elements += seq_len;
             data->has_mismatch.elements += seq_len;
             *read_start = read_start[-1] + read_len[-1];
@@ -1283,21 +2296,21 @@ LIB_EXPORT rc_t CC ReferenceSeq_Compress(const ReferenceSeq* cself, uint32_t opt
         i_ref_offset_elements = data->ref_offset.elements;
         i_mismatch_elements = data->mismatch.elements;
         ALIGN_C_DBG("align%s '%.*s'[%u] to '%s:%s' at %i", (options & ewrefmgr_cmp_Exact) ? " EXACT" : "",
-                    seq_len, seq, seq_len, cself->id, cself->accession, offset);
+                    seq_len, seq, seq_len, cself->id, cself->seqId, offset);
 #endif
         if( allele != NULL ) {
             /* determine length of reference for subst by allele */
             ALIGN_C_DBG("apply allele %.*s[%u] at %i w/cigar below",
                         allele_len, allele, allele_len, allele_offset);
             rc = cigar2offset(options, allele_cigar, allele_cigar_len,
-                    (int32_t*)(cself->mgr->compress_buf), sizeof(cself->mgr->compress_buf) / sizeof(cself->mgr->compress_buf[0]),
+                    allele_off_buf, sizeof(allele_off_buf)/sizeof(*allele_off_buf)/2,
                     allele_len, &seq_pos, &allele_ref_end, &max_rl);
             /* where allele ends on reference */
             allele_ref_end += allele_offset;
         }
         if( rc == 0 ) {
             rc = cigar2offset(options, cigar, cigar_len,
-                             (int32_t*)(cself->mgr->compress_buf), sizeof(cself->mgr->compress_buf) / sizeof(cself->mgr->compress_buf[0]),
+                              (int32_t*)(cself->mgr->compress.base), cself->mgr->compress.elem_count / 2,
                              seq_len, &seq_pos, &rl, &max_rl);
         }
         if( allele != NULL ) {
@@ -1306,18 +2319,19 @@ LIB_EXPORT rc_t CC ReferenceSeq_Compress(const ReferenceSeq* cself, uint32_t opt
                     "allele $(a) offset $(ao) $(ac) is not within referenced region in $(id) at offset $(ro) $(rc)",
                     "a=%.*s,ao=%i,ac=%.*s,id=%s,ro=%i,rc=%.*s",
                     allele_len, allele, allele_offset, (options & ewrefmgr_cmp_Binary) ? 0 : allele_cigar_len, allele_cigar,
-                    cself->accession, offset, (options & ewrefmgr_cmp_Binary) ? 0 : cigar_len, cigar));
+                    cself->seqId, offset, (options & ewrefmgr_cmp_Binary) ? 0 : cigar_len, cigar));
                 allele = NULL;
             }
         }
         if( rc == 0 ) {
             if( !(options & ewrefmgr_cmp_Exact) ) {
                 /* do not write leading deletes just move reference offset */
-                if( cself->mgr->compress_buf[0] > 0 ) {
-                    offset += cself->mgr->compress_buf[0];
-                    rl -= cself->mgr->compress_buf[0];
-                    max_rl -= cself->mgr->compress_buf[0];
-                    ((int32_t*)(cself->mgr->compress_buf))[0] = 0;
+                int32_t *const compress_buf = cself->mgr->compress.base;
+                if( compress_buf[0] > 0 ) {
+                    offset += compress_buf[0];
+                    rl -= compress_buf[0];
+                    max_rl -= compress_buf[0];
+                    compress_buf[0] = 0;
                     ALIGN_C_DBG("adjusted offset %i", offset);
                 }
             }
@@ -1335,27 +2349,28 @@ LIB_EXPORT rc_t CC ReferenceSeq_Compress(const ReferenceSeq* cself, uint32_t opt
             ALIGN_C_DBG("chosen REF_LEN %u, ref len for match %u", ref_len, max_rl);
 
             assert(seq_len == seq_pos);
-            if( max_rl > sizeof(ref_buf) ) {
-                rc = RC(rcAlign, rcFile, rcProcessing, rcBuffer, rcInsufficient);
-            } else {
+            if (max_rl > sizeof(sref_buf)) {
+                if (href_buf)
+                    free(href_buf);
+                href_buf = malloc(max_rl);
+                if (href_buf == NULL)
+                    rc = RC(rcAlign, rcFile, rcProcessing, rcMemory, rcExhausted);
+                ref_buf = href_buf;
+            }
+            if (rc == 0) {
                 int64_t ref_pos;
 
                 if( allele != NULL ) {
                     /* subst allele in reference */
-                    if( allele_offset < offset ) {
+                    if( allele_offset <= offset ) {
                         /* move allele start inside referenced chunk */
-                        if( allele_len < offset - allele_offset ) {
-                            /* shouldnt happen, there is a check + warning above */
-                            rc = RC(rcAlign, rcFile, rcProcessing, rcSize, rcInsufficient);
-                        } else {
-                            allele += offset - allele_offset;
-                            allele_len -= offset - allele_offset;
+			    allele     += offset_in_allele;
+			    allele_len -= offset_in_allele;
                             rl = 0;
-                        }
                     } else {
                         /* fetch portion of reference which comes before allele */
                         rl = allele_offset - offset;
-                        rc = ReferenceSeq_ReadDirect((ReferenceSeq*)cself, offset, rl, true, ref_buf, &i);
+                        rc = ReferenceSeq_ReadDirect((ReferenceSeq*)cself, offset, rl, true, ref_buf, &i, false);
                         if( rc == 0 && rl != i ) {
                             /* here we need to test it otherwise excessive portion of allele could be fetch in next if */
                             rc = RC(rcAlign, rcFile, rcProcessing, rcRange, rcExcessive);
@@ -1365,7 +2380,7 @@ LIB_EXPORT rc_t CC ReferenceSeq_Compress(const ReferenceSeq* cself, uint32_t opt
                         memcpy(&ref_buf[rl], allele, allele_len);
                         rl += allele_len;
                         /* append tail of actual reference */
-                        rc = ReferenceSeq_ReadDirect((ReferenceSeq*)cself, allele_ref_end, max_rl - rl, true, &ref_buf[rl], &i);
+                        rc = ReferenceSeq_ReadDirect((ReferenceSeq*)cself, allele_ref_end, max_rl - rl, true, &ref_buf[rl], &i, false);
                         rl += i;
                     } else if( rc == 0 ) {
                         /* allele is longer than needed */
@@ -1373,17 +2388,22 @@ LIB_EXPORT rc_t CC ReferenceSeq_Compress(const ReferenceSeq* cself, uint32_t opt
                         rl = max_rl;
                     }
                 } else {
-                    rc = ReferenceSeq_ReadDirect((ReferenceSeq*)cself, offset, max_rl, true, ref_buf, &rl);
+                    rc = ReferenceSeq_ReadDirect((ReferenceSeq*)cself, offset, max_rl, true, ref_buf, &rl, false);
                 }
                 if( rc != 0 || max_rl != rl ) {
                     rc = rc ? rc : RC(rcAlign, rcFile, rcProcessing, rcRange, rcExcessive);
                     ALIGN_C_DBGERRP("refseq is shorter: at offset %i need %u bases", rc, offset, max_rl);
                 } else {
+                    int32_t *const compress_buf = cself->mgr->compress.base;
                     for(seq_pos = 0, ref_pos = 0; seq_pos < seq_len; seq_pos++, ref_pos++) {
-                        has_ref_offset[seq_pos] = cself->mgr->compress_buf[seq_pos] != 0;
-                        if( has_ref_offset[seq_pos] ) {
-                            ref_offset[data->ref_offset.elements++] = cself->mgr->compress_buf[seq_pos];
-                            ref_pos += cself->mgr->compress_buf[seq_pos];
+                        has_ref_offset[seq_pos] = compress_buf[seq_pos] != 0;
+                        if( has_ref_offset[seq_pos]){
+                            if(compress_buf[seq_pos] == 0x80000000 ){
+                                compress_buf[seq_pos] = 0; /** the hack has served its purpose **/
+                            } else {
+                                ref_offset[data->ref_offset.elements++] = compress_buf[seq_pos];
+                                ref_pos += compress_buf[seq_pos];
+                            }
                         }
                         if( (ref_pos < 0) || (ref_pos >= max_rl) || 
                             ((toupper(ref_buf[ref_pos]) != toupper(seq[seq_pos])) && (seq[seq_pos] != '=')) ) {
@@ -1399,7 +2419,7 @@ LIB_EXPORT rc_t CC ReferenceSeq_Compress(const ReferenceSeq* cself, uint32_t opt
         }
 #if _DEBUGGING
         if(rc == 0 ) {
-            INSDC_coord_len j;
+            int32_t j;
             memset(x, '-', sizeof(x) - 1);
             x[sizeof(x) - 2] = '\0';
 
@@ -1451,27 +2471,31 @@ LIB_EXPORT rc_t CC ReferenceSeq_Compress(const ReferenceSeq* cself, uint32_t opt
                 &mismatch[i_mismatch_elements], data->mismatch.elements - i_mismatch_elements));
         }
 #endif
-        if( rc == 0 && allele == NULL ) {
+        if( rc == 0 ) {
             if( data->ploidy == 0 ) {
+                int64_t *const ref_id = (int64_t *)data->ref_id.buffer;
+                INSDC_coord_zero *const ref_start = (INSDC_coord_zero *)data->ref_start.buffer;
+                uint64_t *const global_ref_start = (uint64_t *)data->global_ref_start.buffer;
+                
                 data->ref_1st_row_id = cself->start_rowid;
                 data->effective_offset = offset;
                 data->ref_len = ref_len;
                 ALIGN_C_DBGF(("%s:%u: reference 1st ROW_ID %li OFFSET %i REF_LEN %u",
                     __func__, __LINE__, data->ref_1st_row_id, data->effective_offset, data->ref_len));
-                if( data->ref_id.buffer ) {
-                    ((int64_t*)(data->ref_id.buffer))[0] = cself->start_rowid + offset / cself->mgr->max_seq_len;
+                
+                ReferenceSeq_TranslateOffset_int(cself, offset, ref_id, ref_start, global_ref_start);
+                
+                if (ref_id) {
                     data->ref_id.elements = 1;
-                    ALIGN_C_DBGF((" REF_ID %li", ((int64_t*)(data->ref_id.buffer))[0]));
+                    ALIGN_C_DBGF((" REF_ID %li", ref_id[0]));
                 }
-                if( data->ref_start.buffer ) {
-                    ((INSDC_coord_zero*)(data->ref_start.buffer))[0] = offset % cself->mgr->max_seq_len;
+                if (ref_start) {
                     data->ref_start.elements = 1;
-                    ALIGN_C_DBGF((" REF_START %i", ((INSDC_coord_zero*)(data->ref_start.buffer))[0]));
+                    ALIGN_C_DBGF((" REF_START %i", ref_start[0]));
                 }
-                if( data->global_ref_start.buffer ) {
-                    ((uint64_t*)(data->global_ref_start.buffer))[0] = (cself->start_rowid - 1) * cself->mgr->max_seq_len + offset;
+                if (global_ref_start) {
                     data->global_ref_start.elements = 1;
-                    ALIGN_C_DBGF((" GLOBAL_REF_START %lu", ((uint64_t*)(data->global_ref_start.buffer))[0]));
+                    ALIGN_C_DBGF((" GLOBAL_REF_START %lu", global_ref_start[0]));
                 }
                 ALIGN_C_DBGF(("\n"));
             } else {
@@ -1479,12 +2503,12 @@ LIB_EXPORT rc_t CC ReferenceSeq_Compress(const ReferenceSeq* cself, uint32_t opt
                     rc = RC(rcAlign, rcFile, rcProcessing, rcData, rcInconsistent);
                     (void)PLOGERR(klogErr, (klogErr, rc,
                         "all reads in alignment record must align to same refseq at same location $(r1)@$(o1) <> $(r2):$(a2)@$(o2)",
-                        "r1=%li,o1=%i,r2=%s,a2=%s,o2=%i", data->ref_1st_row_id, data->effective_offset, cself->id, cself->accession, offset));
+                        "r1=%li,o1=%i,r2=%s,a2=%s,o2=%i", data->ref_1st_row_id, data->effective_offset, cself->id, cself->seqId, offset));
                 } else if( data->ref_len != ref_len ) {
                     rc = RC(rcAlign, rcFile, rcProcessing, rcData, rcInconsistent);
                     (void)PLOGERR(klogErr, (klogErr, rc,
                         "all reads in alignment record must have same size projection on refseq $(rl1) <> $(rl2) $(r):$(a)@$(o)",
-                        "rl1=%u,rl2=%u,r=%s,a=%s,o=%i", data->ref_len, ref_len, cself->id, cself->accession, offset));
+                        "rl1=%u,rl2=%u,r=%s,a=%s,o=%i", data->ref_len, ref_len, cself->id, cself->seqId, offset));
                 }
             }
         }
@@ -1493,6 +2517,8 @@ LIB_EXPORT rc_t CC ReferenceSeq_Compress(const ReferenceSeq* cself, uint32_t opt
             data->read_start.elements = data->ploidy;
             data->read_len.elements = data->ploidy;
         }
+        if (href_buf)
+            free(href_buf);
     }
     ALIGN_C_DBGERR(rc);
     return rc;
@@ -1506,7 +2532,7 @@ LIB_EXPORT rc_t CC ReferenceSeq_Read(const ReferenceSeq* cself, INSDC_coord_zero
     if( cself == NULL || buffer == NULL || ref_len == NULL ) {
         rc = RC(rcAlign, rcFile, rcReading, rcParam, rcNull);
     } else {
-        rc = ReferenceSeq_ReadDirect((ReferenceSeq*)cself, offset, len, true, buffer, ref_len);
+        rc = ReferenceSeq_ReadDirect((ReferenceSeq*)cself, offset, len, true, buffer, ref_len, false);
     }
     ALIGN_DBGERR(rc);
     return rc;
@@ -1532,7 +2558,7 @@ LIB_EXPORT rc_t CC ReferenceSeq_AddCoverage(const ReferenceSeq* cself, INSDC_coo
         rc = RC(rcAlign, rcFile, rcReading, rcParam, rcNull);
     } else if( !(cself->mgr->options & ewrefmgr_co_Coverage) ) {
         rc = RC( rcAlign, rcType, rcWriting, rcData, rcUnexpected);
-        ALIGN_DBGERRP("coverage %s", rc, "data");
+        ALIGN_R_DBGERRP("coverage %s", rc, "data");
     } else if( (rc = ReferenceSeq_ReOffset(cself->circular, cself->seq_len, &offset)) == 0 ) {
         rc = TableWriterRef_WriteCoverage(cself->mgr->writer, cself->start_rowid, offset, data);
     }

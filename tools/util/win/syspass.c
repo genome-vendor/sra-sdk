@@ -28,6 +28,7 @@
 
 #include <klib/rc.h>
 
+#include <conio.h> /* _getch */
 #include <stdio.h>
 
 rc_t get_pass(const char *prompt, char *buf, size_t bufsiz) {

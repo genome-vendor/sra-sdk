@@ -127,7 +127,7 @@ rc_t VProdResolveCastExpr ( const VProdResolve *self, VProduction **out, const S
 
            in all cases, the sizeof rh production element
            matches "cast" size */
-        rc = VSimpleProdMake ( out, self -> owned, prodSimpleCast,
+        rc = VSimpleProdMake ( out, self -> owned, self -> curs, prodSimpleCast,
             "cast", & cast, & desc, NULL, * out, self -> chain );
     }
 
@@ -196,7 +196,7 @@ rc_t VProdResolveSProduction ( const VProdResolve *self, VProduction **out, cons
         {
             const char *name = sprod -> name -> name . addr;
             assert ( name [ sprod -> name -> name . size ] == 0 );
-            rc = VSimpleProdMake ( out, self -> owned, prodSimpleCast,
+            rc = VSimpleProdMake ( out, self -> owned, self -> curs, prodSimpleCast, 
                 name, & fd, & desc, & sprod -> cid, * out, self -> chain );
             if ( rc == 0 )
             {
@@ -762,7 +762,7 @@ rc_t VProdResolveColumnRead ( const VProdResolve *self,
     /* create a simple prod to manage fd and desc */
     name = scol -> name -> name . addr;
     assert ( name [ scol -> name -> name . size ] == 0 );
-    rc = VSimpleProdMake ( out, self -> owned, prodSimpleCast,
+    rc = VSimpleProdMake ( out, self -> owned, self->curs, prodSimpleCast,
         name, & fd, & vcol -> desc, NULL, * out, self -> chain );
 
     assert (rc != -1);
@@ -829,7 +829,7 @@ rc_t VProdResolvePhysicalRead ( const VProdResolve *self, VPhysical *phys )
 
     /* create output adapter */
     rc = VPhysicalProdMake ( & prod, self -> owned,
-        phys, prodPhysicalOut, name, & fd, & desc );
+        curs, phys, prodPhysicalOut, name, & fd, & desc );
     if ( rc != 0 )
         return rc;
 
@@ -853,12 +853,12 @@ rc_t VProdResolvePhysicalRead ( const VProdResolve *self, VPhysical *phys )
 
     /* create adapter */
     rc = VPhysicalProdMake ( & prod, self -> owned,
-        phys, prodPhysicalKCol, name, & fd, & desc );
+        curs, phys, prodPhysicalKCol, name, & fd, & desc );
     if ( rc != 0 )
         return rc;
 
     /* create serial-to-blob stage */
-    rc = VSimpleProdMake ( & prod, self -> owned,
+    rc = VSimpleProdMake ( & prod, self -> owned, self->curs,
         prodSimpleSerial2Blob, name, & fd, & desc, NULL, prod, chainDecoding );
     if ( rc != 0 )
         return rc;

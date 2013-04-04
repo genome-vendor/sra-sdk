@@ -38,13 +38,17 @@
 #include "cc-priv.h"
 
 #include <kdb/index.h>
+#include <kdb/meta.h>
+#include <kdb/kdb-priv.h>
 
 #include <kfs/file.h>
 #include <kfs/md5.h>
 #include <klib/refcount.h>
+#include <klib/log.h> /* PLOGMSG */
 #include <klib/rc.h>
 #include <klib/namelist.h>
 #include <kdb/namelist.h>
+
 #include <os-native.h>
 #include <sysalloc.h>
 
@@ -79,10 +83,12 @@ rc_t KTableCheckMD5 ( const KTable *self, CCReportFunc report, void *ctx )
     return DirectoryCheckMD5 ( self->dir, "md5", & info, report, ctx );
 }
 
+#if 0
 static bool KTableCheckColumnsFilter(const KDirectory *dir, const char *name, void *data)
 {
     return (KDirectoryPathType(dir, name) & ~kptAlias) == kptDir;
 }
+#endif
 
 typedef struct KTableCheckColumn_pb_s {
     KTable const *self;
@@ -91,6 +97,7 @@ typedef struct KTableCheckColumn_pb_s {
     unsigned n;
     int level;
     uint32_t depth;
+    INSDC_SRA_platform_id platform;
 } KTableCheckColumn_pb_t;
 
 static rc_t CC KTableCheckColumn(const KDirectory *dir, uint32_t type, const char *name, void *data)
@@ -114,6 +121,7 @@ static rc_t CC KTableCheckColumn(const KDirectory *dir, uint32_t type, const cha
     }
     else {
         bool hasZombies;
+        INSDC_SRA_platform_id platform = pb->platform;
         uint32_t ktype = KDBPathType(dir, &hasZombies, name);
         rc_t rc;
         
@@ -148,13 +156,21 @@ static rc_t CC KTableCheckColumn(const KDirectory *dir, uint32_t type, const cha
                 return info.info.done.rc;
             }
         }
+        if (platform != SRA_PLATFORM_UNDEFINED && platform != SRA_PLATFORM_454
+            && name != NULL && name[0] != '\0' && strcmp(name, "SIGNAL") == 0)
+        {
+            (void)PLOGMSG(klogWarn, (klogWarn, "COLUMN '$(name)' IS INCOMPLETE",
+                "name=%s", name));
+            return 0;
+        }
         info.info.done.mesg = "Failed to open column";
         return pb->report(&info, pb->rpt_ctx);
     }
 }
 
 static
-rc_t KTableCheckColumns ( const KTable *self, uint32_t depth, int level, CCReportFunc report, void *ctx )
+rc_t KTableCheckColumns ( const KTable *self, uint32_t depth, int level,
+    CCReportFunc report, void *ctx, INSDC_SRA_platform_id platform )
 {
     KTableCheckColumn_pb_t pb;
     
@@ -164,6 +180,7 @@ rc_t KTableCheckColumns ( const KTable *self, uint32_t depth, int level, CCRepor
     pb.n = 0;
     pb.level = level;
     pb.depth = depth;
+    pb.platform = platform;
     return KDirectoryVVisit(self->dir, false, KTableCheckColumn, &pb, "col", NULL);
 }
 
@@ -197,6 +214,8 @@ static
 rc_t KTableCheckIndices(const KTable *self, uint32_t depth, int level, CCReportFunc report, void *ctx)
 {
     uint32_t n;
+    const KMetadata *meta;
+    int64_t max_row_id = 0;
 
     KNamelist *list;
     rc_t rc = KTableListIdx(self, &list);
@@ -205,6 +224,22 @@ rc_t KTableCheckIndices(const KTable *self, uint32_t depth, int level, CCReportF
         if ( GetRCState ( rc ) == rcNotFound )
             return 0;
         return rc;
+    }
+
+    rc = KTableOpenMetadataRead ( self, & meta );
+    if ( rc == 0 )
+    {
+        const KMDataNode *seq;
+        rc = KMetadataOpenNodeRead ( meta, & seq, "/.seq/spot" );
+        if ( rc == 0 )
+        {
+            rc = KMDataNodeReadAsI64 ( seq, & max_row_id );
+            if ( rc != 0 )
+                max_row_id = 0;
+            KMDataNodeRelease ( seq );
+        }
+
+        KMetadataRelease ( meta );
     }
 
     rc = KNamelistCount(list, &n);
@@ -243,6 +278,8 @@ rc_t KTableCheckIndices(const KTable *self, uint32_t depth, int level, CCReportF
                     }
                     else
                     {
+                        KIndexSetMaxRowId ( idx, max_row_id );
+
                         nfo.type = ccrpt_Index;
                         rc = KIndexConsistencyCheck(idx, level < 3 ? 1 : 3,
                                                     &nfo.info.index.start_id,
@@ -274,11 +311,16 @@ rc_t KTableCheckIndices(const KTable *self, uint32_t depth, int level, CCReportF
 
 LIB_EXPORT
 rc_t CC KTableConsistencyCheck(const KTable *self, uint32_t depth, uint32_t level,
-                               CCReportFunc report, void *ctx)
+    CCReportFunc report, void *ctx, INSDC_SRA_platform_id platform)
 {
     rc_t rc = 0;
     uint32_t type;
     
+    bool indexOnly = level & CC_INDEX_ONLY;
+    if (indexOnly) {
+        level &= ~CC_INDEX_ONLY;
+    }
+
     if (self == NULL)
         return RC(rcDB, rcTable, rcValidating, rcSelf, rcNull);
     
@@ -308,8 +350,11 @@ rc_t CC KTableConsistencyCheck(const KTable *self, uint32_t depth, uint32_t leve
         
         rc = report(&info, ctx);
     }
-    else if (type != kptNotFound)
-        rc = KTableCheckMD5(self, report, ctx);
+    else if (type != kptNotFound) {
+        if (!indexOnly) {
+            rc = KTableCheckMD5(self, report, ctx);
+        }
+    }
     else {
         CCReportInfoBlock info;
         
@@ -322,9 +367,9 @@ rc_t CC KTableConsistencyCheck(const KTable *self, uint32_t depth, uint32_t leve
         
         rc = report(&info, ctx);
     }
-    
-    if ( rc == 0 )
-        rc = KTableCheckColumns(self, depth, level, report, ctx);
+
+    if ( rc == 0 && ! indexOnly )
+        rc = KTableCheckColumns(self, depth, level, report, ctx, platform);
 
     if ( rc == 0 )    
         rc = KTableCheckIndices(self, depth, level, report, ctx);

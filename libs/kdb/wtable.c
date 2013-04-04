@@ -38,6 +38,7 @@
 #include <klib/symbol.h>
 #include <kdb/namelist.h>
 #include <klib/log.h>
+#include <klib/printf.h>
 #include <klib/rc.h>
 #include <kfs/directory.h>
 #include <kfs/file.h>
@@ -382,7 +383,7 @@ rc_t KDBManagerVCreateTableInt ( KDBManager *self,
         bool convert = false;
         bool not_found = false;
 
-        switch ( KDBPathType ( wd, NULL, tblpath ) )
+        switch ( KDBPathType ( /*NULL,*/ wd, NULL, tblpath ) )
         {
         case kptNotFound:
             not_found = true;
@@ -421,8 +422,8 @@ rc_t KDBManagerVCreateTableInt ( KDBManager *self,
         case kptFile | kptAlias:
             /* if we find a file, vary the failure if it is an archive that is a table
              * or a non related file */
-            if (( KDBOpenPathTypeRead ( wd, tblpath, NULL, kptTable, NULL ) == 0 ) ||
-                ( KDBOpenPathTypeRead ( wd, tblpath, NULL, kptPrereleaseTbl, NULL ) == 0 ) )
+            if (( KDBOpenPathTypeRead ( self, wd, tblpath, NULL, kptTable, NULL, false ) == 0 ) ||
+                ( KDBOpenPathTypeRead ( self, wd, tblpath, NULL, kptPrereleaseTbl, NULL, false ) == 0 ) )
                 return RC ( rcDB, rcMgr, rcCreating, rcTable, rcReadonly );
             /* fall through */
         default:
@@ -578,17 +579,19 @@ LIB_EXPORT rc_t CC KDatabaseVCreateTable ( KDatabase *self,
  */
 static
 rc_t KDBManagerVOpenTableReadInt ( const KDBManager *cself,
-    const KTable **tblp, const KDirectory *wd,
+    const KTable **tblp, const KDirectory *wd, bool try_srapath,
     const char *path, va_list args )
 {
+    rc_t rc;
     char tblpath [ 4096 ];
-    rc_t rc = KDirectoryVResolvePath ( wd, true,
-        tblpath, sizeof tblpath, path, args );
+    size_t z;
+
+/*    rc = KDirectoryVResolvePath ( wd, 1,
+        tblpath, sizeof tblpath, path, args ); */
+    rc = string_vprintf( tblpath, sizeof tblpath, &z, path, args );
     if ( rc == 0 )
     {
         KSymbol *sym;
-        const KDirectory *dir;
-        bool prerelease = false;
         
         /* if already open */
         sym = KDBManagerOpenObjectFind (cself, tblpath);
@@ -596,6 +599,7 @@ rc_t KDBManagerVOpenTableReadInt ( const KDBManager *cself,
         {
             const KTable * ctbl;
             rc_t obj;
+
             switch (sym->type)
             {
             case kptTable:
@@ -628,39 +632,41 @@ rc_t KDBManagerVOpenTableReadInt ( const KDBManager *cself,
                 obj = rcMetadata;
                 break;
             }
-            return  RC (rcDB, rcMgr, rcOpening, obj, rcBusy);
+            rc = RC (rcDB, rcMgr, rcOpening, obj, rcBusy);
         }
-        rc = KDBOpenPathTypeRead ( wd, tblpath, &dir, kptTable, NULL );
-        if ( rc != 0 )
+        else
         {
-            prerelease = true;
-            rc = KDBOpenPathTypeRead ( wd, tblpath, &dir, kptPrereleaseTbl, NULL );
-        }
-        
-        if ( rc == 0 )
-        {
-            KTable *tbl;
-            
-            rc = KTableMake ( & tbl, dir, tblpath, NULL, true );
+            KTable * tbl;
+            const KDirectory *dir;
+            bool prerelease = false;
+
+            rc = KDBOpenPathTypeRead ( cself, wd, tblpath, &dir, kptTable, NULL, try_srapath );
+            if ( rc != 0 )
+            {
+                prerelease = true;
+                rc = KDBOpenPathTypeRead ( cself, wd, tblpath, &dir, kptPrereleaseTbl, NULL, try_srapath );
+            }        
             if ( rc == 0 )
             {
-                KDBManager *self = ( KDBManager* ) cself;
-                
-                rc = KDBManagerInsertTable ( self, tbl );
+                rc = KTableMake ( & tbl, dir, tblpath, NULL, true );
                 if ( rc == 0 )
                 {
-                    tbl -> prerelease = prerelease;
-                    * tblp = tbl;
-                    return 0;
+                    KDBManager * self = (KDBManager *)cself;
+
+                    rc = KDBManagerInsertTable (self, tbl );
+
+                    if (rc == 0)
+                    {
+                        tbl -> prerelease = prerelease;
+                        * tblp = tbl;
+                        return 0;
+                    }
+                    free ( tbl );
                 }
-                
-                free ( tbl );
+                KDirectoryRelease ( dir );
             }
-            
-            KDirectoryRelease ( dir );
         }
     }
-    
     return rc;
 }
 
@@ -688,7 +694,7 @@ LIB_EXPORT rc_t CC KDBManagerVOpenTableRead ( const KDBManager *self,
     if ( self == NULL )
         return RC ( rcDB, rcMgr, rcOpening, rcSelf, rcNull );
 
-    return KDBManagerVOpenTableReadInt ( self, tbl, self -> wd, path, args );
+    return KDBManagerVOpenTableReadInt ( self, tbl, self -> wd, true, path, args );
 }
 
 LIB_EXPORT rc_t CC KDatabaseOpenTableRead ( const KDatabase *self,
@@ -723,7 +729,7 @@ LIB_EXPORT rc_t CC KDatabaseVOpenTableRead ( const KDatabase *self,
     if ( rc == 0 )
     {
         rc = KDBManagerVOpenTableReadInt ( self -> mgr, tblp,
-            self -> dir, path, NULL );
+                                           self -> dir, false, path, NULL );
         if ( rc == 0 )
         {
             KTable *tbl = ( KTable* ) * tblp;
@@ -786,7 +792,7 @@ rc_t KDBManagerVOpenTableUpdateInt ( KDBManager *self,
             return RC ( rcDB, rcMgr, rcOpening, obj, rcBusy );
         }
         /* only open existing tbls */
-        switch ( KDBPathType ( wd, NULL, tblpath ) )
+        switch ( KDBPathType ( /*NULL,*/ wd, NULL, tblpath ) )
         {
         case kptNotFound:
             return RC ( rcDB, rcMgr, rcOpening, rcTable, rcNotFound );
@@ -798,8 +804,8 @@ rc_t KDBManagerVOpenTableUpdateInt ( KDBManager *self,
         case kptFile | kptAlias:
             /* if we find a file, vary the failure if it is an archive that is a table
              * or a non related file */
-            if (( KDBOpenPathTypeRead ( wd, tblpath, NULL, kptTable, NULL ) == 0 ) ||
-                ( KDBOpenPathTypeRead ( wd, tblpath, NULL, kptPrereleaseTbl, NULL ) == 0 ) )
+            if (( KDBOpenPathTypeRead ( self, wd, tblpath, NULL, kptTable, NULL, false ) == 0 ) ||
+                ( KDBOpenPathTypeRead ( self, wd, tblpath, NULL, kptPrereleaseTbl, NULL, false ) == 0 ) )
                 return RC ( rcDB, rcMgr, rcCreating, rcTable, rcUnauthorized );
             /* fall through */
         default:
@@ -1039,7 +1045,7 @@ LIB_EXPORT bool CC KTableIsAlias ( const KTable *self, uint32_t type,
             return false;
         }
 
-        rc = KDBVMakeSubPath ( self -> dir, path, sizeof path, ns, 3, name, NULL );
+        rc = KDBMakeSubPath ( self -> dir, path, sizeof path, ns, 3, name );
         if ( rc == 0 )
         {
             switch ( KDirectoryPathType ( self -> dir, path ) )
@@ -1297,7 +1303,7 @@ LIB_EXPORT rc_t CC KTableReindex ( KTable *self )
                        idx0 is used for cursor sessions */
                     if ( KTableColumnNeedsReindex ( self, name ) )
                     {
-                        rc = KTableVOpenColumnUpdate ( self, & col, name, NULL );
+                        rc = KTableOpenColumnUpdate ( self, & col, name );
                         if ( rc != 0 )
                         {
                             if ( GetRCState ( rc ) == rcBusy )
@@ -1516,18 +1522,30 @@ LIB_EXPORT rc_t CC KTableModDate ( const KTable *self, KTime_t *mtime )
 /* List
  *  create table listings
  */
-static
-bool CC KDatabaseListFilter ( const KDirectory *dir, const char *name, void *data )
+struct FilterData
 {
-    return KDBOpenPathTypeRead(dir, name, NULL, (intptr_t)data, NULL) == 0;
+    const KDBManager * mgr;
+    int type;
+};
+
+static
+bool CC KDatabaseListFilter ( const KDirectory *dir, const char *name, void *data_ )
+{
+    struct FilterData * data = data_;
+
+    return KDBOpenPathTypeRead(data->mgr, dir, name, NULL, data->type, NULL, false) == 0;
 }
 
 LIB_EXPORT rc_t CC KTableListCol ( const KTable *self, KNamelist **names )
 {
     if ( self != NULL )
     {
+        struct FilterData data;
+        data.mgr = self->mgr;
+        data.type = kptColumn;
+
         return KDirectoryVList ( self -> dir,
-                                names, KDatabaseListFilter, ( void* ) kptColumn, "col", NULL );
+            names, KDatabaseListFilter, &data, "col", NULL );
     }
     
     if ( names != NULL )

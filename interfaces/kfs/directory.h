@@ -78,6 +78,9 @@ KFS_EXTERN rc_t CC KDirectoryRelease ( const KDirectory *self );
  *
  *  "path" [ IN, NULL OKAY ] - optional parameter for target
  *  directory. if NULL or empty, interpreted to mean "."
+ *
+ *  function makes a flat list, does not step into sub-dirs!
+ *
  */
 KFS_EXTERN rc_t CC KDirectoryList ( const KDirectory *self, struct KNamelist **list,
     bool ( CC * f ) ( const KDirectory *dir, const char *name, void *data ),
@@ -274,6 +277,7 @@ KFS_EXTERN rc_t CC KDirectoryVSetDate ( KDirectory *self, bool recurse,
 
 /* CreateAlias
  *  creates a path alias according to create mode
+ *  such that "alias" => "targ"
  *
  *  "access" [ IN ] - standard Unix directory access mode
  *  used when "mode" has kcmParents set and alias path does
@@ -282,10 +286,13 @@ KFS_EXTERN rc_t CC KDirectoryVSetDate ( KDirectory *self, bool recurse,
  *  "mode" [ IN ] - a creation mode ( see explanation above ).
  *
  *  "targ" [ IN ] - NUL terminated string in directory-native
- *  character set denoting target object
+ *  character set denoting target object, i.e. the object which
+ *  is designated by symlink "alias". THE PATH IS GIVEN RELATIVE
+ *  TO DIRECTORY ( "self" ), NOT SYMLINK ( "alias" )!
  *
  *  "alias" [ IN ] - NUL terminated string in directory-native
- *  character set denoting target alias
+ *  character set denoting target alias, i.e. the symlink that
+ *  designates a target "targ".
  */
 KFS_EXTERN rc_t CC KDirectoryCreateAlias ( KDirectory *self,
     uint32_t access, KCreateMode mode,
@@ -436,7 +443,7 @@ KFS_EXTERN rc_t CC KDirectoryVOpenDirUpdate ( KDirectory *self,
  *
  *  "access" [ IN ] - standard Unix directory mode, e.g.0775
  *
- *  "mode" [ IN ] - a creation mode ( see explanation above ).
+ *  "mode" [ IN ] - a creation mode ( see explanation in defs.h ).
  *
  *  "path" [ IN ] - NUL terminated string in directory-native
  *  character set denoting target directory
@@ -445,6 +452,52 @@ KFS_EXTERN rc_t CC KDirectoryCreateDir ( KDirectory *self,
     uint32_t access, KCreateMode mode, const char *path, ... );
 KFS_EXTERN rc_t CC KDirectoryVCreateDir ( KDirectory *self,
     uint32_t access, KCreateMode mode, const char *path, va_list args );
+
+
+/* CopyPath
+ *  copies a file
+ *
+ *  "src_path" [ IN ] - path to source-file
+ *
+ *  "dst_path" [ IN ] - file to create
+ *
+ *  "path" [ IN ] - NUL terminated string in directory-native
+ *  character set denoting target directory
+ */
+KFS_EXTERN rc_t CC KDirectoryCopyPath ( const KDirectory *src_dir,
+    KDirectory *dst_dir, const char *src_path, const char * dst_path );
+
+
+/* CopyPaths
+ *  copies files, optional recursive in sub-dirs...
+ *
+ *  "recursive" [ IN ] - handle subdir's recursivly
+ *
+ *  "src" [ IN ] - what directory to copy
+ *
+ *  "dst" [ IN ] - into what directory to copy
+ *      ( will be created if it does not already exist )
+ *
+ */
+LIB_EXPORT rc_t CC KDirectoryCopyPaths( const KDirectory * src_dir,
+    KDirectory *dst_dir, bool recursive, const char *src, const char *dst );
+
+
+/* Copy
+ *  detects if src is a file or a directory
+ *
+ *  "recursive" [ IN ] - handle subdir's recursivly 
+ *            ( if srs is a directory )
+ *
+ *  "src" [ IN ] - what file/directory to copy
+ *
+ *  "dst" [ IN ] - into what file/directory to copy
+ *      ( will be created if it does not already exist )
+ *
+ */
+LIB_EXPORT rc_t CC KDirectoryCopy( const KDirectory * src_dir,
+    KDirectory *dst_dir, bool recursive, const char *src, const char *dst );
+
 
 /* NativeDir
  *  returns a native file-system directory node reference

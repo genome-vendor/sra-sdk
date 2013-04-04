@@ -57,3 +57,10 @@ DLLX = dll
 
 # compilation defines
 DEFINES	:= -DWINDOWS
+
+# flex+bison: on Windows, use source-controlled generated .c/.h files
+YACC = @ true
+LEX = @ true
+
+# build matrix
+COMPILERS = VC++

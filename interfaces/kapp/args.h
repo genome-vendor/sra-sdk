@@ -35,6 +35,10 @@
 extern "C" {
 #endif
 
+/* this define is while adding the --option-file to standard options
+ * and it might not be right yet */
+#define USE_OPTFILE    1
+
 /*
  * Terminology for this module:
  *
@@ -76,14 +80,22 @@ extern OptDef StandardOptions [];
 #define OPTION_HELP      "help"
 #define OPTION_VERSION   "version"
 #define OPTION_VERBOSE   "verbose"
-#define OPTION_REPORT    "report"
-
+#if USE_OPTFILE
+#define OPTION_OPTFILE   "option-file"
+#endif
+#define OPTION_NO_USER_SETTINGS "no-user-settings"
 #define ALIAS_DEBUG     "+"
 #define ALIAS_LOG_LEVEL "L"
 #define ALIAS_HELP      "h?"
 #define ALIAS_HELP1     "h"
 #define ALIAS_VERSION   "V"
 #define ALIAS_VERBOSE   "v"
+#if USE_OPTFILE
+#define ALIAS_OPTFILE   ""
+#endif
+
+#define OPTION_REPORT   "report"
+#define ALIAS_REPORT    ""
 
 /*--------------------------------------------------------------------------
  * Args
@@ -104,6 +116,9 @@ rc_t CC ArgsMake ( Args ** pself );
  */
 rc_t CC ArgsWhack ( Args * self );
 
+#ifndef ArgsRelease
+#define ArgsRelease(self) ArgsWhack(self)
+#endif
 
 /* AddOptionArray
  *  helper function to call the ArgsAddOption() multiple times
@@ -127,6 +142,35 @@ rc_t CC ArgsAddStandardOptions ( Args * self );
  */
 rc_t CC ArgsParse ( Args * self, int argc, char *argv[] );
 
+
+/* tokenizes a file into an user supplied argv array ( not the one from main() ! )
+ * the result can be passed into ArgsParse(), enables commandline-options from a file
+ *  caller has to free the created array via Args_free_token_argv()
+ */
+rc_t CC Args_tokenize_file_into_argv( const char * filename, int * argc, char *** argv );
+
+rc_t CC Args_tokenize_file_and_progname_into_argv( const char * filename, const char * progname,
+                                                   int * argc, char *** argv );
+
+/* free's the array that was created by calling Args_tokenize_file_into_argv()
+ */
+void CC Args_free_token_argv( int argc, char * argv[] );
+
+
+/* looks in args for file_option(s), if found loades the files, parses them
+   if this results in more files to be parsed ( kind of includes ),
+   the parsing continues recursivly
+ */
+rc_t CC Args_parse_inf_file( Args * args, const char * file_option );
+
+
+/* looks in the unparsed original argv for the value of an option
+   >>> this is a hack to enable special treatment for tools that do not use
+       the standard args-parsing <<<
+ */
+rc_t CC Args_find_option_in_argv( int argc, char * argv[],
+                                  const char * option_name,
+                                  char * option, size_t option_len );
 
 /* OptionCount
  *  how many times did this Option occur?
@@ -189,6 +233,7 @@ rc_t CC ArgsMakeStandardOptions (Args** pself);
 
 rc_t CC ArgsHandleHelp (Args * self);
 rc_t CC ArgsHandleVersion (Args * self);
+rc_t CC ArgsHandleOptfile (Args * self);
 
 /*
  * ArgsHandleLogLevel
@@ -211,6 +256,10 @@ rc_t CC ArgsOptionSingleString (const Args * self, const char * option, const ch
 
 /* either fullpath or progname can be NULL, args can not */
 rc_t CC ArgsProgram (const Args * args, const char ** fullpath, const char ** progname);
+
+
+/* after arguments are parsed; check to see if any required arguments are missing */
+rc_t CC ArgsCheckRequired (Args * args);
 
 
 /*

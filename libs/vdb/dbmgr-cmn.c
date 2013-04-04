@@ -64,45 +64,6 @@
 #endif
 
 /*--------------------------------------------------------------------------
- * VDBMem
- */
-
-/* Whack
- */
-static
-void CC VDBMemWhack ( DLNode *n, void *ignore )
-{
-    DEBUG_PRINT("freeing mem", 0);
-    free ( n );
-}
-
-
-/* Release
- */
-void CC VDBMemRelease ( DLNode *item, void *data )
-{
-    VDBMem *self = ( VDBMem* ) item;
-    VDBManager *mgr = data;
-
-    if ( self != NULL )
-    {
-        if ( mgr == NULL || mgr -> pcount >= mgr -> plimit ) {
-            if (mgr) {
-                DEBUG_PRINT("freeing mem, pcount: %u, plimit: %u", mgr->pcount, mgr->plimit);
-                --mgr->mcount;
-            }
-            free ( self );
-        }
-        else
-        {
-            DEBUG_PRINT("pooling mem, pcount: %u, plimit: %u", mgr->pcount, mgr->plimit);
-            DLListPushTail ( & mgr -> mpool, & self -> n );
-            ++ mgr -> pcount;
-        }
-    }
-}
-
-/*--------------------------------------------------------------------------
  * VDBManager
  *  opaque handle to library
  */
@@ -129,7 +90,6 @@ rc_t VDBManagerWhack ( VDBManager *self )
 
         VSchemaRelease ( self -> schema );
         VLinkerRelease ( self -> linker );
-        DLListWhack ( & self -> mpool, VDBMemWhack, NULL );
         free ( self );
         return 0;
     }
@@ -530,68 +490,6 @@ LIB_EXPORT rc_t CC VDBManagerSetUserData ( const VDBManager *cself,
     return 0;
 }
 
-
-/* MakeMem
- *  pops a buffer from pool
- *  or allocates a new one on demand
- */
-rc_t VDBManagerMakeMem ( VDBManager *self, VDBMem **memp )
-{
-    rc_t rc;
-
-    if ( memp == NULL )
-        rc = RC ( rcVDB, rcMgr, rcAllocating, rcParam, rcNull );
-    else
-    {
-        if ( self == NULL )
-            rc = RC ( rcVDB, rcMgr, rcAllocating, rcSelf, rcNull );
-        else
-        {
-            VDBMem *mem;
-
-            if ( self -> pcount > 0 )
-            {
-                /* "count" tells us that there is at least 1 pooled buffer */
-                mem = ( VDBMem* ) DLListPopHead ( & self -> mpool );
-                assert ( mem != NULL );
-
-                /* should always happen */
-                if ( mem != NULL )
-                {
-                    DEBUG_PRINT("retrieving mem from pool", 0);
-                    -- self -> pcount;
-                    * memp = mem;
-                    return 0;
-                }
-
-                /* should never happen */
-                self -> pcount = 0;
-            }
-            
-            if (self->mcount > self->mlimit) {
-                rc = RC(rcVDB, rcMgr, rcAllocating, rcResources, rcExhausted);
-                DEBUG_PRINT("refusing to allocate; too many allocs", 0);
-            }
-            else {
-                mem = malloc ( sizeof * mem );
-                if ( mem == NULL )
-                    rc = RC ( rcVDB, rcMgr, rcAllocating, rcMemory, rcExhausted );
-                else
-                {
-                    ++self->mcount;
-                    DEBUG_PRINT("allocating mem %u", self->mcount);
-                    * memp = mem;
-                    return 0;
-                }
-            }
-        }
-
-        * memp = NULL;
-    }
-
-    return rc;
-}
-
 /* OpenKDBManager
  *  returns a new reference to KDBManager used by VDBManager
  */
@@ -814,4 +712,36 @@ LIB_EXPORT rc_t CC VDBManagerListExternalSchemaModules ( const VDBManager *self,
     }
 
     return rc;
+}
+
+
+/* PathType
+ *  check the path type of an object/directory path.
+ *
+ *  this is an extension of the KDirectoryPathType ( see <kdb/manager.h> )
+ *  and will return the KDirectory values if a path type is not specifically
+ *  a VDB or KDB object.
+ */
+LIB_EXPORT int CC VDBManagerPathType ( const VDBManager * self,
+    const char *path, ... )
+{
+    int type;
+
+    va_list args;
+    va_start ( args, path );
+
+    type = VDBManagerVPathType ( self, path, args );
+
+    va_end ( args );
+
+    return type;
+}
+
+LIB_EXPORT int CC VDBManagerVPathType ( const VDBManager * self,
+    const char *path, va_list args )
+{
+    if ( self != NULL )
+        return KDBManagerVPathType ( self -> kmgr, path, args );
+
+    return kptBadPath;
 }

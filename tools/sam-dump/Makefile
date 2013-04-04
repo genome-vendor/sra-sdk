@@ -42,15 +42,13 @@ ALL_TOOLS = \
 #-------------------------------------------------------------------------------
 # outer targets
 #
-vers-includes: $(addsuffix .vers.h,$(EXT_TOOLS))
-
-all std: makedirs vers-includes
+all std: vers-includes
 	@ $(MAKE_CMD) $(TARGDIR)/std
 
-$(ALL_TOOLS): makedirs vers-includes
+$(ALL_TOOLS): vers-includes
 	@ $(MAKE_CMD) $(BINDIR)/$@
 
-.PHONY: vers-includes all std $(ALL_TOOLS)
+.PHONY: all std $(ALL_TOOLS)
 
 #-------------------------------------------------------------------------------
 # std
@@ -61,19 +59,18 @@ $(TARGDIR)/std: \
 .PHONY: $(TARGDIR)/std
 
 #-------------------------------------------------------------------------------
+# vers-includes
+#
+$(TARGDIR)/vers-includes: $(addsuffix .vers.h,$(EXT_TOOLS))
+
+.PHONY: $(TARGDIR)/vers-includes
+
+#-------------------------------------------------------------------------------
 # clean
 #
 clean: stdclean
 
 .PHONY: clean
-
-#-------------------------------------------------------------------------------
-# tag
-#
-tag: \
-	$(addsuffix _tag,$(ALL_TOOLS))
-
-.PHONY: tag $(addsuffix _tag,$(ALL_TOOLS))
 
 #-------------------------------------------------------------------------------
 # sam-dump
@@ -88,10 +85,8 @@ SAMDUMP_LIB = \
 	-lkapp \
 	-ssrapath \
 	-lalign-reader \
-	-daxf \
+	$(READONLY_SCHEMA_LIBS) \
 	-lsraschema \
-	-dsraxf \
-	-dvxf \
 	-lvdb \
 	-lkdb \
 	-lvfs \
@@ -99,15 +94,9 @@ SAMDUMP_LIB = \
 	-lkfg \
 	-lkfs \
 	-lksrch \
+	-lkproc \
 	-lklib \
 	-lm
 
-ifdef NCBI
-CFLAGS += -DNCBI
-endif
-
 $(BINDIR)/sam-dump: $(SAMDUMP_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(SAMDUMP_LIB)
-
-samdump_tag:
-	@ $(TOP)/build/tag-module.sh $(MODULE) samdump $(SAMDUMP_OBJ)

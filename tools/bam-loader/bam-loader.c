@@ -71,13 +71,14 @@ static char const option_accept_dup[] = "accept-dups";
 static char const option_accept_nomatch[] = "accept-nomatch";
 static char const option_nomatch_log[] = "nomatch-log";
 static char const option_keep_mismatch_qual[] = "keep-mismatch-qual";
-static char const option_no_spot_assembly[] = "no-spot-assembly";
 static char const option_min_match[] = "minimum-match";
 static char const option_header[] = "header";
 static char const option_no_cs[] = "no-cs";
 static char const option_no_secondary[] = "no-secondary";
 static char const option_ref_file[] = "ref-file";
 static char const option_TI[] = "TI";
+static char const option_max_warn_dup_flag[] = "max-warning-dup-flag";
+static char const option_accept_hard_clip[] = "accept-hard-clip";
 
 #define OPTION_INPUT option_input
 #define OPTION_OUTPUT option_output
@@ -92,13 +93,14 @@ static char const option_TI[] = "TI";
 #define OPTION_ACCEPT_DUP option_accept_dup
 #define OPTION_ACCEPT_NOMATCH option_accept_nomatch
 #define OPTION_NOMATCH_LOG option_nomatch_log
-#define OPTION_NO_SPOT_ASSEMBLY option_no_spot_assembly
 #define OPTION_MIN_MATCH option_min_match
 #define OPTION_HEADER option_header
 #define OPTION_NO_CS option_no_cs
 #define OPTION_NO_SECONDARY option_no_secondary
 #define OPTION_REF_FILE option_ref_file
 #define OPTION_TI option_TI
+#define OPTION_MAX_WARN_DUP_FLAG option_max_warn_dup_flag
+#define OPTION_ACCEPT_HARD_CLIP option_accept_hard_clip
 
 #define ALIAS_INPUT  "i"
 #define ALIAS_OUTPUT "o"
@@ -109,7 +111,6 @@ static char const option_TI[] = "TI";
 #define ALIAS_MAX_ERR_COUNT "E"
 #define ALIAS_UNALIGNED "u"
 #define ALIAS_ACCEPT_DUP "d"
-#define ALIAS_NO_SPOT_ASSEMBLY "n"
 #define ALIAS_NO_SECONDARY "P"
 #define ALIAS_REF_FILE "r"
 
@@ -265,13 +266,6 @@ char const * use_nomatch_log[] =
 };
 
 static
-char const * use_no_spot_assembly[] = 
-{
-    "Disable spot assembly",
-    NULL
-};
-
-static
 char const * use_min_match[] = 
 {
     "minimum number of matches for an alignment",
@@ -313,6 +307,20 @@ char const * use_TI[] =
     NULL
 };
 
+static
+char const * use_max_dup_warnings[] = 
+{
+    "set limit for number of duplicate flag mismatch warnings",
+    NULL
+};
+
+static
+char const * use_accept_hard_clip[] = 
+{
+    "accept hard clipping in CIGAR",
+    NULL
+};
+
 OptDef Options[] = 
 {
     /* order here is same as in param array below!!! */
@@ -329,7 +337,6 @@ OptDef Options[] =
     { OPTION_MINMAPQ, ALIAS_MINMAPQ, NULL, min_mapq_usage, 1, true,  false },
     { OPTION_CACHE_SIZE, NULL, NULL, cache_size_usage, 1, true,  false },
     { OPTION_NO_CS, NULL, NULL, use_no_cs, 1, false,  false },
-    { OPTION_NO_SPOT_ASSEMBLY, ALIAS_NO_SPOT_ASSEMBLY, NULL, use_no_spot_assembly, 1, false,  false },
     { OPTION_MIN_MATCH, NULL, NULL, use_min_match, 1, true, false },
     { OPTION_NO_SECONDARY, ALIAS_NO_SECONDARY, NULL, use_no_secondary, 1, false, false },
     { option_unsorted, NULL, NULL, unsorted_usage, 1, false,  false },
@@ -343,7 +350,9 @@ OptDef Options[] =
     { OPTION_MAX_REC_COUNT, NULL, NULL, mrc_usage, 1, true,  false },
     { OPTION_MAX_ERR_COUNT, ALIAS_MAX_ERR_COUNT, NULL, mec_usage, 1, true,  false },
     { OPTION_REF_FILE, ALIAS_REF_FILE, NULL, use_ref_file, 0, true, false },
-    { OPTION_TI, NULL, NULL, use_TI, 0, false, false }
+    { OPTION_TI, NULL, NULL, use_TI, 1, false, false },
+    { OPTION_MAX_WARN_DUP_FLAG, NULL, NULL, use_max_dup_warnings, 1, true, false },
+    { OPTION_ACCEPT_HARD_CLIP, NULL, NULL, use_accept_hard_clip, 1, false, false }
 };
 
 const char* OptHelpParam[] =
@@ -362,7 +371,6 @@ const char* OptHelpParam[] =
     "phred-score",
     "mbytes",
     NULL,
-    NULL,
     "count",
     NULL,
     NULL,
@@ -376,6 +384,8 @@ const char* OptHelpParam[] =
     NULL,
     NULL,
     "path-to-file",
+    NULL,
+    "count",
     NULL
 };
 
@@ -717,7 +727,7 @@ rc_t CC KMain (int argc, char * argv[])
             if (rc)
                 break;
         }
-
+        
         rc = ArgsOptionCount (args, option_edit_aligned_qual, &pcount);
         if (rc)
             break;
@@ -751,6 +761,17 @@ rc_t CC KMain (int argc, char * argv[])
                 MiniUsage (args);
                 break;
             }
+        }
+        
+        rc = ArgsOptionCount (args, OPTION_MAX_WARN_DUP_FLAG, &pcount);
+        if (rc)
+            break;
+        if (pcount == 1)
+        {
+            rc = ArgsOptionValue (args, OPTION_MAX_WARN_DUP_FLAG, 0, &value);
+            if (rc)
+                break;
+            G.maxWarnCount_DupConflict = strtoul(value, &dummy, 0);
         }
         
         rc = ArgsOptionCount (args, option_unsorted, &pcount);
@@ -816,15 +837,15 @@ rc_t CC KMain (int argc, char * argv[])
             break;
         G.noSecondary = pcount > 0;
         
-        rc = ArgsOptionCount (args, OPTION_NO_SPOT_ASSEMBLY, &pcount);
-        if (rc)
-            break;
-        G.noSpotAssembly = pcount > 0;
-
         rc = ArgsOptionCount (args, OPTION_TI, &pcount);
         if (rc)
             break;
         G.hasTI = pcount > 0;
+        
+        rc = ArgsOptionCount (args, OPTION_ACCEPT_HARD_CLIP, &pcount);
+        if (rc)
+            break;
+        G.acceptHardClip = pcount > 0;
         
         rc = ArgsOptionCount (args, OPTION_NOMATCH_LOG, &pcount);
         if (rc)
@@ -941,6 +962,7 @@ rc_t CC KMain (int argc, char * argv[])
     }
     free(name_buffer);
     free((void *)G.headerText);
+    free(G.refFiles);
 
     value = G.outpath ? strrchr(G.outpath, '/') : "/???";
     if( value == NULL ) {
@@ -949,7 +971,7 @@ rc_t CC KMain (int argc, char * argv[])
         value++;
     }
     if (rc) {
-        (void)PLOGERR(klogErr, (klogErr, rc, "load failed: $(reason_short)",
+        (void)PLOGERR(klogErr, (klogErr, rc, "load failed",
                 "severity=total,status=failure,accession=%s,errors=%u", value, G.errCount));
     } else {
         (void)PLOGMSG(klogInfo, (klogInfo, "loaded",

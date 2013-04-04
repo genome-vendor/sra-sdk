@@ -81,14 +81,14 @@ tag: \
 #
 $(LIBDIR)/libkfs: $(addprefix $(LIBDIR)/libkfs.,$(LIBEXT))
 
-KFS_SRC = \
+KFS_CMN = \
 	directory \
 	arrayfile \
 	file \
 	sysdir \
 	sysfile \
-	mmap \
 	sysmmap \
+	syslockfile \
 	sysdll \
 	gzip \
 	bzip \
@@ -103,6 +103,7 @@ KFS_SRC = \
 	tar \
 	teefile \
 	buffile \
+	buffile-read \
 	buffile-write \
 	subfile \
 	nullfile \
@@ -111,13 +112,23 @@ KFS_SRC = \
 	pagefile \
 	pmem \
 	readheadfile \
-	report
+	ramfile \
+	quickmount \
+	report \
+	lockfile \
+	syslockfile \
+	cacheteefile
+
+KFS_SRC = \
+	mmap \
+	$(KFS_CMN)
 
 
 KFS_OBJ = \
 	$(addsuffix .$(LOBX),$(KFS_SRC))
 
 KFS_LIB = \
+	-dkproc \
 	-dklib \
 	-ddl \
 	-dz \

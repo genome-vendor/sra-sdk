@@ -56,22 +56,22 @@ rc_t destroy_progressbar( progressbar * pb )
 
 static void progess_0a( const uint16_t percent )
 {
-    OUTMSG (( "| %2u%%", percent ));
+    KOutMsg( "| %2u%%", percent );
 }
 
 static void progess_0( const uint16_t percent )
 {
     if ( percent & 1 )
-        OUTMSG (( "\b\b\b\b- %2u%%", percent ));
+        KOutMsg( "\b\b\b\b- %2u%%", percent );
     else
-        OUTMSG (( "\b\b\b%2u%%", percent ));
+        KOutMsg( "\b\b\b%2u%%", percent );
 }
 
 static void progess_1a( const uint16_t percent )
 {
     uint16_t p1 = percent / 10;
     uint16_t p0 = percent - ( p1 * 10 );
-    OUTMSG (( "| %2u.%01u%%", p1, p0 ));
+    KOutMsg( "| %2u.%01u%%", p1, p0 );
 }
 
 static void progess_1( const uint16_t percent )
@@ -79,16 +79,16 @@ static void progess_1( const uint16_t percent )
     uint16_t p1 = percent / 10;
     uint16_t p0 = percent - ( p1 * 10 );
     if ( ( p1 & 1 )&&( p0 == 0 ) )
-        OUTMSG (( "\b\b\b\b\b\b- %2u.%01u%%", p1, p0 ));
+        KOutMsg( "\b\b\b\b\b\b- %2u.%01u%%", p1, p0 );
     else
-        OUTMSG (( "\b\b\b\b\b%2u.%01u%%", p1, p0 ));
+        KOutMsg( "\b\b\b\b\b%2u.%01u%%", p1, p0 );
 }
 
 static void progess_2a( const uint16_t percent )
 {
     uint16_t p1 = percent / 100;
     uint16_t p0 = percent - ( p1 * 100 );
-    OUTMSG (( "| %2u.%02u%%", p1, p0 ));
+    KOutMsg( "| %2u.%02u%%", p1, p0 );
 }
 
 static void progess_2( const uint16_t percent )
@@ -96,9 +96,9 @@ static void progess_2( const uint16_t percent )
     uint16_t p1 = percent / 100;
     uint16_t p0 = percent - ( p1 * 100 );
     if ( ( p1 & 1 )&&( p0 == 0 ) )
-        OUTMSG (( "\b\b\b\b\b\b\b- %2u.%02u%%", p1, p0 ));
+        KOutMsg( "\b\b\b\b\b\b\b- %2u.%02u%%", p1, p0 );
     else
-        OUTMSG (( "\b\b\b\b\b\b%2u.%02u%%", p1, p0 ));
+        KOutMsg( "\b\b\b\b\b\b%2u.%02u%%", p1, p0 );
 }
 
 rc_t update_progressbar( progressbar * pb, const uint8_t fract_digits,

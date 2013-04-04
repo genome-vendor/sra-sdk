@@ -172,9 +172,9 @@ then
             ;;
 
 ##### TEMPORARY #####
-# skip kproc
+# use ksproc for kproc
     kproc)
-        continue
+        xLIBNAME=ksproc
         ;;
 #####################
 

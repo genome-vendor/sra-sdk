@@ -70,7 +70,8 @@ KDB_EXTERN rc_t CC KTableListIdx ( struct KTable const *self, struct KNamelist *
  *  create metadata node listings
  */
 KDB_EXTERN rc_t CC KMDataNodeListAttr ( struct KMDataNode const *self, struct KNamelist **names );
-KDB_EXTERN rc_t CC KMDataNodeListChild ( struct KMDataNode const *self, struct KNamelist **names );
+KDB_EXTERN rc_t CC KMDataNodeListChildren ( struct KMDataNode const *self, struct KNamelist **names );
+#define KMDataNodeListChild KMDataNodeListChildren
 
 
 #ifdef __cplusplus

@@ -53,7 +53,7 @@ struct KSemaphore
     volatile uint64_t avail;
     volatile uint64_t requested;
     volatile uint64_t min_requested;
-    KCondition cond;
+    KCondition* cond;
     volatile uint32_t waiting;
     volatile bool uniform;
 };
@@ -69,7 +69,7 @@ rc_t KSemaphoreWhack ( KSemaphore *self )
     if ( self -> waiting != 0 )
         return RC ( rcPS, rcSemaphore, rcDestroying, rcSemaphore, rcBusy );
 
-    rc = KConditionDestroy ( & self -> cond );
+    rc = KConditionRelease ( self -> cond );
     if ( rc != 0 )
         return ResetRCContext ( rc, rcPS, rcSemaphore, rcDestroying );
 
@@ -94,7 +94,7 @@ LIB_EXPORT rc_t CC KSemaphoreMake ( KSemaphore **semp, uint64_t count )
             rc = RC ( rcPS, rcSemaphore, rcConstructing, rcMemory, rcExhausted );
         else
         {
-            rc = KConditionInit ( & sem -> cond );
+            rc = KConditionMake( & sem -> cond );
             if ( rc == 0 )
             {
                 sem -> avail = count;
@@ -122,7 +122,7 @@ LIB_EXPORT rc_t CC KSemaphoreMake ( KSemaphore **semp, uint64_t count )
 LIB_EXPORT rc_t CC KSemaphoreAddRef ( const KSemaphore *cself )
 {
     if ( cself != NULL )
-        return KConditionAddRef ( & cself -> cond );
+        return KConditionAddRef ( cself -> cond );
     return 0;
 }
 
@@ -130,7 +130,7 @@ LIB_EXPORT rc_t CC KSemaphoreRelease ( const KSemaphore *cself )
 {
     if ( cself != NULL )
     {
-        if ( KConditionDropRef ( & cself -> cond ) )
+        if ( KConditionDropRef ( cself -> cond ) )
             return KSemaphoreWhack ( ( KSemaphore* ) cself );
     }
     return 0;
@@ -162,7 +162,7 @@ LIB_EXPORT rc_t CC KSemaphoreWait ( KSemaphore *self, struct KLock *lock )
 
         do
         {
-            rc_t rc = KConditionWait ( & self -> cond, lock );
+            rc_t rc = KConditionWait ( self -> cond, lock );
             if ( rc != 0 )
             {
                 -- self -> waiting;
@@ -219,7 +219,7 @@ LIB_EXPORT rc_t CC KSemaphoreTimedWait ( KSemaphore *self,
             rc_t rc;
 
             SMSG ( "%s[%p]: wait on condition...\n", __func__, self );
-            rc = KConditionTimedWait ( & self -> cond, lock, tm );
+            rc = KConditionTimedWait ( self -> cond, lock, tm );
             SMSG ( "%s[%p]:...done, rc = %R\n", __func__, self, rc );
             if ( rc != 0 )
             {
@@ -253,7 +253,7 @@ LIB_EXPORT rc_t CC KSemaphoreCancel ( KSemaphore *self )
     if ( self -> waiting != 0 )
     {
         SMSG ( "%s[%p]: canceling %u waiters\n", __func__, self, self -> waiting );
-        return KConditionBroadcast ( & self -> cond );
+        return KConditionBroadcast ( self -> cond );
     }
 
     SMSG ( "%s[%p]: cancel request ( no waiters )\n", __func__, self );
@@ -277,8 +277,8 @@ LIB_EXPORT rc_t CC KSemaphoreSignal ( KSemaphore *self )
            - and only one request can be satisfied
            - then signal. otherwise, broadcast */
         if ( self -> uniform && self -> avail / self -> min_requested == 1 )
-            return KConditionSignal ( & self -> cond );
-        return KConditionBroadcast ( & self -> cond );
+            return KConditionSignal ( self -> cond );
+        return KConditionBroadcast ( self -> cond );
     }
 
     return 0;
@@ -315,7 +315,7 @@ LIB_EXPORT rc_t CC KSemaphoreAlloc ( KSemaphore *self,
 
         do
         {
-            rc_t rc = KConditionWait ( & self -> cond, lock );
+            rc_t rc = KConditionWait ( self -> cond, lock );
             if ( rc != 0 )
             {
                 -- self -> waiting;
@@ -367,7 +367,7 @@ LIB_EXPORT rc_t CC KSemaphoreTimedAlloc ( KSemaphore *self,
 
         do
         {
-            rc_t rc = KConditionTimedWait ( & self -> cond, lock, tm );
+            rc_t rc = KConditionTimedWait ( self -> cond, lock, tm );
             if ( rc != 0 )
             {
                 -- self -> waiting;
@@ -400,8 +400,8 @@ LIB_EXPORT rc_t CC KSemaphoreFree ( KSemaphore *self, uint64_t count )
            - and only one request can be satisfied
            - then signal. otherwise, broadcast */
         if ( self -> uniform && self -> avail / self -> min_requested == 1 )
-            return KConditionSignal ( & self -> cond );
-        return KConditionBroadcast ( & self -> cond );
+            return KConditionSignal ( self -> cond );
+        return KConditionBroadcast ( self -> cond );
     }
 
     return 0;

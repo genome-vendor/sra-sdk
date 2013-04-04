@@ -87,6 +87,7 @@ rc_t init_keywords ( KSymTable *tbl )
         KEYWORD ( typeset ),
         KEYWORD ( validate ),
         KEYWORD ( version ),
+        KEYWORD ( view ),
         KEYWORD ( virtual ),
         KEYWORD ( void ),
         KEYWORD ( writeonly ),

@@ -46,14 +46,28 @@ include $(TOP)/build/Makefile.env
 #  ifdefs, so we have general rules to produce two sets of object files
 #  from a single set of sources
 #
+%.n.32.$(OBJX): %.c
+	$(CC) -o $@ $(OPT) $(CFLAGS) -DJU_32BIT $<
+%.n.64.$(OBJX): %.c
+	$(CC) -o $@ $(OPT) $(CFLAGS) -DJU_64BIT $<
 %.n.32.$(LOBX): %.c
 	$(CC) -o $@ -fPIC $(OPT) $(CFLAGS) -DJU_32BIT $<
 %.n.64.$(LOBX): %.c
 	$(CC) -o $@ -fPIC $(OPT) $(CFLAGS) -DJU_64BIT $<
+
+%.b.32.$(OBJX): %.c
+	$(CC) -o $@ $(OPT) $(CFLAGS) -DJUDY1 -DJU_32BIT $<
+%.b.64.$(OBJX): %.c
+	$(CC) -o $@ $(OPT) $(CFLAGS) -DJUDY1 -DJU_64BIT $<
 %.b.32.$(LOBX): %.c
 	$(CC) -o $@ -fPIC $(OPT) $(CFLAGS) -DJUDY1 -DJU_32BIT $<
 %.b.64.$(LOBX): %.c
 	$(CC) -o $@ -fPIC $(OPT) $(CFLAGS) -DJUDY1 -DJU_64BIT $<
+
+%.w.32.$(OBJX): %.c
+	$(CC) -o $@ $(OPT) $(CFLAGS) -DJUDYL -DJU_32BIT $<
+%.w.64.$(OBJX): %.c
+	$(CC) -o $@ $(OPT) $(CFLAGS) -DJUDYL -DJU_64BIT $<
 %.w.32.$(LOBX): %.c
 	$(CC) -o $@ -fPIC $(OPT) $(CFLAGS) -DJUDYL -DJU_32BIT $<
 %.w.64.$(LOBX): %.c
@@ -68,25 +82,23 @@ endif
 #DEBUG := -DDEBUG
 #endif
 
-CFLAGS = $(DEBUG) $(NO_ARRAY_BOUNDS_WARNING) $(DBG) $(PROF) $(JUDY_WIN) -I$(SRCDIR) -I$(SRCDIR)/..
+CFLAGS = $(DEBUG) $(NO_ARRAY_BOUNDS_WARNING) $(DBG) $(CARCH) $(PROF) $(JUDY_WIN) -I$(SRCDIR) -I$(SRCDIR)/..
 
 VPATH += $(OBJDIR)
 
 #-------------------------------------------------------------------------------
 # outer targets
 #
-vers-includes: $(addsuffix .vers.h,$(EXT_LIBS))
-
-all std: makedirs vers-includes
+all std: makedirs
 	@ $(MAKE_CMD) $(TARGDIR)/std
 
-$(INT_LIBS): makedirs vers-includes
+$(INT_LIBS): makedirs
 	@ $(MAKE_CMD) $(ILIBDIR)/$@
 
-$(EXT_LIBS): makedirs vers-includes
+$(EXT_LIBS): makedirs
 	@ $(MAKE_CMD) $(LIBDIR)/$@
 
-.PHONY: vers-includes all std $(ALL_LIBS)
+.PHONY: all std $(ALL_LIBS)
 
 #-------------------------------------------------------------------------------
 # std
@@ -120,10 +132,10 @@ JUDY_TABLES_SRC = \
 	JudyTablesGen
 
 JUDY_TABLES_BOBJ = \
-	$(addsuffix .b.$(BITS).$(LOBX),$(JUDY_TABLES_SRC))
+	$(addsuffix .b.$(BITS).$(OBJX),$(JUDY_TABLES_SRC))
 
 JUDY_TABLES_WOBJ = \
-	$(addsuffix .w.$(BITS).$(LOBX),$(JUDY_TABLES_SRC))
+	$(addsuffix .w.$(BITS).$(OBJX),$(JUDY_TABLES_SRC))
 
 $(OBJDIR)/Judy1TablesGen: $(JUDY_TABLES_BOBJ)
 	$(LD) --exe -o $@ $^
@@ -132,10 +144,10 @@ $(OBJDIR)/JudyLTablesGen: $(JUDY_TABLES_WOBJ)
 	$(LD) --exe -o $@ $^
 
 $(OBJDIR)/Judy1Tables.c: $(OBJDIR)/Judy1TablesGen
-	$^
+	$(RUN_REMOTELY) $^
 
 $(OBJDIR)/JudyLTables.c: $(OBJDIR)/JudyLTablesGen
-	$^
+	$(RUN_REMOTELY) $^
 
 $(ILIBDIR)/judy-tables: \
 	$(OBJDIR)/JudyLTables.c \

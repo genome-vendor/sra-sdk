@@ -38,6 +38,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <assert.h>
 
 /*--------------------------------------------------------------------------
@@ -241,4 +242,60 @@ LIB_EXPORT rc_t CC VNamelistRemove( VNamelist *self, const char* s )
             free( removed );
     }
     return rc;
+}
+
+
+
+/* Reorder
+ *  sort the names according to case sensitivity
+ *  and UNICODE character code ordering
+ *
+ *  "case_insensitive" [ IN ] - when true, perform "tolower" on
+ *   each character before compare
+ */
+static
+int CC vect_string_cmp ( const void **a, const void **b, void *ignore )
+{
+    return strcmp ( * a, * b );
+}
+
+static
+int CC vect_string_cmp_case ( const void **a, const void **b, void *ignore )
+{
+    uint32_t i;
+
+    const char *ap = * a;
+    const char *bp = * b;
+
+    if ( ap == NULL )
+        return bp != NULL;
+    if ( bp == NULL )
+        return -1;
+
+    for ( i = 0; ; ++ i )
+    {
+        if ( ap [ i ] != bp [ i ] )
+        {
+            /* TBD - this should perform UTF-8 to UNICODE conversion
+               but for that, create a function in text module */
+            int diff = tolower ( ap [ i ] ) - tolower ( bp [ i ] );
+            if ( diff == 0 )
+                continue;
+
+            return diff;
+        }
+
+        if ( ap [ i ] == 0 )
+            break;
+    }
+
+    return 0;
+}
+
+LIB_EXPORT void CC VNamelistReorder ( VNamelist *self, bool case_insensitive )
+{
+    if ( self != NULL )
+    {
+        VectorReorder ( & self -> name_vector, case_insensitive ? vect_string_cmp_case : vect_string_cmp, NULL );
+    }
 }

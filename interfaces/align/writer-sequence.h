@@ -79,7 +79,7 @@ typedef struct TableWriterSeqData_struct {
     TableWriterData read_type;
     TableWriterData read_start;
     TableWriterData read_len;
-    uint32_t tmp_key_id;
+    uint64_t tmp_key_id;
     TableWriterData spot_group;
     TableWriterData cskey;
     TableWriterData read_filter;
@@ -134,7 +134,7 @@ ALIGN_EXTERN rc_t CC TableWriterSeq_Write(const TableWriterSeq* cself, const Tab
 ALIGN_EXTERN rc_t CC TableWriterSeq_TmpKeyStart(const TableWriterSeq* cself);
 
 /* retrieve TMP_KEY value by rowid */
-ALIGN_EXTERN rc_t CC TableWriterSeq_TmpKey(const TableWriterSeq* cself, int64_t rowid, uint32_t *key_id);
+ALIGN_EXTERN rc_t CC TableWriterSeq_TmpKey(const TableWriterSeq* cself, int64_t rowid, uint64_t *key_id);
 
 /* passing rowid == 0 will cause the cursor to be flushed */
 ALIGN_EXTERN rc_t CC TableWriterSeq_WriteAlignmentData(const TableWriterSeq* cself, int64_t rowid,

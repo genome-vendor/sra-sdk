@@ -142,6 +142,16 @@ KLIB_EXTERN rc_t CC VNameListCount ( const VNamelist *self, uint32_t *count );
  */
 KLIB_EXTERN rc_t CC VNameListGet ( const VNamelist *self, uint32_t idx, const char **name );
 
+
+/* Reorder
+ *  sort the names according to case sensitivity
+ *  and UNICODE character code ordering
+ *
+ *  "case_insensitive" [ IN ] - when true, perform "tolower" on
+ *   each character before compare
+ */
+KLIB_EXTERN void CC VNamelistReorder ( VNamelist *self, bool case_insensitive );
+
 #ifdef __cplusplus
 }
 #endif

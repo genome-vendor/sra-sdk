@@ -415,7 +415,7 @@ rc_t VPhysicalReadKColumn ( VPhysical *self, VBlob **vblob, int64_t id, uint32_t
                     num_read = 2;
 
                 /* create data buffer */
-                rc = KDataBufferMakeBytes ( & buffer, (uint32_t)( num_read + remaining ) );
+                rc = KDataBufferMakeBytes ( & buffer, num_read + remaining );
                 if ( rc == 0 )
                 {
                     /* read entire blob */
@@ -520,15 +520,14 @@ rc_t VPhysicalReadStatic ( VPhysical *self, VBlob **vblob, int64_t id, uint32_t 
 
                         /* copy out single row */
                         memcpy ( buffer . base, base, bytes );
+                        self->fixed_len = buffer.elem_count;
 
                         /* limit row range */
                         if ( ( ( sstop_id - sstart_id ) >> 32 ) != 0 )
                         {
-			    sstart_id  = id - 0x40000000;   /** step back 1 billion **/
-			    sstart_id  &=    ~0x3FFFFFFFL;  /** disable lower bits **/
-			    sstart_id  += 1;                /** stay in 1-base space **/
-			    if ( ( ( sstop_id - sstart_id ) >> 32 ) != 0 ) /** still not enough ***/
-				sstop_id = sstart_id + 0x80000000;
+                            sstart_id  =   ((id-1) &  ~0x7fffffffUL ) + 1;  /** Truncate to the nearest 2 billion **/
+                            if ( ( ( sstop_id - sstart_id ) >> 32 ) != 0 ) /** still not enough ***/
+                                sstop_id = sstart_id + 0x80000000UL ; /** leave only 2 billion */
                         }
 
                         rc = VBlobCreateFromSingleRow ( vblob,
@@ -553,9 +552,16 @@ rc_t VPhysicalReadBlob ( VPhysical *self, VBlob **vblob, int64_t id, uint32_t el
     {
         return VPhysicalReadStatic ( self, vblob, id, elem_bits );
     }
-
+    {
     /* need to read from kcolumn path */
-    return VProductionReadBlob ( self -> b2p, vblob, id , 1);
+	rc_t rc = VProductionReadBlob ( self -> b2p, vblob, id , 1, NULL);
+	if(rc == 0){
+	    if((*vblob)->pm==NULL){
+		rc = PageMapProcessGetPagemap(&self->curs->pmpr,&(*vblob)->pm);
+	    }
+	}
+	return rc;
+   }
 }
 
 
@@ -564,9 +570,10 @@ rc_t VPhysicalReadBlob ( VPhysical *self, VBlob **vblob, int64_t id, uint32_t el
  */
 
 rc_t VPhysicalProdMake ( VProduction **prodp, Vector *owned,
-    VPhysical *phys, int sub, const char *name,
+    struct VCursor *curs, VPhysical *phys, int sub, const char *name,
     const VFormatdecl *fd, const VTypedesc *desc )
 {
+#define PHYSPROD_INDEX_OFFSET 1000000000
     VPhysicalProd *prod;
     rc_t rc = VProductionMake ( prodp, owned, sizeof * prod,
         prodPhysical, sub, name, fd, desc, NULL, chainDecoding );
@@ -576,6 +583,10 @@ rc_t VPhysicalProdMake ( VProduction **prodp, Vector *owned,
 
         /* this class only knows how to redirect messages to VPhysical */
         prod -> phys = phys;
+	if(sub == prodPhysicalOut){
+		(*prodp) -> cctx.cache   = curs->blob_mru_cache;
+		(*prodp) -> cctx.col_idx = PHYSPROD_INDEX_OFFSET + (++curs -> phys_cnt);
+	}
     }
     return rc;
 }

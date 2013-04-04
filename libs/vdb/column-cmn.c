@@ -226,7 +226,7 @@ rc_t VColumnReadCachedBlob ( const VColumn *self, const VBlob *vblob, int64_t ro
 }
 
 rc_t VColumnReadBlob ( const VColumn *cself, const VBlob **vblobp, int64_t row_id,
-   uint32_t *elem_bits, const void **base, uint32_t *boff, uint32_t *row_len )
+   uint32_t *elem_bits, const void **base, uint32_t *boff, uint32_t *row_len, VBlobMRUCacheCursorContext *cctx )
 {
     rc_t rc;
 
@@ -235,7 +235,7 @@ rc_t VColumnReadBlob ( const VColumn *cself, const VBlob **vblobp, int64_t row_i
     else
     {
         VBlob *vblob;
-        rc = VProductionReadBlob ( cself -> in, & vblob, row_id, 1 );
+        rc = VProductionReadBlob ( cself -> in, & vblob, row_id, 1, cctx );
         if ( rc == 0 )
         {
             VColumn *self = ( VColumn* ) cself;
@@ -259,28 +259,32 @@ rc_t VColumnReadBlob ( const VColumn *cself, const VBlob **vblobp, int64_t row_i
 }
 
 rc_t VColumnRead ( const VColumn *cself, int64_t row_id,
-   uint32_t *elem_bits, const void **base, uint32_t *boff, uint32_t *row_len )
+   uint32_t *elem_bits, const void **base, uint32_t *boff, uint32_t *row_len,
+   VBlob **vblob)
 {
     rc_t rc;
+    VBlob *dummy = NULL;
+    if (vblob == NULL)
+    {   vblob = &dummy; }
 
     if ( cself -> in == NULL )
         rc = RC ( rcVDB, rcColumn, rcReading, rcColumn, rcNotOpen );
     else
     {
-        VBlob *vblob;
-        rc = VProductionReadBlob ( cself -> in, & vblob, row_id, 1 );
+        rc = VProductionReadBlob ( cself -> in, vblob, row_id, 1, NULL );
         if ( rc == 0 )
         {
             VColumn *self = ( VColumn* ) cself;
-            VColumnReadCachedBlob ( self, vblob, row_id, elem_bits, base, boff, row_len );
+            VColumnReadCachedBlob ( self, *vblob, row_id, elem_bits, base, boff, row_len );
 
 #if USE_KURT
             TRACK_BLOB ( VBlobRelease, self -> cache );
             ( void ) VBlobRelease ( self -> cache );
-            self -> cache = vblob;
+            self -> cache = *vblob;
 #else
-            TRACK_BLOB ( VBlobRelease, vblob );
-            ( void ) VBlobRelease ( vblob );            
+            TRACK_BLOB ( VBlobRelease, *vblob );
+            ( void ) VBlobRelease ( *vblob );
+            *vblob = NULL;
 #endif
         }
     }

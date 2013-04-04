@@ -156,7 +156,7 @@ static rc_t ENCODE(uint8_t dst[], size_t dsize, size_t *used, int64_t *Min, int6
 			min = Y[i];
 		}
 		y_cur += slope;
-		if(y_cur > Y[i]){/*** reduce the slope ***/
+		if(y_cur > (int64_t)Y[i]){/*** reduce the slope ***/
 			slope =  ((int64_t)Y[i] - (int64_t)Y[0] - i+1/**round down**/) /i;
 			y_cur =  (int64_t)Y[0] + (int64_t)(i* slope);
 			assert( y_cur <= (int64_t)Y[i]);
@@ -285,7 +285,7 @@ static rc_t ENCODE(uint8_t dst[], size_t dsize, size_t *used, int64_t *Min, int6
     } else {
 	for( i = 0; i != N; ++i){
 		uint64_t val =  Y[i] - a0 - slope*i;
-		assert(Y[i] >=  a0 + slope*i);
+		assert((int64_t)Y[i] >=  (int64_t)a0 + slope*i);
 		MACRO_FLUSH_VALUE;
 	}
     }
@@ -320,9 +320,10 @@ static rc_t DECODE(STYPE Y[], unsigned N, int64_t* min, int64_t* slope, uint8_t 
     unsigned i;
     uint8_t *scratch=NULL;
     rc_t rc=0;
+    bool    first;
 
     memset(Y, 0, sizeof(Y[0]) * N);
-    for (j = k = 0, m = 1; m < 0x100; m <<= 1, k += 8) {
+    for (j = k = 0, m = 1,first=true; m < 0x100; m <<= 1, k += 8) {
         size_t n;
         
         if ((planes & m) == 0)
@@ -334,11 +335,85 @@ static rc_t DECODE(STYPE Y[], unsigned N, int64_t* min, int64_t* slope, uint8_t 
         rc = zlib_decompress(scratch, N, &n, src + j, ssize - j);
         if (rc) goto DONE;
         j += n;
-        
-        for (i = 0; i != N; ++i)
-            Y[i] |= ((STYPE)scratch[i]) << k;
+	if(first){
+		for (i = 0; i != N; ++i) Y[i] = ((STYPE)scratch[i]) << k;
+		first = false;
+	} else {
+		for (i = 0; i != N; ++i) Y[i] |= ((STYPE)scratch[i]) << k;
+	}
     }
     if(series_count == 2){
+#if 0 /** trying to unroll ***/
+	STYPE Ylast;
+	if(slope[0]==DELTA_BOTH){
+		if(slope[1]==DELTA_BOTH){ 
+			for(i = 0; i != N; ++i){
+				scratch[i] = Y[i]&3;
+				Y[i] = ((USTYPE)Y[i]) >> 2;
+			}
+		} else {
+			for(i = 0; i != N; ++i){
+				uint8_t tmp = Y[i]&1;
+				if(tmp){
+					scratch[i] = tmp;
+					Y[i] = ((USTYPE)Y[i]) >> 1;
+				} else {
+					scratch[i] = Y[i]&3;
+					Y[i] = ((USTYPE)Y[i]) >> 2;
+				}
+                        }
+
+		}
+	} else {
+		if(slope[1]==DELTA_BOTH){
+			for(i = 0; i != N; ++i){
+                                uint8_t tmp = Y[i]&1;
+                                if(!tmp){
+                                        scratch[i] = tmp;
+					Y[i] = ((USTYPE)Y[i]) >> 1;
+                                } else {
+                                        scratch[i] = Y[i]&3;
+					Y[i] = ((USTYPE)Y[i]) >> 2;
+
+                                }
+                        }
+		} else {
+			for(i = 0; i != N; ++i){
+				scratch[i] = Y[i]&1;
+				Y[i] = ((USTYPE)Y[i]) >> 1;
+			}
+		}
+	}
+	/** k=0 - main series, k=1 -secondary **/
+	for(k=0;k<2;k++){
+		Ylast = min[k];
+		if(slope[k]==DELTA_POS) {
+			for (i = 0; i != N; ++i){
+				if((scratch[i]&1)==k){
+					Y[i]  = Ylast + Y[i];
+					Ylast = Y[i];
+				}
+			}
+		} else if (slope[k]==DELTA_NEG){
+			for (i = 0; i != N; ++i){
+				if((scratch[i]&1)==k){
+					Y[i]  = Ylast - Y[i];
+					Ylast = Y[i];
+				}
+			}
+		} else for (i = 0; i != N; ++i){
+			if((scratch[i]&1)==k){
+				if(scratch[i]&2){
+					Y[i]  = Ylast - Y[i];
+				} else {
+					Y[i]  = Ylast + Y[i];
+				}
+				Ylast = Y[i];
+			}
+		}
+	}
+
+#else
 	uint32_t last[2]={0,0};
 	for (i = 0; i != N; ++i){
 		if( (Y[i]&1) == 0 ){/**main series **/
@@ -367,6 +442,7 @@ static rc_t DECODE(STYPE Y[], unsigned N, int64_t* min, int64_t* slope, uint8_t 
                         last[1]=i;
 		}
         }
+#endif
     } else if(min[0]==0 && slope[0]==0){ /*** no slope no offset - nothing to do ***/
     } else if(slope[0] == DELTA_POS){
 	assert(Y[0] == 0);
@@ -401,6 +477,6 @@ static rc_t DECODE(STYPE Y[], unsigned N, int64_t* min, int64_t* slope, uint8_t 
     }
 
 DONE:
-    free(scratch);
+    if(scratch) free(scratch);
     return rc;
 }

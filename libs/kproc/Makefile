@@ -28,27 +28,26 @@ default: std
 TOP ?= $(shell ../../build/abspath.sh ../..)
 MODULE = libs/kproc
 
-EXT_LIBS = \
-	libkproc \
-	libksproc \
-	libkq
-
 ALL_LIBS = \
 	$(INT_LIBS) \
 	$(EXT_LIBS)
 
 include $(TOP)/build/Makefile.env
 
+EXT_LIBS = \
+	libksproc \
+	libkproc
+
+ifneq (win,$(OS))
+EXT_LIBS += \
+	libkq
+endif
+
 #-------------------------------------------------------------------------------
 # outer targets
 #
-ifeq (win,$(OS))
-all std:
-	@ true
-else
 all std: makedirs
 	@ $(MAKE_CMD) $(TARGDIR)/std
-endif
 
 $(INT_LIBS): makedirs
 	@ $(MAKE_CMD) $(ILIBDIR)/$@
@@ -87,18 +86,38 @@ tag: \
 #
 $(LIBDIR)/libkproc: $(addprefix $(LIBDIR)/libkproc.,$(LIBEXT))
 
+PROC_CMN = \
+	task \
+	procmgr
+
 PROC_SRC = \
+	$(PROC_CMN)
+
+ifneq (win,$(OS))
+PROC_SRC += \
 	systimeout \
 	syslock \
+	systhread \
 	syscond \
-	sem \
-	systhread
+	sem
+else
+PROC_SRC += \
+	systimeout \
+	syslock \
+	systhread \
+	syscond
+endif
 
 PROC_OBJ = \
 	$(addsuffix .$(LOBX),$(PROC_SRC))
 
+ifneq (win,$(OS))
 PROC_LIB = \
 	-dpthread
+else
+PROC_LIB = \
+	-dklib
+endif
 
 $(LIBDIR)/libkproc.$(SHLX): $(PROC_OBJ)
 	$(LD) --dlib --vers $(SRCDIR) -o $@ $^ $(PROC_LIB)
@@ -116,6 +135,7 @@ libkproc_tag:
 $(LIBDIR)/libksproc: $(addprefix $(LIBDIR)/libksproc.,$(LIBEXT))
 
 SPROC_SRC = \
+	$(PROC_CMN) \
 	sttimeout \
 	stlock \
 	stcond \
@@ -126,11 +146,14 @@ SPROC_SRC = \
 SPROC_OBJ = \
 	$(addsuffix .$(LOBX),$(SPROC_SRC))
 
+SPROC_LIB = \
+	-dklib
+
 $(LIBDIR)/libksproc.$(SHLX): $(SPROC_OBJ)
-	$(LD) --dlib --vers $(SRCDIR) -o $@ $^
+	$(LD) --dlib --vers $(SRCDIR) -o $@ $^ $(SPROC_LIB)
 
 $(LIBDIR)/libksproc.$(LIBX): $(SPROC_OBJ)
-	$(LD) --slib --vers $(SRCDIR) -o $@ $^
+	$(LD) --slib --vers $(SRCDIR) -o $@ $^ $(SPROC_LIB)
 
 libksproc_tag:
 	@ $(TOP)/build/tag-module.sh $(MODULE) libksproc $(SPROC_OBJ)

@@ -49,6 +49,7 @@
 #include <klib/text.h>
 #endif
 
+#include <ctype.h>
 #include <direct.h>
 #include <math.h>
 
@@ -69,31 +70,24 @@ extern "C" {
  *  a structure for communicating a timeout
  *  which under Windows is a relative time
  */
-typedef struct timeout_t timeout_t;
 struct timeout_t
 {
     uint32_t mS;
+    uint32_t prepared;
 };
-
-/* Init
- *  initialize a timeout in milliseconds
- */
-rc_t CC TimeoutInit ( timeout_t *tm, uint32_t msec );
-
-
-/* Prepare
- *  ensures that a timeout is prepared with an absolute value
-*/
-#define TimeoutPrepare( tm ) \
-    ( ( void ) ( tm ), 0 )
-
 
 /* not consistent across all windows? */
 /* #define snprintf _snprintf */
 
 
+#ifndef putenv
+#define putenv( s ) _putenv ( s )
+#endif
+
 #define mkdir( d, m ) _mkdir( d )
 #define strcasecmp _stricmp
+#define strtoll _strtoi64
+#define strtok_r strtok_s
 
 #undef strdup
 #define strdup( str ) \
@@ -164,11 +158,35 @@ char *strsep ( char **stringp, const char *delim )
 	return NULL;
 }
 
+#define gmtime_r(t, tm) gmtime_s(tm, t)
+#define timegm _mkgmtime
 
 static __inline
 int strncasecmp( const char *s1, const char *s2, size_t n )
 {
     return _strnicmp( s1, s2, n );
+}
+
+static __inline 
+const char *strcasestr (const char *s1, const char *s2)
+{
+    unsigned char c2 = tolower((unsigned char) *s2);
+    size_t l1 = strlen(s1), l2 = strlen(s2);
+    
+    if (l2 == 0) {
+        return s1;
+    }
+
+    while (l1 >= l2) {
+        if (tolower((unsigned char) *s1) == c2
+            &&  (l2 == 1  ||  _strnicmp(s1 + 1, s2 + 1, l2 - 1) == 0)) {
+            return s1;
+        }
+        ++s1;
+        --l1;
+    }
+
+    return NULL;
 }
 
 static __inline

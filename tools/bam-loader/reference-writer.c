@@ -47,16 +47,23 @@
 #define SORTED_CACHE_SIZE ((2 * 1024 * 1024)/(SORTED_OPEN_TABLE_LIMIT))
 
 #ifdef __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__
-#define UNSORTED_OPEN_TABLE_LIMIT (4)
+#define UNSORTED_OPEN_TABLE_LIMIT (8)
+#define UNSORTED_CACHE_SIZE ((1024 * 1024 * 1024)/(UNSORTED_OPEN_TABLE_LIMIT))
 #else
-#define UNSORTED_OPEN_TABLE_LIMIT (32)
+#define UNSORTED_OPEN_TABLE_LIMIT (64)
+#define UNSORTED_CACHE_SIZE (350 * 1024 * 1024)
 #endif
-#define UNSORTED_CACHE_SIZE ((1024 * 1024 * 1024)/(SORTED_OPEN_TABLE_LIMIT))
+
+#if _DEBUGGING
+#define DUMP_CONFIG 1
+#endif
 
 struct overlap_s {
     uint32_t min; /* minimum start pos of any alignment that ends in this chunk */
     uint32_t max; /* maximum end pos of any alignment that starts before this chunk and ends in this chunk */
 };
+
+extern void ReferenceMgr_DumpConfig(ReferenceMgr const *const self);
 
 rc_t ReferenceInit(Reference *self, const VDBManager *mgr, VDatabase *db)
 {
@@ -70,18 +77,40 @@ rc_t ReferenceInit(Reference *self, const VDBManager *mgr, VDatabase *db)
     self->pri_align.elem_bits = self->sec_align.elem_bits = 64;
     self->pri_overlap.elem_bits = self->sec_overlap.elem_bits = sizeof(struct overlap_s) * 8;
     
-    if( (rc = ReferenceMgr_Make(&self->mgr, db, mgr, ewrefmgr_co_Coverage,
-                                G.refXRefPath, G.inpath,
-                                G.maxSeqLen, cache, open_count)) == 0 )
-    {
-        const char** p = G.refFiles;
-        while( rc == 0 && *p != NULL ) {
-            if( (rc = ReferenceMgr_FastaPath(self->mgr, *p++)) != 0 ) {
-                (void)PLOGERR(klogInfo, (klogInfo, rc, "fasta file '$(file)'", "file=%s", p[-1]));
+    rc = ReferenceMgr_Make(&self->mgr, db, mgr, ewrefmgr_co_Coverage,
+                           G.refXRefPath, G.inpath,
+                           G.maxSeqLen, cache, open_count);
+    if (rc == 0) {
+        unsigned i;
+        
+        for (i = 0; G.refFiles[i]; ++i) {
+            rc = ReferenceMgr_FastaPath(self->mgr, G.refFiles[i]);
+            if (rc) {
+                (void)PLOGERR(klogWarn, (klogWarn, rc, "fasta file '$(file)'", "file=%s", G.refFiles[i]));
+                break;
             }
         }
+#if DUMP_CONFIG
+        if (rc == 0) {
+            ReferenceMgr_DumpConfig(self->mgr);
+        }
+#endif
     }
     return rc;
+}
+
+static
+void Unsorted(Reference *self) {
+    (void)LOGMSG(klogWarn, "Alignments are unsorted");
+    self->out_of_order = true;
+    ReferenceMgr_SetCache(self->mgr, UNSORTED_CACHE_SIZE, UNSORTED_OPEN_TABLE_LIMIT);
+    KDataBufferWhack(&self->sec_align);
+    KDataBufferWhack(&self->pri_align);
+    KDataBufferWhack(&self->mismatches);
+    KDataBufferWhack(&self->indels);
+    KDataBufferWhack(&self->coverage);
+    KDataBufferWhack(&self->pri_overlap);
+    KDataBufferWhack(&self->sec_overlap);
 }
 
 #define BAIL_ON_FAIL(STMT) do { rc_t const rc__ = (STMT); if (rc__) return rc__; } while(0)
@@ -138,7 +167,14 @@ static rc_t FlushBuffers(Reference *self, uint64_t upto, bool full, bool final)
             for (i = 0; i != m; ++i)
                 data.indels += indel[offset + i];
             
-            BAIL_ON_FAIL(ReferenceSeq_AddCoverage(self->rseq, curPos, &data));
+            {
+                rc_t rc = ReferenceSeq_AddCoverage(self->rseq, curPos, &data);
+                
+                if (rc) {
+                    Unsorted(self);
+                    return 0;
+                }
+            }
             
             KDataBufferResize(&self->pri_align, 0);
             KDataBufferResize(&self->sec_align, 0);
@@ -192,8 +228,10 @@ rc_t ReferenceSetFile(Reference *self, const char id[],
     self->curPos = self->endPos = 0;
     self->length = length;
     self->lastOffset = 0;
-    
-    (void)PLOGMSG(klogInfo, (klogInfo, "Processing Reference '$(id)'", "id=%s", id));
+    KDataBufferResize(&self->pri_overlap, 0);
+    KDataBufferResize(&self->sec_overlap, 0);
+
+    if(!self->out_of_order) (void)PLOGMSG(klogInfo, (klogInfo, "Processing Reference '$(id)'", "id=%s", id));
     
     return 0;
 }
@@ -252,7 +290,7 @@ rc_t ReferenceAddCoverage(Reference *const self,
         memset(&((struct overlap_s *)self->sec_overlap.base)[end], 0, (chunks - end) * sizeof(struct overlap_s));
     }
     BAIL_ON_FAIL(FlushBuffers(self, refStart, false, false));
-    {
+    if (!self->out_of_order) {
         unsigned const startBase = refStart - self->curPos;
         unsigned const endChunk = (startBase + refLength) / G.maxSeqLen;
         KDataBuffer *const overlapBuffer = isPrimary ? &self->pri_overlap : &self->sec_overlap;
@@ -326,22 +364,14 @@ rc_t ReferenceRead(Reference *self, AlignmentRecord *data, uint64_t const pos,
                    char const seqDNA[], uint32_t const seqLen, uint32_t *matches)
 {
     *matches = 0;
-    BAIL_ON_FAIL(ReferenceSeq_Compress(self->rseq, ewrefmgr_cmp_Binary, pos,
-        seqDNA, seqLen, rawCigar, cigCount, 0, NULL, 0, NULL, 0, &data->data));
+    BAIL_ON_FAIL(ReferenceSeq_Compress(self->rseq, (G.acceptHardClip ? ewrefmgr_co_AcceptHardClip : 0) + ewrefmgr_cmp_Binary, pos,
+        seqDNA, seqLen, rawCigar, cigCount, 0, NULL, 0, 0, NULL, 0, &data->data));
 
     if (!G.acceptNoMatch && data->data.ref_len == 0)
         return RC(rcApp, rcFile, rcReading, rcConstraint, rcViolated);
     
     if (!self->out_of_order && pos < self->lastOffset) {
-        (void)LOGMSG(klogWarn, "Alignments are unsorted");
-        self->out_of_order = true;
-        KDataBufferWhack(&self->sec_align);
-        KDataBufferWhack(&self->pri_align);
-        KDataBufferWhack(&self->mismatches);
-        KDataBufferWhack(&self->indels);
-        KDataBufferWhack(&self->coverage);
-        KDataBufferWhack(&self->pri_overlap);
-        KDataBufferWhack(&self->sec_overlap);
+        Unsorted(self);
     }
     if (self->out_of_order)
         return 0;
@@ -350,13 +380,14 @@ rc_t ReferenceRead(Reference *self, AlignmentRecord *data, uint64_t const pos,
         unsigned nmatch;
         unsigned indels;
 
-        self->lastOffset = pos;
+        self->lastOffset = data->data.effective_offset;
         GetCounts(data, seqLen, &nmatch, &nmis, &indels);
         *matches = nmatch;
         
         if (G.acceptNoMatch || nmatch >= G.minMatchCount)
-            return ReferenceAddCoverage(self, pos, data->data.ref_len,
-                                        nmis, indels, data->isPrimary);
+            return ReferenceAddCoverage(self, data->data.effective_offset,
+                                        data->data.ref_len, nmis, indels,
+                                        data->isPrimary);
         else
             return RC(rcApp, rcFile, rcReading, rcConstraint, rcViolated);
     }
@@ -386,6 +417,10 @@ rc_t ReferenceWhack(Reference *self, bool commit)
     rc_t rc = 0;
     
     if (self) {
+#if DUMP_CONFIG
+        if (self->mgr)
+            ReferenceMgr_DumpConfig(self->mgr);
+#endif
         if (commit) {
             rc = FlushBuffers(self, self->length, true, true);
             if (rc != 0)
@@ -396,6 +431,8 @@ rc_t ReferenceWhack(Reference *self, bool commit)
         KDataBufferWhack(&self->mismatches);
         KDataBufferWhack(&self->indels);
         KDataBufferWhack(&self->coverage);
+        KDataBufferWhack(&self->pri_overlap);
+        KDataBufferWhack(&self->sec_overlap);
         if (self->rseq)
             rc = ReferenceSeq_Release(self->rseq);
         if (self->out_of_order) {

@@ -44,7 +44,7 @@ LP = @ $(TOP)/build/ld.sh $(OS) $(ARCH) g++ \
 	-MD --srcdir $(SRCDIR) --bindir $(BINDIR) -L$(LIBDIR):$(ILIBDIR)
 
 # tool options
-WARN = -Wall -Wno-variadic-macros # -Wconversion
+WARN = -Wall -Wno-variadic-macros -Wno-long-long # -Wconversion
 ifeq (linux,$(OS))
     NO_ARRAY_BOUNDS_WARNING = -Wno-array-bounds
 endif
@@ -63,7 +63,10 @@ ifeq (dbg, $(BUILD))
 	DBG = -g
 	OPT = $(WARN)
 	NOPT = $(WARN)
-	PED = -std=c99 -ansi -pedantic
+	# GCC seems unable to use c99 without ansi, which
+	# basically clobbers features back to c89. the options
+	# must be specified in the order shown.
+	PED = -std=c99 -ansi -pedantic # -fdiagnostics-show-option
 else
 
 ifeq (x86_64, $(ARCH))

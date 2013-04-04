@@ -32,6 +32,7 @@
 
 #include <klib/report.h> /* ReportInit */
 #include <klib/namelist.h> /* KNamelistRelease */
+#include <klib/time.h> /* KTime */
 #include <klib/text.h> /* string_printf */
 #include <klib/printf.h> /* string_printf */
 #include <klib/log.h> /* LOGERR */
@@ -124,7 +125,9 @@ typedef struct Report {
     const char* date;
     char** argv;
     int argc;
+    KTime_t start;
     ver_t tool_ver;
+    bool hasZombies;
     bool silence;
 } Report;
 
@@ -208,6 +211,7 @@ static rc_t ReportRelease(void)
             for ( i = 0; i < cur_report -> argc; ++ i )
                 free ( cur_report -> argv [ i ] );
             free ( cur_report -> argv );
+            cur_report -> argv = NULL;
         }
 
         memset ( cur_report, 0, sizeof * cur_report );
@@ -267,8 +271,10 @@ static rc_t reportImpl(int indent, bool open, bool close, bool eol,
             const char* s;
             int i;
             int64_t i64;
+            KTime* t;
             rc_t rc;
             const uint8_t* digest;
+            uint64_t u64;
             ver_t vers;
         } u;
         OUTMSG((" %s=\"", name));
@@ -286,9 +292,17 @@ static rc_t reportImpl(int indent, bool open, bool close, bool eol,
                 u.i64 = va_arg(args, int64_t);
                 OUTMSG(("%ld", u.i64));
                 break;
+            case 'u':
+                u.u64 = va_arg(args, uint64_t);
+                OUTMSG(("%lu", u.u64));
+                break;
             case 'R':
                 u.rc = va_arg(args, rc_t);
                 OUTMSG(("%R", u.rc));
+                break;
+            case 'T':
+                u.t = va_arg(args, KTime*);
+                OUTMSG(("%lT", u.t));
                 break;
             case 's':
                 u.s = va_arg(args, const char*);
@@ -426,6 +440,29 @@ static rc_t ReportRun(int indent, rc_t rc_in) {
 
     reportOpen(indent, tag, 0);
 
+    {
+        KTime kt;
+        const char tag[] = "Date";
+        reportOpen(indent + 1, tag, 0);
+        KTimeLocal(&kt, self->start);
+        report(indent + 2, "Start", 1, "value", 'T', &kt);
+        KTimeLocal(&kt, KTimeStamp());
+        report(indent + 2, "End"  , 1, "value", 'T', &kt);
+        reportClose(indent + 1, tag);
+    }
+
+    {
+        const char* name = "HOME";
+        const char* val = getenv(name);
+        if (val == NULL) {
+            name = "USERPROFILE";
+            val = getenv(name);
+        }
+        if (val == NULL)
+        {   name = val = "not found"; }
+        report(indent + 1, "Home", 2, "name", 's', name, "value", 's', val);
+    }
+
     if ( self -> report_cwd != NULL )
         rc = ( * self -> report_cwd ) ( & report_funcs, indent + 1 );
 
@@ -489,43 +526,60 @@ static rc_t reportToStdErrSet(const Report* self, KWrtHandler* old_handler) {
 LIB_EXPORT rc_t CC ReportFinalize(rc_t rc_in) {
     rc_t rc = 0;
 
+    const char* report_arg = NULL;
+
     bool force =  rc_in != 0;
 
     Report* self = NULL;
     ReportGet(&self);
 
-    if ( self != NULL )
-    {
-        const char* report_arg = NULL;
-        if (self->argv) {
-            int i = 0;
-            for (i = 1; i < self->argc; ++i) {
-                if (strcmp("--" OPTION_REPORT, self->argv[i]) == 0) {
-                    if (i + 1 < self->argc) {
-                        report_arg = self->argv[i + 1];
-                    }
-                    break;
+    if (GetRCTarget(rc_in) == rcArgv)
+    {   force = false; }
+
+    if ( self == NULL )
+    {   return rc; }
+
+    if (self->argv) {
+        int i = 0;
+        for (i = 1; i < self->argc; ++i) {
+            if (strcmp("--" OPTION_REPORT, self->argv[i]) == 0) {
+                if (i + 1 < self->argc) {
+                    report_arg = self->argv[i + 1];
                 }
+                break;
             }
         }
-        if ( ! self -> silence )
-        {
-            if (force) { 
-                if (report_arg && strcmp("never", report_arg) == 0) {
-                    force = false;
-                }
+    }
+    if ( ! self -> silence )
+    {
+        if (force) { 
+            if (report_arg && strcmp("never", report_arg) == 0) {
+                force = false;
             }
-            else {
-                if (report_arg && strcmp("always", report_arg) == 0) {
-                    force = true;
-                }
+        }
+        else {
+            if (report_arg && strcmp("always", report_arg) == 0) {
+                force = true;
             }
+        }
 /*                              PLOGERR(klogErr, (klogErr,
                                RC(rcApp, rcArgv, rcParsing, rcRange, rcInvalid),
                                "report type '$(type)' is unrecognized",
                                "type=%s", self->argv[i + 1]));*/
 
-            if (force) {
+        if (force) {
+            if (self->hasZombies) {
+                KOutHandlerSetStdErr();
+                if (self->object != NULL) {
+                    OUTMSG(("\nThe archive '%s' may be truncated: "
+                        "Please download it again.\n", self->object));
+                }
+                else {
+                    OUTMSG(("\nThe archive may be truncated: "
+                        "Please download it again.\n"));
+                }
+            }
+            else {
                 int indent = 0;
                 const char tag[] = "Report";
 
@@ -611,12 +665,11 @@ LIB_EXPORT rc_t CC ReportFinalize(rc_t rc_in) {
 "to 'sra@ncbi.nlm.nih.gov' for assistance.\n"
 "=============================================================\n\n", path));
                 }
-                
             }
         }
-
-        ReportRelease();
     }
+
+    ReportRelease();
 
     return rc;
 }
@@ -644,6 +697,7 @@ LIB_EXPORT void CC ReportInit(int argc, char* argv[], ver_t tool_version)
         static Report self;
 
         /* initialize with non-zero parameters */
+        self.start = KTimeStamp();
         self.argc = argc;
         self.argv = copy_argv ( argc, argv );
         self.date = __DATE__;
@@ -734,4 +788,13 @@ LIB_EXPORT rc_t CC ReportResetObject(const char* path)
     }
 
     return ReportReplaceObjectPtr(self, path);
+}
+
+LIB_EXPORT void CC ReportRecordZombieFile(void)
+{
+    Report* self = NULL;
+    ReportGet(&self);
+    if (self == NULL)
+    {   return; }
+    self->hasZombies = true;
 }

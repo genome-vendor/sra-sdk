@@ -54,8 +54,8 @@ typedef enum {
 typedef struct SRASplitter SRASplitter;
 
 #define NREADS_MAX (8*1024)
-typedef uint8_t readmask_t;
-uint32_t nreads_max;
+typedef uint8_t readmask_t; 
+extern uint32_t nreads_max;
 
 #define make_readmask(m) readmask_t m[NREADS_MAX]
 #define copy_readmask(src,dst) (memcpy(dst, src, sizeof(readmask_t) * nreads_max))
@@ -123,8 +123,8 @@ rc_t SRASplitter_FileActivate(const SRASplitter* self, const char* key);
    spot can be zero to indicate file header/footer
    which no considered as actual data and file treated as empty if no actual spots is written
  */
-rc_t SRASplitter_FileWrite(const SRASplitter* self, spotid_t spot, const void* buf, size_t size);
-rc_t SRASplitter_FileWritePos(const SRASplitter* self, spotid_t spot, uint64_t pos, const void* buf, size_t size);
+rc_t SRASplitter_FileWrite( const SRASplitter* cself, spotid_t spot, const void* buf, size_t size );
+rc_t SRASplitter_FileWritePos( const SRASplitter* cself, spotid_t spot, uint64_t pos, const void* buf, size_t size );
 
 typedef struct SRASplitterFactory SRASplitterFactory;
 

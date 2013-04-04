@@ -428,7 +428,11 @@ static void context_evaluate_options( const Args *my_args, p_context ctx )
 
     context_set_md5_mode( ctx, context_get_str_option( my_args, OPTION_MD5_MODE ) );
     context_set_blob_checksum( ctx, context_get_str_option( my_args, OPTION_BLOB_CHECKSUM ) );
+
+#if ALLOW_EXTERNAL_CONFIG
     context_set_kfg_path( ctx, context_get_str_option( my_args, OPTION_KFG_PATH ) );
+#endif
+
     context_set_table( ctx, context_get_str_option( my_args, OPTION_TABLE ) );
 #if ALLOW_COLUMN_SPEC
     context_set_columns( ctx, context_get_str_option( my_args, OPTION_COLUMNS ) );

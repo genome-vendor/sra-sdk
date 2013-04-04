@@ -25,7 +25,7 @@
 
 default: std
 
-TOP ?= $(abspath ../..)
+TOP ?= $(shell ../../build/abspath.sh ../..)
 MODULE = tools/sra-pileup
 
 include $(TOP)/build/Makefile.env
@@ -33,7 +33,8 @@ include $(TOP)/build/Makefile.env
 INT_TOOLS = \
 
 EXT_TOOLS = \
-	sra-pileup
+	sra-pileup \
+	sam-dump
 
 ALL_TOOLS = \
 	$(INT_TOOLS) \
@@ -42,15 +43,13 @@ ALL_TOOLS = \
 #-------------------------------------------------------------------------------
 # outer targets
 #
-vers-includes: $(addsuffix .vers.h,$(EXT_TOOLS))
-
-all std: makedirs vers-includes
+all std: vers-includes
 	@ $(MAKE_CMD) $(TARGDIR)/$@
 
-$(ALL_TOOLS): makedirs vers-includes
+$(ALL_TOOLS): vers-includes
 	@ $(MAKE_CMD) $(BINDIR)/$@
 
-.PHONY: vers-includes all std $(ALL_TOOLS)
+.PHONY: all std $(ALL_TOOLS)
 
 #-------------------------------------------------------------------------------
 # all
@@ -69,6 +68,13 @@ $(TARGDIR)/std: \
 .PHONY: $(TARGDIR)/std
 
 #-------------------------------------------------------------------------------
+# vers-includes
+#
+$(TARGDIR)/vers-includes: $(addsuffix .vers.h,$(EXT_TOOLS))
+
+.PHONY: $(TARGDIR)/vers-includes
+
+#-------------------------------------------------------------------------------
 # clean
 #
 clean: stdclean
@@ -76,16 +82,11 @@ clean: stdclean
 .PHONY: clean
 
 #-------------------------------------------------------------------------------
-# tag
-#
-tag: $(addsuffix _tag,$(ALL_TOOLS))
-
-.PHONY: tag $(addsuffix _tag,$(ALL_TOOLS))
-
-#-------------------------------------------------------------------------------
 # sra-pileup
 #
 TOOL_SRC = \
+	cmdline_cmn \
+	reref \
 	sra-pileup
 
 TOOL_OBJ = \
@@ -95,10 +96,8 @@ TOOL_LIB = \
 	-lkapp \
 	-ssrapath \
 	-lalign-reader \
-	-daxf \
+	$(READONLY_SCHEMA_LIBS) \
 	-lsraschema \
-	-dsraxf \
-	-dvxf \
 	-lvdb \
 	-lkdb \
 	-lvfs \
@@ -106,11 +105,48 @@ TOOL_LIB = \
 	-lkfg \
 	-lkfs \
 	-lksrch \
+	-lkproc \
 	-lklib \
 	-lm
 
 $(BINDIR)/sra-pileup: $(TOOL_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(TOOL_LIB)
 
-sra-pileup_tag:
-	@ $(TOP)/build/tag-module.sh $(MODULE) sra-pileup $(TOOL_OBJ)
+#-------------------------------------------------------------------------------
+# sam-dump
+#
+SAMDUMP3_SRC = \
+	inputfiles \
+	sam-dump-opts \
+	out_redir \
+	sam-hdr \
+	matecache \
+	read_fkt \
+	sam-aligned \
+	sam-unaligned \
+	cg_tools \
+	sam-dump \
+	sam-dump3
+
+SAMDUMP3_OBJ = \
+	$(addsuffix .$(OBJX),$(SAMDUMP3_SRC))
+
+SAMDUMP3_LIB = \
+	-lkapp \
+	-ssrapath \
+	-lalign-reader \
+	$(READONLY_SCHEMA_LIBS) \
+	-lsraschema \
+	-lvdb \
+	-lkdb \
+	-lvfs \
+	-lkrypto \
+	-lkfg \
+	-lkfs \
+	-lksrch \
+	-lkproc \
+	-lklib \
+	-lm
+
+$(BINDIR)/sam-dump: $(SAMDUMP3_OBJ)
+	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(SAMDUMP3_LIB)

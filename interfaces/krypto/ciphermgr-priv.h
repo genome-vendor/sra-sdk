@@ -23,13 +23,16 @@
 * ===========================================================================
 *
 */
-#ifndef _h_krypto_manager_priv_
-#define _h_krypto_manager_priv_
-
-#ifndef _h_krypto_extern_
-#include <krypto/extern.h>
+#ifdef  __cplusplus
+extern "C" {
 #endif
 
-DO NOT USE
+
+
+#ifdef  __cplusplus
+}
+#endif
+
+
 
 #endif /* #ifndef _h_krypto_manager_priv_ */

@@ -22,24 +22,26 @@
 #
 # ===========================================================================
 
-
+# RFLAGS have to go before any other flags since they can affect their handling
 # compilers
-CC = @ $(TOP)/build/win-cc.sh win "cl /c -D_WIN32_WINNT=0x0502" \
-	 $(CHECKSUM) --objx $(OBJX) $(CFLAGS) -MD
-CP = @ $(TOP)/build/win-cc.sh win "cl /c" \
-	 $(CHECKSUM) --objx $(OBJX) $(CPFLAGS) -MD
+CC = @ $(TOP)/build/win-cc.sh $(BUILD_OS) "cl /c /D_WIN32_WINNT=0x0502" \
+	 $(CHECKSUM) --objx $(OBJX) $(RFLAGS) $(CFLAGS) -MD 
+	 
+CP = @ $(TOP)/build/win-cc.sh $(BUILD_OS) "cl /c" \
+	 $(CHECKSUM) --objx $(OBJX) $(RFLAGS) $(CPFLAGS) -MD -EHsc
+	 
 
 # C preprocessor
 PP = gcc -E $(CFLAGS)
 
 # linkers
-LD = @ $(TOP)/build/ld.sh win $(ARCH) link \
-	--build $(BUILD) $(LDFLAGS) $(STATIC) $(CHECKSUM) \
+LD = @ $(TOP)/build/ld.sh $(BUILD_OS) $(ARCH) link \
+	--build $(BUILD) $(RFLAGS) $(LDFLAGS) $(STATIC) $(CHECKSUM) \
 	--objx $(OBJX) --shlx $(SHLX) --libx $(LIBX) \
 	-MD --srcdir $(SRCDIR) --bindir $(BINDIR) -L$(LIBDIR):$(ILIBDIR)
 
-LP = @ $(TOP)/build/ld.sh win $(ARCH) link \
-	--build $(BUILD) $(LDFLAGS) $(STATIC) $(CHECKSUM) \
+LP = @ $(TOP)/build/ld.sh $(BUILD_OS) $(ARCH) link \
+	--build $(BUILD) $(RFLAGS) $(LDFLAGS) $(STATIC) $(CHECKSUM) \
 	--objx $(OBJX) --shlx $(SHLX) --libx $(LIBX) \
 	-MD --srcdir $(SRCDIR) --bindir $(BINDIR) -L$(LIBDIR):$(ILIBDIR)
 

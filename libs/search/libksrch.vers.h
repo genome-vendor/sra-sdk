@@ -1,1 +1,0 @@
-#define LIBKSRCH_VERS 0x01000009

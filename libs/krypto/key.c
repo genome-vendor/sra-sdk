@@ -67,6 +67,10 @@ static rc_t KKeyInitInt (KKey * self, KKeyType key_type,
         
         switch (self->type = key_type)
         {
+        default:
+            z = 0;
+            break;
+
         case kkeyAES128:
             z = 128/8;
             break;

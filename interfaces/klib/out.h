@@ -65,6 +65,8 @@ KLIB_EXTERN rc_t CC KOutInit (void);
 
 KLIB_EXTERN rc_t CC KOutMsg (const char * fmt, ...);
 
+#define KOutStr(str) KOutMsg("%s",str)
+
 /*
  * A usage could look like
  *
@@ -72,8 +74,10 @@ KLIB_EXTERN rc_t CC KOutMsg (const char * fmt, ...);
  *
  */
 #define OUTMSG(msg) \
-    (void)((KOutWriterGet() != NULL) ? KOutMsg msg : 0)
+    ((KOutWriterGet() != NULL) ? KOutMsg msg : 0)
 
+#define OUTSTR(msg) \
+    ((KOutWriterGet() != NULL) ? KOutStr (msg) : 0)
 
 #ifdef __cplusplus
 }

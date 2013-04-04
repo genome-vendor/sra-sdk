@@ -54,7 +54,11 @@ extern "C" {
 #define OPTION_WITHOUT_ACCESSION "without_accession"
 #define OPTION_IGNORE_REJECT     "ignore_reject"
 #define OPTION_IGNORE_REDACT     "ignore_redact"
+
+#if ALLOW_EXTERNAL_CONFIG
 #define OPTION_KFG_PATH          "kfg_path"
+#endif
+
 #define OPTION_SHOW_MATCHING     "show_matching"
 #define OPTION_SHOW_PROGRESS     "show_progress"
 #define OPTION_IGNORE_INCOMP     "ignore_incompatible_columns"
@@ -75,7 +79,11 @@ extern "C" {
 #define ALIAS_WITHOUT_ACCESSION "a"
 #define ALIAS_IGNORE_REJECT     "r"
 #define ALIAS_IGNORE_REDACT     "e"
+
+#if ALLOW_EXTERNAL_CONFIG
 #define ALIAS_KFG_PATH          "k"
+#endif
+
 #define ALIAS_SHOW_MATCHING     "m"
 #define ALIAS_SHOW_PROGRESS     "p"
 #define ALIAS_IGNORE_INCOMP     "i"

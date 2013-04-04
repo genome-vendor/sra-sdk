@@ -138,6 +138,8 @@ LIB_EXPORT rc_t CC SraHeaderValidate ( const KSraHeader * self, bool * reverse, 
 
 LIB_EXPORT uint64_t CC SraHeaderGetFileOffset ( const KSraHeader * self )
 {
+    if ( self -> byte_order == eSraByteOrderReverse )
+        return bswap_64 ( self->u.v1.file_offset );
     return self->u.v1.file_offset;
 }
 

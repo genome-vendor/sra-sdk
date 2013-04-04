@@ -304,7 +304,7 @@ VDB_EXTERN rc_t CC VDatabaseOpenSchema ( const VDatabase *self, struct VSchema c
  *
  * "names" [ OUT ] - return parameter for table 
  */
-VDB_EXTERN rc_t CC VDatabaseListTbl( const VDatabase *self, KNamelist **names );
+VDB_EXTERN rc_t CC VDatabaseListTbl ( const VDatabase *self, KNamelist **names );
 
 /* lists the sub-databases of the database
  *

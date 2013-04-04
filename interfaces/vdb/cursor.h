@@ -49,6 +49,7 @@ extern "C" {
 /*--------------------------------------------------------------------------
  * forwards
  */
+struct VBlob;
 struct VTable;
 struct VTypedesc;
 struct VTypedecl;
@@ -222,6 +223,17 @@ VDB_EXTERN rc_t CC VCursorOpenRow ( const VCursor *self );
  */
 VDB_EXTERN rc_t CC VCursorCommitRow ( VCursor *self );
 
+/* RepeatRow
+ *  repeats the current row by the count provided
+ *  row must have been committed
+ *
+ *  AVAILABILITY: version 2.6
+ *
+ *  "count" [ IN ] - the number of times to repeat
+ *  the current row.
+ */
+VDB_EXTERN rc_t CC VCursorRepeatRow ( VCursor *self, uint64_t count );
+
 /* CloseRow
  *  balances OpenRow message
  *  if there are uncommitted modifications,
@@ -239,6 +251,26 @@ VDB_EXTERN rc_t CC VCursorCloseRow ( const VCursor *self );
  *  size and column affinity
  */
 VDB_EXTERN rc_t CC VCursorFlushPage ( VCursor *self );
+
+
+/* GetBlob
+ *  retrieve a blob of data containing the current row id
+ * GetBlobDirect
+ *  retrieve a blob of data containing the requested row id
+ *
+ *  "blob" [ OUT ] - return parameter for a new reference
+ *  to VBlob containing requested cell. NB - must be released
+ *  via VBlobRelease when no longer needed.
+ *
+ *  "row_id" [ IN ] - allows ReadDirect random access to any cell
+ *  in column
+ *
+ *  "col_idx" [ IN ] - index of column to be read, returned by "AddColumn"
+ */
+VDB_EXTERN rc_t CC VCursorGetBlob ( const VCursor *self,
+    struct VBlob const **blob, uint32_t col_idx );
+VDB_EXTERN rc_t CC VCursorGetBlobDirect ( const VCursor *self,
+    struct VBlob const **blob, int64_t row_id, uint32_t col_idx );
 
 
 /* Read
@@ -395,6 +427,11 @@ VDB_EXTERN rc_t CC VCursorOpenParentUpdate ( VCursor *self, struct VTable **tbl 
 VDB_EXTERN rc_t CC VCursorGetUserData ( const VCursor *self, void **data );
 VDB_EXTERN rc_t CC VCursorSetUserData ( const VCursor *self,
     void *data, void ( CC * destroy ) ( void *data ) );
+
+
+VDB_EXTERN rc_t CC VCursorLinkedCursorGet(const VCursor *cself,const char *tbl,VCursor const **curs);
+VDB_EXTERN rc_t CC VCursorLinkedCursorSet(const VCursor *cself,const char *tbl,VCursor const *curs);
+
 
 
 #ifdef __cplusplus

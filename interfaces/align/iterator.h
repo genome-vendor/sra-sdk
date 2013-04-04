@@ -200,8 +200,9 @@ struct PlacementRecord
     /* mapping quality of alignment */
     int32_t mapq;
 
-    /* here for alignment */
-    int32_t ignore;
+    /* spotgroup is now in here too */
+    uint32_t spot_group_len;
+    char * spot_group;
 };
 
 
@@ -215,6 +216,9 @@ struct PlacementRecord
 enum { placementRecordExtension0, placementRecordExtension1 };
 
 ALIGN_EXTERN void* CC PlacementRecordCast ( const PlacementRecord *self, uint32_t ext );
+
+
+ALIGN_EXTERN void* CC PlacementRecord_get_ext_data_ptr ( const PlacementRecord *self, uint32_t ext );
 
 
 /* Whack
@@ -247,7 +251,7 @@ struct PlacementRecordExtendFuncs
 
     /* variable allocation size calculation
        when non-NULL, takes precedence over "fixed_size" */
-    size_t ( CC * alloc_size ) ( struct VCursor const *curs, int64_t row_id, void *data );
+    rc_t ( CC * alloc_size ) ( struct VCursor const *curs, int64_t row_id, size_t * size, void *data );
     
     /* fixed allocation size
        ignored if "alloc_size" is non-NULL,
@@ -262,7 +266,7 @@ ALIGN_EXTERN void CC AlignIteratorRecordDestroy ( void *obj, void *data );
 ALIGN_EXTERN rc_t CC AlignIteratorRecordPopulate ( void *obj,
     const PlacementRecord *placement, struct VCursor const *curs,
     INSDC_coord_zero ref_window_start, INSDC_coord_len ref_window_len, void *data );
-ALIGN_EXTERN size_t CC AlignIteratorRecordSize ( struct VCursor const *curs, int64_t row_id, void *data );
+ALIGN_EXTERN rc_t CC AlignIteratorRecordSize ( struct VCursor const *curs, int64_t row_id, size_t * size, void *data );
 
 
 /*--------------------------------------------------------------------------
@@ -299,6 +303,17 @@ typedef struct PlacementIterator PlacementIterator;
  *
  *  "ext_0" [ IN, NULL OKAY ] and "ext_1" [ IN, NULL OKAY ] - optional pointers
  *  to blocks describing how to extend the basic placement record
+ *
+ *  rd_group [ IN, NULL OKAY ]
+ *      != NULL, non empty string ... produce all alignments with this string as
+ *                  spot-group ( no matter what the "real" spot-group of the
+ *                  alignment is )
+ *
+ *      != NULL, empty string ... produce all alignments with the "real" spot-group
+ *                  read from the column "SPOT_GROUP"
+ *
+ *      == NULL, ... produce all alignments with no spot-group assigned ( the user
+ *                  does not wish the data to be read, the alignment to be bined )
  */
 
 typedef uint8_t align_id_src;
@@ -308,7 +323,8 @@ ALIGN_EXTERN rc_t CC AlignMgrMakePlacementIterator ( struct AlignMgr const *self
     PlacementIterator **iter, struct ReferenceObj const *ref_obj,
     INSDC_coord_zero ref_pos, INSDC_coord_len ref_len, int32_t min_mapq,
     struct VCursor const *ref_cur, struct VCursor const *align_cur, align_id_src ids,
-    const PlacementRecordExtendFuncs *ext_0, const PlacementRecordExtendFuncs *ext_1 );
+    const PlacementRecordExtendFuncs *ext_0, const PlacementRecordExtendFuncs *ext_1,
+    const char * spot_group );
 
 
 /* AddRef
@@ -329,13 +345,15 @@ ALIGN_EXTERN rc_t CC PlacementIteratorRefWindow ( const PlacementIterator *self,
  *  returns the Ref-obj, that was used to create this placement-iterator
  */
 ALIGN_EXTERN rc_t CC PlacementIteratorRefObj( const PlacementIterator * self,
-                                              struct ReferenceObj const ** refobj );
+    struct ReferenceObj const ** refobj );
 
 
 /* NextAvailPos
  *  check the next available position having one or more placements
  *
  *  "pos" [ OUT ] - next position on reference having one or more placements
+ *  may return negative position, indicating an alignment that wraps around
+ *  a circular reference, and starts in negative space after linearization.
  *
  *  "len" [ OUT, NULL OKAY ] - optional return parameter for length of
  *  placement at that position
@@ -415,12 +433,17 @@ ALIGN_EXTERN rc_t CC PlacementSetIteratorRelease ( const PlacementSetIterator *s
 
 
 ALIGN_EXTERN rc_t CC PlacementSetIteratorNextReference ( PlacementSetIterator *self,
-    INSDC_coord_zero *first_pos, INSDC_coord_zero *last_pos, struct ReferenceObj const ** refobj );
+    INSDC_coord_zero *first_pos, INSDC_coord_len *len, struct ReferenceObj const ** refobj );
+
+ALIGN_EXTERN rc_t CC PlacementSetIteratorNextWindow ( PlacementSetIterator *self,
+    INSDC_coord_zero *first_pos, INSDC_coord_len *len );
 
 /* NextAvailPos
  *  check the next available position having one or more placements
  *
  *  "pos" [ OUT ] - next position on reference having one or more placements
+ *  may return negative position, indicating an alignment that wraps around
+ *  a circular reference, and starts in negative space after linearization.
  *
  *  "len" [ OUT, NULL OKAY ] - optional return parameter for length of
  *  placement at that position
@@ -503,13 +526,27 @@ ALIGN_EXTERN rc_t CC ReferenceIteratorAddPlacementIterator
  */
 ALIGN_EXTERN rc_t CC ReferenceIteratorAddPlacements ( ReferenceIterator *self,
     struct ReferenceObj const *ref_obj, INSDC_coord_zero ref_pos, INSDC_coord_len ref_len,
-    struct VCursor const *ref, struct VCursor const *align, align_id_src ids );
+    struct VCursor const *ref, struct VCursor const *align, align_id_src ids,
+    const char * spot_group );
 
 
 /* NextReference
  *  advance to the next reference
  */
-ALIGN_EXTERN rc_t CC ReferenceIteratorNextReference ( ReferenceIterator *self, struct ReferenceObj const ** refobj );
+ALIGN_EXTERN rc_t CC ReferenceIteratorNextReference ( ReferenceIterator *self,
+    INSDC_coord_zero *first_pos, INSDC_coord_len *len, struct ReferenceObj const ** refobj );
+
+/* NextWindow
+ *  advance to the next window on the reference
+ */
+ALIGN_EXTERN rc_t CC ReferenceIteratorNextWindow ( ReferenceIterator *self,
+    INSDC_coord_zero *first_pos, INSDC_coord_len *len );
+
+/* NextSpotGroup
+ *  advance to the next spot_group on the reference
+ */
+ALIGN_EXTERN rc_t CC ReferenceIteratorNextSpotGroup ( ReferenceIterator *self,
+    const char ** name, size_t * len );
 
 
 /* NextPos

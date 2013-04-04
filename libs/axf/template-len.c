@@ -86,11 +86,13 @@ rc_t CC template_len_impl(void *data,const VXformInfo *info, int64_t row_id, VRo
             unsigned const tlen = rightmost - leftmost;
             
             /* The standard says, "The leftmost segment has a plus sign and the rightmost has a minus sign." */
-            if (self_right == mate_right && self_left == mate_left) {       /* precise overlap; */
-                if (r1[0] == 2)                                             /* assign minus to second read; non-standard */
-                    dst[0] = -tlen;
-                else
+            if (   (self_left <= mate_left && self_right >= mate_right)     /* mate fully contained within self or */
+                || (mate_left <= self_left && mate_right >= self_right))    /* self fully contained within mate; */
+            {
+                if (self_left < mate_left || (r1[0] == 1 && self_left == mate_left))
                     dst[0] = tlen;
+                else
+                    dst[0] = -tlen;
             }
             else if (   (self_right == mate_right && mate_left == leftmost) /* both are rightmost, but mate is leftmost */
                      ||  self_right == rightmost)

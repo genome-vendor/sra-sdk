@@ -332,7 +332,7 @@ bool matcher_src_has_type( const matcher* self, const VSchema * s,
         res = match_type_with_id_vector( s, &td, id_vector );
 /*
     if ( res )
-        OUTMSG (( "redact-type found on (%s)%s\n", col->type_cast->dst->name, name ));
+        KOutMsg( "redact-type found on (%s)%s\n", col->type_cast->dst->name, name );
 */
     return res;
 }
@@ -343,14 +343,14 @@ static void matcher_report_types( const char * s, const Vector *v )
     len = VectorLength( v );
     if ( len > 0 )
     {
-        OUTMSG (( "%s: ", s ));
+        KOutMsg( "%s: ", s );
         for ( idx = 0;  idx < len; ++idx )
         {
             p_mtype item = (p_mtype) VectorGet ( v, idx );
             if ( item != NULL )
-                OUTMSG (( "[ %s ] ", item->name ));
+                KOutMsg( "[ %s ] ", item->name );
         }
-        OUTMSG (( "\n" ));
+        KOutMsg( "\n" );
     }
 }
 
@@ -360,15 +360,15 @@ static void matcher_report_pair( const p_mpair pair )
     if ( pair->src == NULL || pair->dst == NULL )
         return;
     if ( pair->compatible == 0 )
-        OUTMSG (( "[%s](l=%u/o=%u/d=%u) --> [%s] (c) dist=%u\n", 
+        KOutMsg( "[%s](l=%u/o=%u/d=%u) --> [%s] (c) dist=%u\n", 
                   pair->src->name, 
                   pair->src->lossy_score, pair->src->order, pair->src->dflt,
-                  pair->dst->name, pair->distance ));
+                  pair->dst->name, pair->distance );
     else
-        OUTMSG (( "[%s](l=%u/o=%u/d=%u) --> [%s] dist=%u\n",
+        KOutMsg( "[%s](l=%u/o=%u/d=%u) --> [%s] dist=%u\n",
                   pair->src->name,
                   pair->src->lossy_score, pair->src->order, pair->src->dflt,
-                  pair->dst->name, pair->distance ));
+                  pair->dst->name, pair->distance );
 }
 
 
@@ -383,15 +383,15 @@ static void matcher_report_pairs( const Vector *v )
 
 static void matcher_report_col( const p_mcol item )
 {
-    OUTMSG (( "----------------------------------\n" ));
+    KOutMsg( "----------------------------------\n" );
     if ( item->to_copy )
-        OUTMSG (( "col: %s (c)\n", item->name ));
+        KOutMsg( "col: %s (c)\n", item->name );
     else
-        OUTMSG (( "col: %s\n", item->name ));
+        KOutMsg( "col: %s\n", item->name );
     matcher_report_types( " src", &(item->src_types ) );
     matcher_report_types( " dst", &(item->dst_types ) );
     matcher_report_pairs( &(item->pairs ) );
-    OUTMSG (( "\n" ));
+    KOutMsg( "\n" );
 }
 
 

@@ -32,6 +32,9 @@
 #include <insdc/insdc.h>
 #include <align/iterator.h>
 #include <align/manager.h>
+#include <sysalloc.h>
+
+#include "debug.h"
 
 #include <stdlib.h>
 #include <stdio.h>

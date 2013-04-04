@@ -48,7 +48,8 @@
 
 #define DATABUFFERINITSIZE 10240
 
-typedef struct TAlignedRegion_struct {
+typedef struct TAlignedRegion_struct
+{
     const char* name;
     uint32_t name_len;
     /* 1-based, 0 - means not set */
@@ -56,12 +57,16 @@ typedef struct TAlignedRegion_struct {
     uint64_t to;
 } TAlignedRegion;
 
-typedef struct TMatepairDistance_struct {
+
+typedef struct TMatepairDistance_struct
+{
     uint64_t from;
     uint64_t to;
 } TMatepairDistance;
 
-struct FastqArgs_struct {
+
+struct FastqArgs_struct
+{
     bool is_platform_cs_native;
 
     int maxReads;
@@ -94,7 +99,9 @@ struct FastqArgs_struct {
     uint32_t mp_dist_qty;
 } FastqArgs;
 
-typedef enum DefNodeType_enum {
+
+typedef enum DefNodeType_enum
+{
     DefNode_Unknown = 0,
     DefNode_Text = 1,
     DefNode_Optional,
@@ -109,146 +116,180 @@ typedef enum DefNodeType_enum {
     DefNode_Last
 } DefNodeType;
 
-typedef struct DefNode_struct {
+
+typedef struct DefNode_struct
+{
     SLNode node;
     DefNodeType type;
-    union {
+    union
+    {
         SLList* optional;
         char* text;
     } data;
 } DefNode;
 
-typedef struct DeflineData_struct {
+
+typedef struct DeflineData_struct
+{
     rc_t rc;
     bool optional;
-    union {
+    union
+    {
         spotid_t* id;
-        struct {
+        struct
+        {
             const char* s;
             size_t sz;
         } str;
         uint32_t* u32;
-    } values[DefNode_Last];
+    } values[ DefNode_Last ];
     char* buf;
     size_t buf_sz;
     size_t* writ;
 } DeflineData;
 
-static
-bool CC Defline_Builder( SLNode *node, void *data )
+
+static bool CC Defline_Builder( SLNode *node, void *data )
 {
-    DefNode* n = (DefNode*)node;
-    DeflineData* d = (DeflineData*)data;
-    char s[256];
+    DefNode* n = ( DefNode* )node;
+    DeflineData* d = ( DeflineData* )data;
+    char s[ 256 ];
     size_t w;
     int x = 0;
 
-    s[0] = '\0';
-    switch(n->type) {
-        case DefNode_Optional:
+    s[ 0 ] = '\0';
+    switch ( n->type )
+    {
+        case DefNode_Optional :
             d->optional = true;
             w = *d->writ;
             *d->writ = 0;
             SLListDoUntil( n->data.optional, Defline_Builder, data );
-            x = (*d->writ == 0) ? 0 : 1;
+            x = ( *d->writ == 0 ) ? 0 : 1;
             d->optional = false;
             *d->writ = w;
-            if( x > 0 ) {
+            if ( x > 0 )
+            {
                 SLListDoUntil( n->data.optional, Defline_Builder, data );
             }
             break;
 
-        case DefNode_Text:
-            if( d->optional ) {
+        case DefNode_Text :
+            if ( d->optional )
+            {
                 break;
             }
             d->values[n->type].str.s = n->data.text;
-            d->values[n->type].str.sz = strlen(n->data.text);
-        case DefNode_Accession:
-        case DefNode_SpotName:
-        case DefNode_SpotGroup:
-        case DefNode_ReadName:
-            if( d->values[n->type].str.s != NULL ) {
-                x = d->values[n->type].str.sz;
-                if( x < sizeof(s) ) {
-                    strncpy(s, d->values[n->type].str.s, x);
-                    s[x] = '\0';
+            d->values[n->type].str.sz = strlen( n->data.text );
+
+        case DefNode_Accession :
+        case DefNode_SpotName :
+        case DefNode_SpotGroup :
+        case DefNode_ReadName :
+            if ( d->values[n->type].str.s != NULL )
+            {
+                x = d->values[ n->type ].str.sz;
+                if ( x < sizeof( s ) )
+                {
+                    strncpy( s, d->values[ n->type ].str.s, x );
+                    s[ x ] = '\0';
                     *d->writ = *d->writ + x;
-                } else {
-                    d->rc = RC(rcExe, rcNamelist, rcExecuting, rcBuffer, rcInsufficient);
+                }
+                else
+                {
+                    d->rc = RC( rcExe, rcNamelist, rcExecuting, rcBuffer, rcInsufficient );
                 }
             }
             break;
 
-        case DefNode_SpotId:
-            if( d->values[n->type].id != NULL && (!d->optional || *d->values[n->type].id > 0) ) {
-                x = snprintf(s, sizeof(s), "%u", *d->values[n->type].id);
-                if( x < 0 || x >= sizeof(s) ) {
-                    d->rc = RC(rcExe, rcNamelist, rcExecuting, rcBuffer, rcInsufficient);
-                } else {
+        case DefNode_SpotId :
+            if ( d->values[ n->type ].id != NULL &&
+                ( !d->optional || *d->values[ n->type ].id > 0 ) )
+            {
+                x = snprintf( s, sizeof( s ), "%u", *d->values[ n->type ].id );
+                if ( x < 0 || x >= sizeof( s ) )
+                {
+                    d->rc = RC( rcExe, rcNamelist, rcExecuting, rcBuffer, rcInsufficient );
+                }
+                else
+                {
                     *d->writ = *d->writ + x;
                 }
             }
             break;
 
-        case DefNode_ReadId:
-        case DefNode_SpotLen:
-        case DefNode_ReadLen:
-            if( d->values[n->type].u32 != NULL && (!d->optional || *d->values[n->type].u32 > 0) ) {
-                x = snprintf(s, sizeof(s), "%u", *d->values[n->type].u32);
-                if( x < 0 || x >= sizeof(s) ) {
-                    d->rc = RC(rcExe, rcNamelist, rcExecuting, rcBuffer, rcInsufficient);
-                } else {
+        case DefNode_ReadId :
+        case DefNode_SpotLen :
+        case DefNode_ReadLen :
+            if ( d->values[ n->type] .u32 != NULL &&
+                 ( !d->optional || *d->values[ n->type ].u32 > 0 ) )
+            {
+                x = snprintf( s, sizeof( s ), "%u", *d->values[ n->type ].u32 );
+                if ( x < 0 || x >= sizeof( s ) )
+                {
+                    d->rc = RC( rcExe, rcNamelist, rcExecuting, rcBuffer, rcInsufficient );
+                }
+                else
+                {
                     *d->writ = *d->writ + x;
                 }
             }
             break;
 
         default:
-            d->rc = RC(rcExe, rcNamelist, rcExecuting, rcId, rcInvalid);
-    }
-    if( d->rc == 0 && !d->optional && n->type != DefNode_Optional ) {
-        if( *d->writ < d->buf_sz ) {
-            strcat(d->buf, s);
-        } else {
-            d->rc = RC(rcExe, rcNamelist, rcExecuting, rcBuffer, rcInsufficient);
+            d->rc = RC( rcExe, rcNamelist, rcExecuting, rcId, rcInvalid );
+    } /* switch */
+
+    if ( d->rc == 0 && !d->optional && n->type != DefNode_Optional )
+    {
+        if ( *d->writ < d->buf_sz )
+        {
+            strcat( d->buf, s );
+        }
+        else
+        {
+            d->rc = RC( rcExe, rcNamelist, rcExecuting, rcBuffer, rcInsufficient );
         }
     }
     return d->rc != 0;
 }
 
-static
-rc_t Defline_Bind(DeflineData* data, const char* accession,
-                  spotid_t* spotId, const char* spot_name, size_t spotname_sz,
-                  const char* spot_group, size_t sgrp_sz, uint32_t* spot_len,
-                  uint32_t* readId, const char* read_name, INSDC_coord_len rlabel_sz, INSDC_coord_len* read_len)
+
+static rc_t Defline_Bind( DeflineData* data, const char* accession,
+            spotid_t* spotId, const char* spot_name, size_t spotname_sz,
+            const char* spot_group, size_t sgrp_sz, uint32_t* spot_len,
+            uint32_t* readId, const char* read_name, INSDC_coord_len rlabel_sz,
+            INSDC_coord_len* read_len )
 {
-    if( data == NULL ) {
-        return RC(rcExe, rcNamelist, rcExecuting, rcMemory, rcInsufficient);
+    if ( data == NULL )
+    {
+        return RC( rcExe, rcNamelist, rcExecuting, rcMemory, rcInsufficient );
     }
-    data->values[DefNode_Unknown].str.s = NULL;
-    data->values[DefNode_Text].str.s = NULL;
-    data->values[DefNode_Optional].str.s = NULL;
-    data->values[DefNode_Accession].str.s = accession;
-    data->values[DefNode_Accession].str.sz = strlen(accession);
-    data->values[DefNode_SpotId].id = spotId;
-    data->values[DefNode_SpotName].str.s = spot_name;
-    data->values[DefNode_SpotName].str.sz = spotname_sz;
-    data->values[DefNode_SpotGroup].str.s = spot_group;
-    data->values[DefNode_SpotGroup].str.sz = sgrp_sz;
-    data->values[DefNode_SpotLen].u32 = spot_len;
-    data->values[DefNode_ReadId].u32 = readId;
-    data->values[DefNode_ReadName].str.s = read_name;
-    data->values[DefNode_ReadName].str.sz = rlabel_sz;
-    data->values[DefNode_ReadLen].u32 = read_len;
+    data->values[ DefNode_Unknown ].str.s = NULL;
+    data->values[ DefNode_Text ].str.s = NULL;
+    data->values[ DefNode_Optional ].str.s = NULL;
+    data->values[ DefNode_Accession ].str.s = accession;
+    data->values[ DefNode_Accession ].str.sz = strlen( accession );
+    data->values[ DefNode_SpotId ].id = spotId;
+    data->values[ DefNode_SpotName ].str.s = spot_name;
+    data->values[ DefNode_SpotName ].str.sz = spotname_sz;
+    data->values[ DefNode_SpotGroup ].str.s = spot_group;
+    data->values[ DefNode_SpotGroup ].str.sz = sgrp_sz;
+    data->values[ DefNode_SpotLen ].u32 = spot_len;
+    data->values[ DefNode_ReadId ].u32 = readId;
+    data->values[ DefNode_ReadName ].str.s = read_name;
+    data->values[ DefNode_ReadName ].str.sz = rlabel_sz;
+    data->values[ DefNode_ReadLen ].u32 = read_len;
     return 0;
 }
 
-static
-rc_t Defline_Build(const SLList* def, DeflineData* data, char* buf, size_t buf_sz, size_t* writ)
+
+static rc_t Defline_Build( const SLList* def, DeflineData* data, char* buf,
+                           size_t buf_sz, size_t* writ )
 {
-    if( data == NULL ) {
-        return RC(rcExe, rcNamelist, rcExecuting, rcMemory, rcInsufficient);
+    if ( data == NULL )
+    {
+        return RC( rcExe, rcNamelist, rcExecuting, rcMemory, rcInsufficient );
     }
 
     data->rc = 0;
@@ -257,253 +298,287 @@ rc_t Defline_Build(const SLList* def, DeflineData* data, char* buf, size_t buf_s
     data->buf_sz = buf_sz;
     data->writ = writ;
 
-    data->buf[0] = '\0';
+    data->buf[ 0 ] = '\0';
     *data->writ = 0;
 
     SLListDoUntil( def, Defline_Builder, data );
     return data->rc;
 }
 
-static
-rc_t DeflineNode_Add(SLList* list, DefNode** node, DefNodeType type, const char* text, size_t text_sz)
+
+static rc_t DeflineNode_Add( SLList* list, DefNode** node,
+                            DefNodeType type, const char* text, size_t text_sz )
 {
     rc_t rc = 0;
 
-    *node = calloc(1, sizeof(**node));
-    if( *node == NULL ) {
-        rc = RC(rcExe, rcNamelist, rcConstructing, rcMemory, rcExhausted);
-    } else if(type == DefNode_Text && (text == NULL || text_sz == 0) ) {
-        rc = RC(rcExe, rcNamelist, rcConstructing, rcParam, rcInvalid);
-    } else {
-        (*node)->type = type;
-        if( type == DefNode_Text ) {
-            (*node)->data.text = strndup(text, text_sz);
-            if( (*node)->data.text == NULL ) {
-                rc = RC(rcExe, rcNamelist, rcConstructing, rcMemory, rcExhausted);
-                free(*node);
-            }
-        } else if( type == DefNode_Optional ) {
-            (*node)->data.optional = malloc(sizeof(SLList));
-            if( (*node)->data.optional == NULL ) {
-                rc = RC(rcExe, rcNamelist, rcConstructing, rcMemory, rcExhausted);
-                free(*node);
-            } else {
-                SLListInit((*node)->data.optional);
+    *node = calloc( 1, sizeof( **node ) );
+    if ( *node == NULL )
+    {
+        rc = RC( rcExe, rcNamelist, rcConstructing, rcMemory, rcExhausted );
+    }
+    else if ( type == DefNode_Text && ( text == NULL || text_sz == 0 ) )
+    {
+        rc = RC( rcExe, rcNamelist, rcConstructing, rcParam, rcInvalid );
+    }
+    else
+    {
+        ( *node )->type = type;
+        if ( type == DefNode_Text )
+        {
+            ( *node )->data.text = strndup( text, text_sz );
+            if ( ( *node )->data.text == NULL )
+            {
+                rc = RC( rcExe, rcNamelist, rcConstructing, rcMemory, rcExhausted );
+                free( *node );
             }
         }
-        if( rc == 0 ) {
-            SLListPushTail(list, &(*node)->node);
+        else if ( type == DefNode_Optional )
+        {
+            ( *node )->data.optional = malloc( sizeof( SLList ) );
+            if ( ( *node )->data.optional == NULL )
+            {
+                rc = RC( rcExe, rcNamelist, rcConstructing, rcMemory, rcExhausted );
+                free( *node );
+            }
+            else
+            {
+                SLListInit( ( *node )->data.optional );
+            }
+        }
+        if ( rc == 0 )
+        {
+            SLListPushTail( list, &( *node )->node );
         }
     }
     return rc;
 }
 
-static
-void Defline_Release(SLList* list);
 
-static
-void CC DeflineNode_Whack( SLNode* node, void* data )
+static void Defline_Release( SLList* list );
+
+
+static void CC DeflineNode_Whack( SLNode* node, void* data )
 {
-    if( node != NULL ) {
+    if ( node != NULL )
+    {
         DefNode* n = (DefNode*)node;
-        if( n->type == DefNode_Text ) {
-            free(n->data.text);
-        } else if( n->type == DefNode_Optional ) {
-            Defline_Release(n->data.optional);
+        if ( n->type == DefNode_Text )
+        {
+            free( n->data.text );
         }
-        free(node);
+        else if ( n->type == DefNode_Optional )
+        {
+            Defline_Release( n->data.optional );
+        }
+        free( node );
     }
 }
 
-static
-void Defline_Release( SLList* list )
+
+static void Defline_Release( SLList* list )
 {
-    if( list != NULL ) {
+    if ( list != NULL )
+    {
         SLListForEach( list, DeflineNode_Whack, NULL );
-        free(list);
+        free( list );
     }
 }
+
 
 #if _DEBUGGING
-static
-void CC Defline_Dump( SLNode* node, void* data )
+static void CC Defline_Dump( SLNode* node, void* data )
 {
-    DefNode* n = (DefNode*)node;
+    DefNode* n = ( DefNode* )node;
     const char* s = NULL, *t;
-    if( n->type == DefNode_Text ) {
+    if ( n->type == DefNode_Text )
+    {
         s = n->data.text;
     }
-    switch(n->type) {
-        case DefNode_Unknown:
-            t = "Unknown";
-            break;
-        case DefNode_Text:
-            t = "Text";
-            break;
-        case DefNode_Optional:
-            t = "Optional";
-            break;
-        case DefNode_Accession:
-            t = "Accession";
-            break;
-        case DefNode_SpotId:
-            t = "SpotId";
-            break;
-        case DefNode_SpotName:
-            t = "SpotName";
-            break;
-        case DefNode_SpotGroup:
-            t = "SpotGroup";
-            break;
-        case DefNode_SpotLen:
-            t = "SpotLen";
-            break;
-        case DefNode_ReadId:
-            t = "ReadId";
-            break;
-        case DefNode_ReadName:
-            t = "ReadName";
-            break;
-        case DefNode_ReadLen:
-            t = "ReadLen";
-            break;
-        default:
-            t = "ERROR";
+    switch ( n->type )
+    {
+        case DefNode_Unknown :      t = "Unknown";   break;
+        case DefNode_Text :         t = "Text";      break;
+        case DefNode_Optional :     t = "Optional";  break;
+        case DefNode_Accession :    t = "Accession"; break;
+        case DefNode_SpotId :       t = "SpotId";    break;
+        case DefNode_SpotName :     t = "SpotName";  break;
+        case DefNode_SpotGroup :    t = "SpotGroup"; break;
+        case DefNode_SpotLen :      t = "SpotLen";   break;
+        case DefNode_ReadId :       t = "ReadId";    break;
+        case DefNode_ReadName :     t = "ReadName";  break;
+        case DefNode_ReadLen :      t = "ReadLen";   break;
+        default :  t = "ERROR";
     }
 
-    SRA_DUMP_DBG(3, ("%s type %s", data, t));
-    if( s ) {
-        SRA_DUMP_DBG(3, (": '%s'", s));
+    SRA_DUMP_DBG( 3, ( "%s type %s", data, t ) );
+    if ( s )
+    {
+        SRA_DUMP_DBG( 3, ( ": '%s'", s ) );
     }
-    SRA_DUMP_DBG(3, ("\n"));
-    if( n->type == DefNode_Optional ) {
+    SRA_DUMP_DBG( 3, ( "\n" ) );
+    if ( n->type == DefNode_Optional )
+    {
         SLListForEach( n->data.optional, Defline_Dump, "+-->" );
     }
 }
 #endif
 
-static
-rc_t Defline_Parse(SLList** def, const char* line)
+
+static rc_t Defline_Parse( SLList** def, const char* line )
 {
     rc_t rc = 0;
     size_t i, sz, text = 0, opt_vars = 0;
     DefNode* node;
     SLList* list = NULL;
 
-    if( def == NULL || line == NULL ) {
-        return RC(rcExe, rcNamelist, rcConstructing, rcParam, rcInvalid);
+    if ( def == NULL || line == NULL )
+    {
+        return RC( rcExe, rcNamelist, rcConstructing, rcParam, rcInvalid );
     }
-    *def = malloc(sizeof(SLList));
-    if( *def  == NULL ) {
-        return RC(rcExe, rcNamelist, rcConstructing, rcMemory, rcExhausted);
+    *def = malloc( sizeof( SLList ) );
+    if ( *def  == NULL )
+    {
+        return RC( rcExe, rcNamelist, rcConstructing, rcMemory, rcExhausted );
     }
-    sz = strlen(line);
+    sz = strlen( line );
     list = *def;
-    SLListInit(list);
+    SLListInit( list );
 
-    for(i = 0; rc == 0 && i < sz; i++ ) {
-        if( line[i] == '[' ) {
-            if( (i + 1) < sz && line[i + 1] == '[' ) {
+    for ( i = 0; rc == 0 && i < sz; i++ )
+    {
+        if ( line[ i ] == '[' )
+        {
+            if ( ( i + 1 ) < sz && line[ i + 1 ] == '[' )
+            {
                 i++;
-            } else {
-                if( list != *def ) {
-                    rc = RC(rcExe, rcNamelist, rcConstructing, rcFormat, rcIncorrect);
-                } else if( i > text ) {
-                    rc = DeflineNode_Add(list, &node, DefNode_Text, &line[text], i - text);
-                }
-                if( rc == 0 && (rc = DeflineNode_Add(list, &node, DefNode_Optional, NULL, 0)) == 0 ) {
-                    opt_vars = 0;
-                    list = node->data.optional;
-                    text = i + 1;
-                }
             }
-        } else if( line[i] == ']' ) {
-            if( (i + 1) < sz && line[i + 1] == ']' ) {
-                i++;
-            } else {
-                if( list == *def ) {
-                    rc = RC(rcExe, rcNamelist, rcConstructing, rcFormat, rcIncorrect);
-                } else {
-                    if( opt_vars < 1 ) {
-                        rc = RC(rcExe, rcNamelist, rcConstructing, rcConstraint, rcEmpty);
-                    } else if( i > text ) {
-                        rc = DeflineNode_Add(list, &node, DefNode_Text, &line[text], i - text);
-                    }
-                    list = *def;
-                    text = i + 1;
+            else
+            {
+                if ( list != *def )
+                {
+                    rc = RC( rcExe, rcNamelist, rcConstructing, rcFormat, rcIncorrect );
                 }
-            }
-        } else if( line[i] == '$' ) {
-            if( (i + 1) < sz && line[i + 1] == '$' ) {
-                i++;
-            } else {
-                DefNodeType type = DefNode_Unknown;
-                switch(line[++i]) {
-                    case 'a':
-                        switch(line[++i]) {
-                            case 'c':
-                                type = DefNode_Accession;
-                                break;
-                        }
-                        break;
-                    case 's':
-                        switch(line[++i]) {
-                            case 'i':
-                                type = DefNode_SpotId;
-                                break;
-                            case 'n':
-                                type = DefNode_SpotName;
-                                break;
-                            case 'g':
-                                type = DefNode_SpotGroup;
-                                break;
-                            case 'l':
-                                type = DefNode_SpotLen;
-                                break;
-                        }
-                        break;
-                    case 'r':
-                        switch(line[++i]) {
-                            case 'i':
-                                type = DefNode_ReadId;
-                                break;
-                            case 'n':
-                                type = DefNode_ReadName;
-                                break;
-                            case 'l':
-                                type = DefNode_ReadLen;
-                                break;
-                        }
-                        break;
+                else if ( i > text )
+                {
+                    rc = DeflineNode_Add( list, &node, DefNode_Text, &line[text], i - text );
                 }
-                if( type == DefNode_Unknown ) {
-                    rc = RC(rcExe, rcNamelist, rcConstructing, rcName, rcUnrecognized);
-                } else {
-                    if( (i - 2) > text ) {
-                        rc = DeflineNode_Add(list, &node, DefNode_Text, &line[text], i - text - 2);
-                    }
-                    if( rc == 0 && (rc = DeflineNode_Add(list, &node, type, NULL, 0)) == 0 ) {
-                        opt_vars++;
+                if ( rc == 0 )
+                {
+                    rc = DeflineNode_Add( list, &node, DefNode_Optional, NULL, 0 );
+                    if ( rc == 0 )
+                    {
+                        opt_vars = 0;
+                        list = node->data.optional;
                         text = i + 1;
                     }
                 }
             }
         }
-    }
-    if( rc == 0 ) {
-        if( list != *def ) {
-            rc = RC(rcExe, rcNamelist, rcConstructing, rcFormat, rcInvalid);
-        } else if( i > text ) {
-            rc = DeflineNode_Add(list, &node, DefNode_Text, &line[text], i - text);
+        else if ( line[ i ] == ']' )
+        {
+            if ( ( i + 1 ) < sz && line[ i + 1 ] == ']' )
+            {
+                i++;
+            }
+            else
+            {
+                if ( list == *def )
+                {
+                    rc = RC( rcExe, rcNamelist, rcConstructing, rcFormat, rcIncorrect );
+                }
+                else
+                {
+                    if ( opt_vars < 1 )
+                    {
+                        rc = RC( rcExe, rcNamelist, rcConstructing, rcConstraint, rcEmpty );
+                    }
+                    else if ( i > text )
+                    {
+                        rc = DeflineNode_Add( list, &node, DefNode_Text, &line[text], i - text );
+                    }
+                    list = *def;
+                    text = i + 1;
+                }
+            }
+        }
+        else if ( line[ i ] == '$' )
+        {
+            if ( ( i + 1 ) < sz && line[ i + 1 ] == '$' )
+            {
+                i++;
+            }
+            else
+            {
+                DefNodeType type = DefNode_Unknown;
+                switch ( line[ ++i] )
+                {
+                    case 'a' :
+                        switch( line[ ++i ] )
+                        {
+                            case 'c': type = DefNode_Accession; break;
+                        }
+                        break;
+
+                    case 's' :
+                        switch ( line[ ++i ] )
+                        {
+                            case 'i': type = DefNode_SpotId; break;
+                            case 'n': type = DefNode_SpotName; break;
+                            case 'g': type = DefNode_SpotGroup; break;
+                            case 'l': type = DefNode_SpotLen; break;
+                        }
+                        break;
+                    case 'r' :
+                        switch( line[ ++i ] )
+                        {
+                            case 'i': type = DefNode_ReadId; break;
+                            case 'n': type = DefNode_ReadName; break;
+                            case 'l': type = DefNode_ReadLen; break;
+                        }
+                        break;
+                }
+                if ( type == DefNode_Unknown )
+                {
+                    rc = RC( rcExe, rcNamelist, rcConstructing, rcName, rcUnrecognized );
+                }
+                else
+                {
+                    if ( ( i - 2 ) > text )
+                    {
+                        rc = DeflineNode_Add( list, &node, DefNode_Text, &line[ text ], i - text - 2 );
+                    }
+                    if ( rc == 0 )
+                    {
+                        rc = DeflineNode_Add( list, &node, type, NULL, 0 );
+                        if ( rc == 0 )
+                        {
+                            opt_vars++;
+                            text = i + 1;
+                        }
+                    }
+                }
+            }
         }
     }
-    if( rc != 0 ) {
+    if ( rc == 0 )
+    {
+        if ( list != *def )
+        {
+            rc = RC( rcExe, rcNamelist, rcConstructing, rcFormat, rcInvalid );
+        }
+        else if ( i > text )
+        {
+            rc = DeflineNode_Add( list, &node, DefNode_Text, &line[ text ], i - text );
+        }
+    }
+    if ( rc != 0 )
+    {
         i = i < sz ? i : sz;
-        PLOGERR(klogErr,(klogErr, rc, "$(l1) -->$(c)<-- $(l2)",
-                            "l1=%.*s,c=%c,l2=%.*s", i - 1, line, line[i - 1], sz - i, &line[i]));
+        PLOGERR( klogErr, ( klogErr, rc, "$(l1) -->$(c)<-- $(l2)",
+                 "l1=%.*s,c=%c,l2=%.*s", i - 1, line, line[ i - 1 ], sz - i, &line[ i ] ) );
     }
 #if _DEBUGGING
-    SRA_DUMP_DBG(3, ("| defline\n"));
+    SRA_DUMP_DBG( 3, ( "| defline\n" ) );
     SLListForEach( *def, Defline_Dump, "+->" );
 #endif
     return rc;
@@ -511,31 +586,41 @@ rc_t Defline_Parse(SLList** def, const char* line)
 
 /* ### ALIGNMENT_COUNT based filtering ##################################################### */
 
-typedef struct AlignedFilter_struct {
+typedef struct AlignedFilter_struct
+{
     const SRAColumn* col;
     bool aligned;
     bool unaligned;
 } AlignedFilter;
 
-static
-rc_t AlignedFilter_GetKey(const SRASplitter* cself, const char** key, spotid_t spot, readmask_t* readmask)
+
+static rc_t AlignedFilter_GetKey( const SRASplitter* cself, const char** key,
+                                  spotid_t spot, readmask_t* readmask )
 {
     rc_t rc = 0;
-    AlignedFilter* self = (AlignedFilter*)cself;
+    AlignedFilter* self = ( AlignedFilter* )cself;
 
-    if( self == NULL || key == NULL ) {
-        rc = RC(rcSRA, rcNode, rcExecuting, rcParam, rcNull);
-    } else {
+    if ( self == NULL || key == NULL )
+    {
+        rc = RC( rcSRA, rcNode, rcExecuting, rcParam, rcNull );
+    }
+    else
+    {
         *key = "";
-        if( self->col != NULL ) {
+        if ( self->col != NULL )
+        {
             const uint8_t* ac = NULL;
             bitsz_t o = 0, sz = 0;
-            if( (rc = SRAColumnRead(self->col, spot, (const void **)&ac, &o, &sz)) == 0 ) {
-                sz = sz / 8 / sizeof(*ac);
-                for(o = 0; o < sz; o++) {
-                    if( (self->aligned   && !self->unaligned && ac[o] == 0) ||
-                        (self->unaligned && !self->aligned   && ac[o] != 0) ) {
-                        unset_readmask(readmask, o);
+            rc = SRAColumnRead( self->col, spot, (const void **)&ac, &o, &sz );
+            if ( rc == 0 )
+            {
+                sz = sz / 8 / sizeof( *ac );
+                for( o = 0; o < sz; o++ )
+                {
+                    if ( ( self->aligned   && !self->unaligned && ac[ o ] == 0 ) ||
+                         ( self->unaligned && !self->aligned   && ac[ o ] != 0 ) )
+                    {
+                        unset_readmask( readmask, o );
                     }
                 }
             }
@@ -544,27 +629,37 @@ rc_t AlignedFilter_GetKey(const SRASplitter* cself, const char** key, spotid_t s
     return rc;
 }
 
-typedef struct AlignedFilterFactory_struct {
+
+typedef struct AlignedFilterFactory_struct
+{
     const SRATable* table;
     const SRAColumn* col;
     bool aligned;
     bool unaligned;
 } AlignedFilterFactory;
 
-static
-rc_t AlignedFilterFactory_Init(const SRASplitterFactory* cself)
+
+static rc_t AlignedFilterFactory_Init( const SRASplitterFactory* cself )
 {
     rc_t rc = 0;
-    AlignedFilterFactory* self = (AlignedFilterFactory*)cself;
+    AlignedFilterFactory* self = ( AlignedFilterFactory* )cself;
 
-    if( self == NULL ) {
-        rc = RC(rcSRA, rcType, rcConstructing, rcParam, rcNull);
-    } else {
-        if( (rc = SRATableOpenColumnRead(self->table, &self->col, "ALIGNMENT_COUNT", vdb_uint8_t)) != 0 ) {
-            if( GetRCState(rc) == rcNotFound ) {
-                LOGMSG(klogWarn, "Column ALIGNMENT_COUNT was not found, param ignored");
+    if ( self == NULL )
+    {
+        rc = RC( rcSRA, rcType, rcConstructing, rcParam, rcNull );
+    }
+    else
+    {
+        rc = SRATableOpenColumnRead( self->table, &self->col, "ALIGNMENT_COUNT", vdb_uint8_t );
+        if ( rc != 0 )
+        {
+            if ( GetRCState( rc ) == rcNotFound )
+            {
+                LOGMSG( klogWarn, "Column ALIGNMENT_COUNT was not found, param ignored" );
                 rc = 0;
-            } else if( GetRCState(rc) == rcExists ) {
+            }
+            else if ( GetRCState( rc ) == rcExists )
+            {
                 rc = 0;
             }
         }
@@ -572,56 +667,73 @@ rc_t AlignedFilterFactory_Init(const SRASplitterFactory* cself)
     return rc;
 }
 
-static
-rc_t AlignedFilterFactory_NewObj(const SRASplitterFactory* cself, const SRASplitter** splitter)
+
+static rc_t AlignedFilterFactory_NewObj( const SRASplitterFactory* cself, const SRASplitter** splitter )
 {
     rc_t rc = 0;
-    AlignedFilterFactory* self = (AlignedFilterFactory*)cself;
+    AlignedFilterFactory* self = ( AlignedFilterFactory* )cself;
 
-    if( self == NULL ) {
-        rc = RC(rcSRA, rcType, rcExecuting, rcParam, rcNull);
-    } else {
-        if( (rc = SRASplitter_Make(splitter, sizeof(AlignedFilter), AlignedFilter_GetKey, NULL, NULL, NULL)) == 0 ) {
-            ((AlignedFilter*)(*splitter))->col = self->col;
-            ((AlignedFilter*)(*splitter))->aligned = self->aligned;
-            ((AlignedFilter*)(*splitter))->unaligned = self->unaligned;
+    if ( self == NULL )
+    {
+        rc = RC( rcSRA, rcType, rcExecuting, rcParam, rcNull );
+    }
+    else
+    {
+        rc = SRASplitter_Make( splitter, sizeof( AlignedFilter ),
+                               AlignedFilter_GetKey, NULL, NULL, NULL );
+        if ( rc == 0 )
+        {
+            ( (AlignedFilter*)(*splitter) )->col = self->col;
+            ( (AlignedFilter*)(*splitter) )->aligned = self->aligned;
+            ( (AlignedFilter*)(*splitter) )->unaligned = self->unaligned;
         }
     }
     return rc;
 }
 
-static
-void AlignedFilterFactory_Release(const SRASplitterFactory* cself)
+
+static void AlignedFilterFactory_Release( const SRASplitterFactory* cself )
 {
-    if( cself != NULL ) {
-        AlignedFilterFactory* self = (AlignedFilterFactory*)cself;
-        SRAColumnRelease(self->col);
+    if ( cself != NULL )
+    {
+        AlignedFilterFactory* self = ( AlignedFilterFactory* )cself;
+        SRAColumnRelease( self->col );
     }
 }
 
-static
-rc_t AlignedFilterFactory_Make(const SRASplitterFactory** cself, const SRATable* table, bool aligned, bool unaligned)
+
+static rc_t AlignedFilterFactory_Make( const SRASplitterFactory** cself,
+                    const SRATable* table, bool aligned, bool unaligned )
 {
     rc_t rc = 0;
     AlignedFilterFactory* obj = NULL;
 
-    if( cself == NULL || table == NULL ) {
-        rc = RC(rcSRA, rcType, rcAllocating, rcParam, rcNull);
-    } else if( (rc = SRASplitterFactory_Make(cself, eSplitterSpot, sizeof(*obj),
-                                             AlignedFilterFactory_Init,
-                                             AlignedFilterFactory_NewObj,
-                                             AlignedFilterFactory_Release)) == 0 ) {
-        obj = (AlignedFilterFactory*)*cself;
-        obj->table = table;
-        obj->aligned = aligned;
-        obj->unaligned = unaligned;
+    if ( cself == NULL || table == NULL )
+    {
+        rc = RC( rcSRA, rcType, rcAllocating, rcParam, rcNull );
+    }
+    else
+    {
+        SRASplitterFactory_Make( cself, eSplitterSpot, sizeof( *obj ),
+                                 AlignedFilterFactory_Init,
+                                 AlignedFilterFactory_NewObj,
+                                 AlignedFilterFactory_Release );
+        if ( rc == 0 )
+        {
+            obj = ( AlignedFilterFactory* )*cself;
+            obj->table = table;
+            obj->aligned = aligned;
+            obj->unaligned = unaligned;
+        }
     }
     return rc;
 }
 
+
 /* ### alignment region filtering ##################################################### */
 
-typedef struct AlignRegionFilter_struct {
+typedef struct AlignRegionFilter_struct
+{
     const SRAColumn* col_pos;
     const SRAColumn* col_name;
     const SRAColumn* col_seqid;
@@ -629,65 +741,86 @@ typedef struct AlignRegionFilter_struct {
     uint32_t alregion_qty;
 } AlignRegionFilter;
 
-static
-rc_t AlignRegionFilter_GetKey(const SRASplitter* cself, const char** key, spotid_t spot, readmask_t* readmask)
+
+static rc_t AlignRegionFilter_GetKey( const SRASplitter* cself, const char** key,
+                                      spotid_t spot, readmask_t* readmask )
 {
     rc_t rc = 0;
-    AlignRegionFilter* self = (AlignRegionFilter*)cself;
+    AlignRegionFilter* self = ( AlignRegionFilter* )cself;
 
-    if( self == NULL || key == NULL ) {
-        rc = RC(rcSRA, rcNode, rcExecuting, rcParam, rcNull);
-    } else {
+    if ( self == NULL || key == NULL )
+    {
+        rc = RC( rcSRA, rcNode, rcExecuting, rcParam, rcNull );
+    }
+    else
+    {
         *key = "";
-        reset_readmask(readmask);
-        if( self->col_name || self->col_seqid ) {
+        reset_readmask( readmask );
+        if ( self->col_name || self->col_seqid )
+        {
             bool match = false;
             uint32_t i;
             const char* nm, *si;
             bitsz_t o, nm_len = 0, si_len = 0;
 
-            if( self->col_name ) {
-                rc = SRAColumnRead(self->col_name, spot, (const void **)&nm, &o, &nm_len);
+            if ( self->col_name )
+            {
+                rc = SRAColumnRead( self->col_name, spot, (const void **)&nm, &o, &nm_len );
                 nm_len /= 8;
             }
-            if( rc == 0 && self->col_seqid ) {
-                rc = SRAColumnRead(self->col_seqid, spot, (const void **)&si, &o, &si_len);
+            if ( rc == 0 && self->col_seqid )
+            {
+                rc = SRAColumnRead( self->col_seqid, spot, (const void **)&si, &o, &si_len );
                 si_len /= 8;
             }
-            for(i = 0; rc == 0 && i < self->alregion_qty; i++) {
-                if( (self->alregion[i].name_len == nm_len && 
-                     strncasecmp(self->alregion[i].name, nm, nm_len) == 0) ||
-                     (self->alregion[i].name_len == si_len && 
-                     strncasecmp(self->alregion[i].name, si, si_len) == 0)) {
-                    if( self->col_pos ) {
+            for ( i = 0; rc == 0 && i < self->alregion_qty; i++ )
+            {
+                if ( ( self->alregion[i].name_len == nm_len && 
+                       strncasecmp( self->alregion[ i ].name, nm, nm_len ) == 0 ) ||
+                     ( self->alregion[i].name_len == si_len && 
+                       strncasecmp(self->alregion[i].name, si, si_len) == 0 ) )
+                {
+                    if ( self->col_pos )
+                    {
                         INSDC_coord_zero* pos;
                         bitsz_t nreads, j;
-                        if( (rc = SRAColumnRead(self->col_pos, spot, (const void **)&pos, &o, &nreads)) == 0 ) {
+                        rc = SRAColumnRead( self->col_pos, spot, ( const void ** )&pos, &o, &nreads );
+                        if ( rc == 0 )
+                        {
                             nreads = nreads / sizeof(*pos) / 8;
-                            for(i = 0; !match && i < self->alregion_qty; i++) {
-                                for(j = 0; j < nreads; j++) {
-                                    if( self->alregion[i].from <= pos[j] && pos[j] <= self->alregion[i].to ) {
+                            for ( i = 0; !match && i < self->alregion_qty; i++ )
+                            {
+                                for ( j = 0; j < nreads; j++ )
+                                {
+                                    if ( self->alregion[i].from <= pos[j] &&
+                                         pos[j] <= self->alregion[i].to )
+                                    {
                                         match = true;
                                         break;
                                     }
                                 }
                             }
                         }
-                    } else {
+                    }
+                    else
+                    {
                         match = true;
                     }
                     break;
                 }
             }
-            if( !match ) {
-                clear_readmask(readmask);
+            if ( !match )
+            {
+                clear_readmask( readmask );
             }
         }
     }
     return rc;
 }
 
-typedef struct AlignRegionFilterFactory_struct {
+
+typedef struct AlignRegionFilterFactory_struct
+{
     const SRATable* table;
     const SRAColumn* col_pos;
     const SRAColumn* col_name;
@@ -696,54 +829,75 @@ typedef struct AlignRegionFilterFactory_struct {
     uint32_t alregion_qty;
 } AlignRegionFilterFactory;
 
-static
-rc_t AlignRegionFilterFactory_Init(const SRASplitterFactory* cself)
+
+static rc_t AlignRegionFilterFactory_Init( const SRASplitterFactory* cself )
 {
     rc_t rc = 0;
-    AlignRegionFilterFactory* self = (AlignRegionFilterFactory*)cself;
+    AlignRegionFilterFactory* self = ( AlignRegionFilterFactory* )cself;
 
-    if( self == NULL ) {
-        rc = RC(rcSRA, rcType, rcConstructing, rcParam, rcNull);
-    } else {
+    if ( self == NULL )
+    {
+        rc = RC( rcSRA, rcType, rcConstructing, rcParam, rcNull );
+    }
+    else
+    {
 
 #define COLNF(v,n,t) (!(rc == 0 && ((rc = SRATableOpenColumnRead(self->table, &v, n, t)) == 0 || \
                        GetRCState(rc) == rcExists)) && GetRCState(rc) == rcNotFound)
 
-        if( COLNF(self->col_name, "REF_NAME", vdb_ascii_t) ) {
-            SRAColumnRelease(self->col_name);
+        if ( COLNF( self->col_name, "REF_NAME", vdb_ascii_t ) )
+        {
+            SRAColumnRelease( self->col_name );
             self->col_name = NULL;
             rc = 0;
         }
-        if( COLNF(self->col_seqid, "REF_SEQ_ID", vdb_ascii_t) ) {
-            SRAColumnRelease(self->col_seqid);
+
+        if ( COLNF( self->col_seqid, "REF_SEQ_ID", vdb_ascii_t ) )
+        {
+            SRAColumnRelease( self->col_seqid );
             self->col_seqid = NULL;
             rc = 0;
         }
-        if( self->col_name == NULL && self->col_seqid == NULL ) {
-            LOGMSG(klogWarn, "None of columns REF_NAME or REF_SEQ_ID was found, no region filtering");
-        } else {
+
+        if ( self->col_name == NULL && self->col_seqid == NULL )
+        {
+            LOGMSG( klogWarn, "None of columns REF_NAME or REF_SEQ_ID was found, no region filtering" );
+        }
+        else
+        {
             bool range_used = false;
             uint32_t i;
             /* see if there are any actual ranges set and open col only if yes */
-            for(i = 0; i < self->alregion_qty; i++) {
-                if( self->alregion[i].from != 0 || self->alregion[i].to != 0 ) {
+            for ( i = 0; i < self->alregion_qty; i++ )
+            {
+                if ( self->alregion[ i ].from != 0 || self->alregion[ i ].to != 0 )
+                {
                     range_used = true;
                     break;
                 }
             }
-            if( range_used ) {
-                if( COLNF(self->col_pos, "REF_POS", "INSDC:coord:zero") ) {
-                    LOGMSG(klogWarn, "Column REF_POS is not found, no region position filtering");
+            if ( range_used )
+            {
+                if ( COLNF( self->col_pos, "REF_POS", "INSDC:coord:zero" ) )
+                {
+                    LOGMSG( klogWarn, "Column REF_POS is not found, no region position filtering" );
                     rc = 0;
-                } else {
-                    for(i = 0; i < self->alregion_qty; i++) {
-                        if( self->alregion[i].from > 0 ) {
-                            self->alregion[i].from--;
+                }
+                else
+                {
+                    for ( i = 0; i < self->alregion_qty; i++ )
+                    {
+                        if ( self->alregion[ i ].from > 0 )
+                        {
+                            self->alregion[ i ].from--;
                         }
-                        if( self->alregion[i].to > 0 ) {
-                            self->alregion[i].to--;
-                        } else if( self->alregion[i].to == 0 ) {
-                            self->alregion[i].to = ~0;
+                        if ( self->alregion[ i ].to > 0 )
+                        {
+                            self->alregion[ i ].to--;
+                        }
+                        else if ( self->alregion[ i ].to == 0 )
+                        {
+                            self->alregion[ i ].to = ~0;
                         }
                     }
                 }
@@ -754,89 +908,115 @@ rc_t AlignRegionFilterFactory_Init(const SRASplitterFactory* cself)
     return rc;
 }
 
-static
-rc_t AlignRegionFilterFactory_NewObj(const SRASplitterFactory* cself, const SRASplitter** splitter)
+
+static rc_t AlignRegionFilterFactory_NewObj( const SRASplitterFactory* cself, const SRASplitter** splitter )
 {
     rc_t rc = 0;
-    AlignRegionFilterFactory* self = (AlignRegionFilterFactory*)cself;
+    AlignRegionFilterFactory* self = ( AlignRegionFilterFactory* )cself;
 
-    if( self == NULL ) {
-        rc = RC(rcSRA, rcType, rcExecuting, rcParam, rcNull);
-    } else {
-        if( (rc = SRASplitter_Make(splitter, sizeof(AlignRegionFilter), AlignRegionFilter_GetKey, NULL, NULL, NULL)) == 0 ) {
-            ((AlignRegionFilter*)(*splitter))->col_pos = self->col_pos;
-            ((AlignRegionFilter*)(*splitter))->col_name = self->col_name;
-            ((AlignRegionFilter*)(*splitter))->col_seqid = self->col_seqid;
-            ((AlignRegionFilter*)(*splitter))->alregion = self->alregion;
-            ((AlignRegionFilter*)(*splitter))->alregion_qty = self->alregion_qty;
+    if ( self == NULL )
+    {
+        rc = RC( rcSRA, rcType, rcExecuting, rcParam, rcNull );
+    }
+    else
+    {
+        rc = SRASplitter_Make( splitter, sizeof( AlignRegionFilter ),
+                               AlignRegionFilter_GetKey, NULL, NULL, NULL );
+        if ( rc == 0 )
+        {
+            ( (AlignRegionFilter*)(*splitter) )->col_pos = self->col_pos;
+            ( (AlignRegionFilter*)(*splitter) )->col_name = self->col_name;
+            ( (AlignRegionFilter*)(*splitter) )->col_seqid = self->col_seqid;
+            ( (AlignRegionFilter*)(*splitter) )->alregion = self->alregion;
+            ( (AlignRegionFilter*)(*splitter) )->alregion_qty = self->alregion_qty;
         }
     }
     return rc;
 }
 
-static
-void AlignRegionFilterFactory_Release(const SRASplitterFactory* cself)
+
+static void AlignRegionFilterFactory_Release( const SRASplitterFactory* cself )
 {
-    if( cself != NULL ) {
-        AlignRegionFilterFactory* self = (AlignRegionFilterFactory*)cself;
-        SRAColumnRelease(self->col_pos);
-        SRAColumnRelease(self->col_name);
-        SRAColumnRelease(self->col_seqid);
+    if ( cself != NULL )
+    {
+        AlignRegionFilterFactory* self = ( AlignRegionFilterFactory* )cself;
+        SRAColumnRelease( self->col_pos );
+        SRAColumnRelease( self->col_name );
+        SRAColumnRelease( self->col_seqid );
     }
 }
 
-static
-rc_t AlignRegionFilterFactory_Make(const SRASplitterFactory** cself, const SRATable* table,
-                                   TAlignedRegion* alregion, uint32_t alregion_qty)
+
+static rc_t AlignRegionFilterFactory_Make( const SRASplitterFactory** cself,
+            const SRATable* table, TAlignedRegion* alregion, uint32_t alregion_qty )
 {
     rc_t rc = 0;
     AlignRegionFilterFactory* obj = NULL;
 
-    if( cself == NULL || table == NULL ) {
-        rc = RC(rcSRA, rcType, rcAllocating, rcParam, rcNull);
-    } else if( (rc = SRASplitterFactory_Make(cself, eSplitterSpot, sizeof(*obj),
-                                             AlignRegionFilterFactory_Init,
-                                             AlignRegionFilterFactory_NewObj,
-                                             AlignRegionFilterFactory_Release)) == 0 ) {
-        obj = (AlignRegionFilterFactory*)*cself;
-        obj->table = table;
-        obj->alregion = alregion;
-        obj->alregion_qty = alregion_qty;
+    if ( cself == NULL || table == NULL )
+    {
+        rc = RC( rcSRA, rcType, rcAllocating, rcParam, rcNull );
+    }
+    else
+    {
+        rc = SRASplitterFactory_Make( cself, eSplitterSpot, sizeof( *obj ),
+                                      AlignRegionFilterFactory_Init,
+                                      AlignRegionFilterFactory_NewObj,
+                                      AlignRegionFilterFactory_Release );
+        if ( rc == 0 )
+        {
+            obj = ( AlignRegionFilterFactory* )*cself;
+            obj->table = table;
+            obj->alregion = alregion;
+            obj->alregion_qty = alregion_qty;
+        }
     }
     return rc;
 }
 
 /* ### alignment meta-pair distance filtering ##################################################### */
 
-typedef struct AlignPairDistanceFilter_struct {
+typedef struct AlignPairDistanceFilter_struct
+{
     const SRAColumn* col_tlen;
     bool mp_dist_unknown;
     const TMatepairDistance* mp_dist;
     uint32_t mp_dist_qty;
 } AlignPairDistanceFilter;
 
-static
-rc_t AlignPairDistanceFilter_GetKey(const SRASplitter* cself, const char** key, spotid_t spot, readmask_t* readmask)
+
+static rc_t AlignPairDistanceFilter_GetKey( const SRASplitter* cself,
+                const char** key, spotid_t spot, readmask_t* readmask )
 {
     rc_t rc = 0;
-    AlignPairDistanceFilter* self = (AlignPairDistanceFilter*)cself;
+    AlignPairDistanceFilter* self = ( AlignPairDistanceFilter* )cself;
 
-    if( self == NULL || key == NULL ) {
-        rc = RC(rcSRA, rcNode, rcExecuting, rcParam, rcNull);
-    } else {
+    if ( self == NULL || key == NULL )
+    {
+        rc = RC( rcSRA, rcNode, rcExecuting, rcParam, rcNull );
+    }
+    else
+    {
         *key = "";
-        reset_readmask(readmask);
-        if( self->col_tlen ) {
+        reset_readmask( readmask );
+        if ( self->col_tlen )
+        {
             uint32_t i, j;
             bitsz_t o, nreads;
             int32_t* tlen;
-            if( (rc = SRAColumnRead(self->col_tlen, spot, (const void **)&tlen, &o, &nreads)) == 0 ) {
+            rc = SRAColumnRead( self->col_tlen, spot, (const void **)&tlen, &o, &nreads );
+            if ( rc == 0 )
+            {
                 nreads = nreads / sizeof(*tlen) / 8;
-                for(i = 0; i < self->mp_dist_qty; i++) {
-                    for(j = 0; j < nreads; j++) {
-                        if( (tlen[j] == 0 && !self->mp_dist_unknown) ||
-                            (tlen[j] != 0 && (tlen[j] < self->mp_dist[i].from || self->mp_dist[i].to < tlen[j])) ) {
-                            unset_readmask(readmask, j);
+                for ( i = 0; i < self->mp_dist_qty; i++ )
+                {
+                    for ( j = 0; j < nreads; j++ )
+                    {
+                        if ( ( tlen[ j ] == 0 && !self->mp_dist_unknown) ||
+                             ( tlen[ j ] != 0 && 
+                               ( tlen[ j ] < self->mp_dist[ i ].from || self->mp_dist[ i ].to < tlen[ j ] ) ) )
+                        {
+                            unset_readmask( readmask, j );
                         }
                     }
                 }
@@ -846,7 +1026,9 @@ rc_t AlignPairDistanceFilter_GetKey(const SRASplitter* cself, const char** key, 
     return rc;
 }
 
-typedef struct AlignPairDistanceFilterFactory_struct {
+
+typedef struct AlignPairDistanceFilterFactory_struct
+{
     const SRATable* table;
     const SRAColumn* col_tlen;
     bool mp_dist_unknown;
@@ -854,26 +1036,33 @@ typedef struct AlignPairDistanceFilterFactory_struct {
     uint32_t mp_dist_qty;
 } AlignPairDistanceFilterFactory;
 
-static
-rc_t AlignPairDistanceFilterFactory_Init(const SRASplitterFactory* cself)
+
+static rc_t AlignPairDistanceFilterFactory_Init( const SRASplitterFactory* cself )
 {
     rc_t rc = 0;
-    AlignPairDistanceFilterFactory* self = (AlignPairDistanceFilterFactory*)cself;
+    AlignPairDistanceFilterFactory* self = ( AlignPairDistanceFilterFactory* )cself;
 
-    if( self == NULL ) {
-        rc = RC(rcSRA, rcType, rcConstructing, rcParam, rcNull);
-    } else {
-        if( !((rc = SRATableOpenColumnRead(self->table, &self->col_tlen, "TEMPLATE_LEN", "I32")) == 0 ||
-             GetRCState(rc) == rcExists) && GetRCState(rc) == rcNotFound ) {
-            LOGMSG(klogWarn, "Column TLEN was not found, no distance filtering");
+    if ( self == NULL )
+    {
+        rc = RC( rcSRA, rcType, rcConstructing, rcParam, rcNull );
+    }
+    else
+    {
+        rc = SRATableOpenColumnRead( self->table, &self->col_tlen, "TEMPLATE_LEN", "I32" );
+        if( !( rc == 0 || GetRCState( rc ) == rcExists ) && GetRCState( rc ) == rcNotFound )
+        {
+            LOGMSG( klogWarn, "Column TLEN was not found, no distance filtering" );
             self->col_tlen = NULL;
             rc = 0;
         }
-        if( rc == 0 ) {
+        if ( rc == 0 )
+        {
             uint32_t i;
-            for(i = 0; i < self->mp_dist_qty; i++ ) {
-                if( self->mp_dist[i].to == 0 ) {
-                    self->mp_dist[i].to = ~0;
+            for ( i = 0; i < self->mp_dist_qty; i++ )
+            {
+                if ( self->mp_dist[ i ].to == 0 )
+                {
+                    self->mp_dist[ i ].to = ~0;
                 }
             }
         }
@@ -881,891 +1070,1204 @@ rc_t AlignPairDistanceFilterFactory_Init(const SRASplitterFactory* cself)
     return rc;
 }
 
-static
-rc_t AlignPairDistanceFilterFactory_NewObj(const SRASplitterFactory* cself, const SRASplitter** splitter)
+
+static rc_t AlignPairDistanceFilterFactory_NewObj( const SRASplitterFactory* cself,
+                                                   const SRASplitter** splitter )
 {
     rc_t rc = 0;
-    AlignPairDistanceFilterFactory* self = (AlignPairDistanceFilterFactory*)cself;
+    AlignPairDistanceFilterFactory* self = ( AlignPairDistanceFilterFactory* )cself;
 
-    if( self == NULL ) {
-        rc = RC(rcSRA, rcType, rcExecuting, rcParam, rcNull);
-    } else {
-        if( (rc = SRASplitter_Make(splitter, sizeof(AlignPairDistanceFilter), AlignPairDistanceFilter_GetKey, NULL, NULL, NULL)) == 0 ) {
-            ((AlignPairDistanceFilter*)(*splitter))->col_tlen = self->col_tlen;
-            ((AlignPairDistanceFilter*)(*splitter))->mp_dist_unknown = self->mp_dist_unknown;
-            ((AlignPairDistanceFilter*)(*splitter))->mp_dist = self->mp_dist;
-            ((AlignPairDistanceFilter*)(*splitter))->mp_dist_qty = self->mp_dist_qty;
+    if ( self == NULL )
+    {
+        rc = RC( rcSRA, rcType, rcExecuting, rcParam, rcNull );
+    }
+    else
+    {
+        rc = SRASplitter_Make( splitter, sizeof( AlignPairDistanceFilter ),
+                               AlignPairDistanceFilter_GetKey, NULL, NULL, NULL );
+        if ( rc == 0 )
+        {
+            ( (AlignPairDistanceFilter*)(*splitter) )->col_tlen = self->col_tlen;
+            ( (AlignPairDistanceFilter*)(*splitter) )->mp_dist_unknown = self->mp_dist_unknown;
+            ( (AlignPairDistanceFilter*)(*splitter) )->mp_dist = self->mp_dist;
+            ( (AlignPairDistanceFilter*)(*splitter) )->mp_dist_qty = self->mp_dist_qty;
         }
     }
     return rc;
 }
 
-static
-void AlignPairDistanceFilterFactory_Release(const SRASplitterFactory* cself)
+
+static void AlignPairDistanceFilterFactory_Release( const SRASplitterFactory* cself )
 {
-    if( cself != NULL ) {
-        AlignPairDistanceFilterFactory* self = (AlignPairDistanceFilterFactory*)cself;
-        SRAColumnRelease(self->col_tlen);
+    if ( cself != NULL )
+    {
+        AlignPairDistanceFilterFactory* self = ( AlignPairDistanceFilterFactory* )cself;
+        SRAColumnRelease( self->col_tlen );
     }
 }
 
-static
-rc_t AlignPairDistanceFilterFactory_Make(const SRASplitterFactory** cself, const SRATable* table,
-                                   bool mp_dist_unknown, TMatepairDistance* mp_dist, uint32_t mp_dist_qty)
+
+static rc_t AlignPairDistanceFilterFactory_Make( const SRASplitterFactory** cself,
+        const SRATable* table, bool mp_dist_unknown, TMatepairDistance* mp_dist, uint32_t mp_dist_qty )
 {
     rc_t rc = 0;
     AlignPairDistanceFilterFactory* obj = NULL;
 
-    if( cself == NULL || table == NULL ) {
-        rc = RC(rcSRA, rcType, rcAllocating, rcParam, rcNull);
-    } else if( (rc = SRASplitterFactory_Make(cself, eSplitterSpot, sizeof(*obj),
-                                             AlignPairDistanceFilterFactory_Init,
-                                             AlignPairDistanceFilterFactory_NewObj,
-                                             AlignPairDistanceFilterFactory_Release)) == 0 ) {
-        obj = (AlignPairDistanceFilterFactory*)*cself;
-        obj->table = table;
-        obj->mp_dist_unknown = mp_dist_unknown;
-        obj->mp_dist = mp_dist;
-        obj->mp_dist_qty = mp_dist_qty;
+    if ( cself == NULL || table == NULL )
+    {
+        rc = RC( rcSRA, rcType, rcAllocating, rcParam, rcNull );
+    }
+    else
+    {
+        rc = SRASplitterFactory_Make( cself, eSplitterSpot, sizeof( *obj ),
+                                      AlignPairDistanceFilterFactory_Init,
+                                      AlignPairDistanceFilterFactory_NewObj,
+                                      AlignPairDistanceFilterFactory_Release );
+        if ( rc == 0 )
+        {
+            obj = ( AlignPairDistanceFilterFactory* ) *cself;
+            obj->table = table;
+            obj->mp_dist_unknown = mp_dist_unknown;
+            obj->mp_dist = mp_dist;
+            obj->mp_dist_qty = mp_dist_qty;
+        }
     }
     return rc;
 }
 
+
 /* ============== FASTQ read type (bio/tech) filter ============================ */
 
-typedef struct FastqBioFilter_struct {
+typedef struct FastqBioFilter_struct
+{
     const FastqReader* reader;
 } FastqBioFilter;
 
 
 /* filter out non-bio reads */
-static
-rc_t FastqBioFilter_GetKey(const SRASplitter* cself, const char** key, spotid_t spot, readmask_t* readmask)
+static rc_t FastqBioFilter_GetKey( const SRASplitter* cself, const char** key,
+                                   spotid_t spot, readmask_t* readmask )
 {
     rc_t rc = 0;
-    FastqBioFilter* self = (FastqBioFilter*)cself;
+    FastqBioFilter* self = ( FastqBioFilter* )cself;
 
-    if( self == NULL || key == NULL ) {
-        rc = RC(rcExe, rcNode, rcExecuting, rcParam, rcInvalid);
-    } else {
+    if ( self == NULL || key == NULL )
+    {
+        rc = RC( rcExe, rcNode, rcExecuting, rcParam, rcInvalid );
+    }
+    else
+    {
         uint32_t num_reads = 0;
 
         *key = NULL;
-        if( (rc = FastqReaderSeekSpot(self->reader, spot)) == 0 ) {
-            if( (rc = FastqReader_SpotInfo(self->reader, NULL, NULL, NULL, NULL, NULL, &num_reads)) == 0 ) {
+        rc = FastqReaderSeekSpot( self->reader, spot );
+        if ( rc == 0 )
+        {
+            rc = FastqReader_SpotInfo( self->reader, NULL, NULL, NULL, NULL, NULL, &num_reads );
+            if ( rc == 0 )
+            {
                 uint32_t readId;
-                SRA_DUMP_DBG(3, ("%s %u row reads: ", __func__, spot));
-                for(readId = 0; rc == 0 && readId < num_reads; readId++) {
-                    if( isset_readmask(readmask, readId) ) {
+                SRA_DUMP_DBG( 3, ( "%s %u row reads: ", __func__, spot ) );
+                for (readId = 0; rc == 0 && readId < num_reads; readId++ )
+                {
+                    if ( isset_readmask( readmask, readId ) )
+                    {
                         SRAReadTypes read_type;
-                        if( (rc = FastqReader_SpotReadInfo(self->reader, readId + 1, &read_type,
-                                                           NULL, NULL, NULL, NULL)) == 0 ) {
-                            if( !(read_type & SRA_READ_TYPE_BIOLOGICAL) ) {
-                                unset_readmask(readmask, readId);
-                            } else {
-                                SRA_DUMP_DBG(3, (" %u", readId));
+                        rc = FastqReader_SpotReadInfo( self->reader, readId + 1, &read_type,
+                                                       NULL, NULL, NULL, NULL);
+                        if ( rc == 0 )
+                        {
+                            if ( !( read_type & SRA_READ_TYPE_BIOLOGICAL ) )
+                            {
+                                unset_readmask( readmask, readId );
+                            }
+                            else
+                            {
+                                SRA_DUMP_DBG( 3, ( " %u", readId ) );
                             }
                         }
                     }
                 }
                 *key = "";
-                SRA_DUMP_DBG(3, (" key '%s'\n", *key));
+                SRA_DUMP_DBG( 3, ( " key '%s'\n", *key ) );
             }
-        } else if( GetRCObject(rc) == rcRow && GetRCState(rc) == rcNotFound ) {
-            SRA_DUMP_DBG(3, ("%s skipped %u row\n", __func__, spot));
+        }
+        else if ( GetRCObject( rc ) == rcRow && GetRCState( rc ) == rcNotFound )
+        {
+            SRA_DUMP_DBG( 3, ( "%s skipped %u row\n", __func__, spot ) );
             rc = 0;
         }
     }
     return rc;
 }
 
-typedef struct FastqBioFilterFactory_struct {
+
+typedef struct FastqBioFilterFactory_struct
+{
     const char* accession;
     const SRATable* table;
     const FastqReader* reader;
 } FastqBioFilterFactory;
 
-static
-rc_t FastqBioFilterFactory_Init(const SRASplitterFactory* cself)
+
+static rc_t FastqBioFilterFactory_Init( const SRASplitterFactory* cself )
 {
     rc_t rc = 0;
-    FastqBioFilterFactory* self = (FastqBioFilterFactory*)cself;
+    FastqBioFilterFactory* self = ( FastqBioFilterFactory* )cself;
 
-    if( self == NULL ) {
-        rc = RC(rcExe, rcType, rcConstructing, rcParam, rcNull);
-    } else {
-        rc = FastqReaderMake(&self->reader, self->table, self->accession,
-                             /* preserve orig spot format to save on conversions */
-                             FastqArgs.is_platform_cs_native, false, FastqArgs.fasta > 0, false, 
-                             false, !FastqArgs.applyClip, 0,
-                             FastqArgs.offset, '\0', 0, 0);
+    if ( self == NULL )
+    {
+        rc = RC( rcExe, rcType, rcConstructing, rcParam, rcNull );
+    }
+    else
+    {
+        rc = FastqReaderMake( &self->reader, self->table, self->accession,
+                              /* preserve orig spot format to save on conversions */
+                              FastqArgs.is_platform_cs_native, false, FastqArgs.fasta > 0, false, 
+                              false, !FastqArgs.applyClip, 0,
+                              FastqArgs.offset, '\0', 0, 0) ;
     }
     return rc;
 }
 
-static
-rc_t FastqBioFilterFactory_NewObj(const SRASplitterFactory* cself, const SRASplitter** splitter)
+
+static rc_t FastqBioFilterFactory_NewObj( const SRASplitterFactory* cself, const SRASplitter** splitter )
 {
     rc_t rc = 0;
-    FastqBioFilterFactory* self = (FastqBioFilterFactory*)cself;
+    FastqBioFilterFactory* self = ( FastqBioFilterFactory* )cself;
 
-    if( self == NULL ) {
-        rc = RC(rcExe, rcType, rcExecuting, rcParam, rcNull);
-    } else {
-        if( (rc = SRASplitter_Make(splitter, sizeof(FastqBioFilter), FastqBioFilter_GetKey, NULL, NULL, NULL)) == 0 ) {
-            ((FastqBioFilter*)(*splitter))->reader = self->reader;
+    if ( self == NULL )
+    {
+        rc = RC( rcExe, rcType, rcExecuting, rcParam, rcNull );
+    }
+    else
+    {
+        rc = SRASplitter_Make( splitter, sizeof( FastqBioFilter ),
+                               FastqBioFilter_GetKey, NULL, NULL, NULL );
+        if ( rc == 0 )
+        {
+            ( (FastqBioFilter*)(*splitter) )->reader = self->reader;
         }
     }
     return rc;
 }
 
-static
-void FastqBioFilterFactory_Release(const SRASplitterFactory* cself)
+
+static void FastqBioFilterFactory_Release( const SRASplitterFactory* cself )
 {
-    if( cself != NULL ) {
-        FastqBioFilterFactory* self = (FastqBioFilterFactory*)cself;
-        FastqReaderWhack(self->reader);
+    if ( cself != NULL )
+    {
+        FastqBioFilterFactory* self = ( FastqBioFilterFactory* )cself;
+        FastqReaderWhack( self->reader );
     }
 }
 
-static
-rc_t FastqBioFilterFactory_Make(const SRASplitterFactory** cself, const char* accession, const SRATable* table)
+
+static rc_t FastqBioFilterFactory_Make( const SRASplitterFactory** cself,
+                        const char* accession, const SRATable* table )
 {
     rc_t rc = 0;
     FastqBioFilterFactory* obj = NULL;
 
-    if( cself == NULL || accession == NULL || table == NULL ) {
-        rc = RC(rcExe, rcType, rcConstructing, rcParam, rcNull);
-    } else if( (rc = SRASplitterFactory_Make(cself, eSplitterSpot, sizeof(*obj),
-                                             FastqBioFilterFactory_Init,
-                                             FastqBioFilterFactory_NewObj,
-                                             FastqBioFilterFactory_Release)) == 0 ) {
-        obj = (FastqBioFilterFactory*)*cself;
-        obj->accession = accession;
-        obj->table = table;
+    if ( cself == NULL || accession == NULL || table == NULL )
+    {
+        rc = RC( rcExe, rcType, rcConstructing, rcParam, rcNull );
+    }
+    else
+    {
+        rc = SRASplitterFactory_Make( cself, eSplitterSpot, sizeof( *obj ),
+                                      FastqBioFilterFactory_Init,
+                                      FastqBioFilterFactory_NewObj,
+                                      FastqBioFilterFactory_Release );
+
+        if ( rc == 0 )
+        {
+            obj = ( FastqBioFilterFactory* )*cself;
+            obj->accession = accession;
+            obj->table = table;
+        }
     }
     return rc;
 }
 
+
 /* ============== FASTQ number of reads filter ============================ */
 
-typedef struct FastqRNumberFilter_struct {
+typedef struct FastqRNumberFilter_struct
+{
     const FastqReader* reader;
 } FastqRNumberFilter;
 
 
-static
-rc_t FastqRNumberFilter_GetKey(const SRASplitter* cself, const char** key, spotid_t spot, readmask_t* readmask)
+static rc_t FastqRNumberFilter_GetKey( const SRASplitter* cself, const char** key,
+                                       spotid_t spot, readmask_t* readmask )
 {
     rc_t rc = 0;
-    FastqRNumberFilter* self = (FastqRNumberFilter*)cself;
+    FastqRNumberFilter* self = ( FastqRNumberFilter* )cself;
 
-    if( self == NULL || key == NULL ) {
-        rc = RC(rcExe, rcNode, rcExecuting, rcParam, rcInvalid);
-    } else {
+    if ( self == NULL || key == NULL )
+    {
+        rc = RC( rcExe, rcNode, rcExecuting, rcParam, rcInvalid );
+    }
+    else
+    {
         uint32_t num_reads = 0;
 
         *key = NULL;
-        if( (rc = FastqReaderSeekSpot(self->reader, spot)) == 0 ) {
-            if( (rc = FastqReader_SpotInfo(self->reader, NULL, NULL, NULL, NULL, NULL, &num_reads)) == 0 ) {
+        rc = FastqReaderSeekSpot( self->reader, spot );
+        if ( rc == 0 )
+        {
+            rc = FastqReader_SpotInfo( self->reader, NULL, NULL, NULL, NULL, NULL, &num_reads );
+            if ( rc == 0 )
+            {
                 int readId, q;
 
-                SRA_DUMP_DBG(3, ("%s %u row reads: ", __func__, spot));
-                for(readId = 0, q = 0; readId < num_reads; readId++) {
-                    if( isset_readmask(readmask, readId) ) {
-                        if( ++q > FastqArgs.maxReads ) {
-                            unset_readmask(readmask, 1 << readId);
-                        } else {
-                            SRA_DUMP_DBG(3, (" %u", readId));
+                SRA_DUMP_DBG( 3, ( "%s %u row reads: ", __func__, spot ) );
+                for ( readId = 0, q = 0; readId < num_reads; readId++ )
+                {
+                    if ( isset_readmask( readmask, readId ) )
+                    {
+                        if ( ++q > FastqArgs.maxReads )
+                        {
+                            unset_readmask( readmask, 1 << readId );
+                        }
+                        else
+                        {
+                            SRA_DUMP_DBG( 3, ( " %u", readId ) );
                         }
                     }
                 }
                 *key = "";
-                SRA_DUMP_DBG(3, (" key '%s'\n", *key));
+                SRA_DUMP_DBG( 3, ( " key '%s'\n", *key ) );
             }
-        } else if( GetRCObject(rc) == rcRow && GetRCState(rc) == rcNotFound ) {
-            SRA_DUMP_DBG(3, ("%s skipped %u row\n", __func__, spot));
+        }
+        else if ( GetRCObject( rc ) == rcRow && GetRCState( rc ) == rcNotFound )
+        {
+            SRA_DUMP_DBG( 3, ( "%s skipped %u row\n", __func__, spot ) );
             rc = 0;
         }
     }
     return rc;
 }
 
-typedef struct FastqRNumberFilterFactory_struct {
+
+typedef struct FastqRNumberFilterFactory_struct
+{
     const char* accession;
     const SRATable* table;
     const FastqReader* reader;
 } FastqRNumberFilterFactory;
 
-static
-rc_t FastqRNumberFilterFactory_Init(const SRASplitterFactory* cself)
+
+static rc_t FastqRNumberFilterFactory_Init( const SRASplitterFactory* cself )
 {
     rc_t rc = 0;
-    FastqRNumberFilterFactory* self = (FastqRNumberFilterFactory*)cself;
+    FastqRNumberFilterFactory* self = ( FastqRNumberFilterFactory* )cself;
 
-    if( self == NULL ) {
-        rc = RC(rcExe, rcType, rcConstructing, rcParam, rcNull);
-    } else {
-        rc = FastqReaderMake(&self->reader, self->table, self->accession,
-                             /* preserve orig spot format to save on conversions */
-                             FastqArgs.is_platform_cs_native, false, FastqArgs.fasta > 0, false, 
-                             false, !FastqArgs.applyClip, 0,
-                             FastqArgs.offset, '\0', 0, 0);
+    if ( self == NULL )
+    {
+        rc = RC( rcExe, rcType, rcConstructing, rcParam, rcNull );
+    }
+    else
+    {
+        rc = FastqReaderMake( &self->reader, self->table, self->accession,
+                              /* preserve orig spot format to save on conversions */
+                              FastqArgs.is_platform_cs_native, false, FastqArgs.fasta > 0, false, 
+                              false, !FastqArgs.applyClip, 0,
+                              FastqArgs.offset, '\0', 0, 0 );
     }
     return rc;
 }
 
-static
-rc_t FastqRNumberFilterFactory_NewObj(const SRASplitterFactory* cself, const SRASplitter** splitter)
+
+static rc_t FastqRNumberFilterFactory_NewObj( const SRASplitterFactory* cself, const SRASplitter** splitter )
 {
     rc_t rc = 0;
-    FastqRNumberFilterFactory* self = (FastqRNumberFilterFactory*)cself;
+    FastqRNumberFilterFactory* self = ( FastqRNumberFilterFactory* )cself;
 
-    if( self == NULL ) {
-        rc = RC(rcExe, rcType, rcExecuting, rcParam, rcNull);
-    } else {
-        if( (rc = SRASplitter_Make(splitter, sizeof(FastqRNumberFilter), FastqRNumberFilter_GetKey, NULL, NULL, NULL)) == 0 ) {
-            ((FastqRNumberFilter*)(*splitter))->reader = self->reader;
+    if ( self == NULL )
+    {
+        rc = RC( rcExe, rcType, rcExecuting, rcParam, rcNull );
+    }
+    else
+    {
+        rc = SRASplitter_Make( splitter, sizeof( FastqRNumberFilter ),
+                               FastqRNumberFilter_GetKey, NULL, NULL, NULL );
+        if ( rc == 0 )
+        {
+            ( (FastqRNumberFilter*)(*splitter) )->reader = self->reader;
         }
     }
     return rc;
 }
 
-static
-void FastqRNumberFilterFactory_Release(const SRASplitterFactory* cself)
+
+static void FastqRNumberFilterFactory_Release( const SRASplitterFactory* cself )
 {
-    if( cself != NULL ) {
-        FastqRNumberFilterFactory* self = (FastqRNumberFilterFactory*)cself;
-        FastqReaderWhack(self->reader);
+    if ( cself != NULL )
+    {
+        FastqRNumberFilterFactory* self = ( FastqRNumberFilterFactory* )cself;
+        FastqReaderWhack( self->reader );
     }
 }
 
-static
-rc_t FastqRNumberFilterFactory_Make(const SRASplitterFactory** cself, const char* accession, const SRATable* table)
+
+static rc_t FastqRNumberFilterFactory_Make( const SRASplitterFactory** cself,
+                                const char* accession, const SRATable* table )
 {
     rc_t rc = 0;
     FastqRNumberFilterFactory* obj = NULL;
 
-    if( cself == NULL || accession == NULL || table == NULL ) {
-        rc = RC(rcExe, rcType, rcConstructing, rcParam, rcNull);
-    } else if( (rc = SRASplitterFactory_Make(cself, eSplitterSpot, sizeof(*obj),
-                                             FastqRNumberFilterFactory_Init,
-                                             FastqRNumberFilterFactory_NewObj,
-                                             FastqRNumberFilterFactory_Release)) == 0 ) {
-        obj = (FastqRNumberFilterFactory*)*cself;
-        obj->accession = accession;
-        obj->table = table;
+    if ( cself == NULL || accession == NULL || table == NULL )
+    {
+        rc = RC( rcExe, rcType, rcConstructing, rcParam, rcNull );
+    }
+    else
+    {
+        rc = SRASplitterFactory_Make( cself, eSplitterSpot, sizeof( *obj ),
+                                      FastqRNumberFilterFactory_Init,
+                                      FastqRNumberFilterFactory_NewObj,
+                                      FastqRNumberFilterFactory_Release );
+        if ( rc == 0 )
+        {
+            obj = ( FastqRNumberFilterFactory* )*cself;
+            obj->accession = accession;
+            obj->table = table;
+        }
     }
     return rc;
 }
 
 /* ============== FASTQ quality filter ============================ */
 
-typedef struct FastqQFilter_struct {
+typedef struct FastqQFilter_struct
+{
     const FastqReader* reader;
     KDataBuffer* kdbuf;
 } FastqQFilter;
 
 
 /* filter out reads by leading/trialing quality */
-static
-rc_t FastqQFilter_GetKey(const SRASplitter* cself, const char** key, spotid_t spot, readmask_t* readmask)
+static rc_t FastqQFilter_GetKey( const SRASplitter* cself, const char** key,
+                                 spotid_t spot, readmask_t* readmask )
 {
     rc_t rc = 0;
-    FastqQFilter* self = (FastqQFilter*)cself;
+    FastqQFilter* self = ( FastqQFilter* )cself;
 
-    if( self == NULL || key == NULL ) {
-        rc = RC(rcExe, rcNode, rcExecuting, rcParam, rcInvalid);
-    } else {
+    if ( self == NULL || key == NULL )
+    {
+        rc = RC( rcExe, rcNode, rcExecuting, rcParam, rcInvalid );
+    }
+    else
+    {
         uint32_t num_reads = 0, spot_len;
 
         *key = NULL;
-        if( (rc = FastqReaderSeekSpot(self->reader, spot)) == 0 ) {
-            if( (rc = FastqReader_SpotInfo(self->reader, NULL, NULL, NULL, NULL, &spot_len, &num_reads)) == 0 ) {
+        rc = FastqReaderSeekSpot( self->reader, spot );
+        if ( rc == 0 )
+        {
+            rc = FastqReader_SpotInfo( self->reader, NULL, NULL, NULL, NULL, &spot_len, &num_reads );
+            if ( rc == 0 )
+            {
                 static char const* const baseStr = "NNNNNNNNNN";
                 static char const* const colorStr = "..........";
                 static const uint32_t strLen = 10;
 
-                SRA_DUMP_DBG(3, ("%s %u row reads: ", __func__, spot));
-                if( FastqArgs.split_spot ) {
+                SRA_DUMP_DBG( 3, ( "%s %u row reads: ", __func__, spot ) );
+                if ( FastqArgs.split_spot )
+                {
                     uint32_t readId;
                     INSDC_coord_len read_len;
-                    for(readId = 0; rc == 0 && readId < num_reads; readId++) {
-                        if( isset_readmask(readmask, readId) ) {
-                            if( (rc = FastqReader_SpotReadInfo(self->reader, readId + 1, NULL, NULL, NULL, NULL, &read_len)) == 0 ) {
+                    for ( readId = 0; rc == 0 && readId < num_reads; readId++ )
+                    {
+                        if ( isset_readmask( readmask, readId ) )
+                        {
+                            rc = FastqReader_SpotReadInfo( self->reader, readId + 1, NULL, NULL, NULL, NULL, &read_len );
+                            if ( rc == 0 )
+                            {
                                 uint32_t xLen = read_len < strLen ? read_len : strLen;
-                                IF_BUF((FastqReaderBase(self->reader, readId + 1,
-                                       self->kdbuf->base, KDataBufferBytes(self->kdbuf), NULL)), self->kdbuf, read_len) {
+                                IF_BUF( ( FastqReaderBase(self->reader, readId + 1,
+                                          self->kdbuf->base, KDataBufferBytes( self->kdbuf ), NULL) ), self->kdbuf, read_len )
+                                {
                                     const char* b = self->kdbuf->base;
-                                        if( (FastqArgs.is_platform_cs_native &&
-                                             (strncmp(&b[1], colorStr, xLen) == 0 || strcmp(&b[read_len - xLen + 1], colorStr) == 0)) ||
-                                            (strncmp(b, baseStr, xLen) == 0 || strcmp(&b[read_len - xLen], baseStr) == 0) )  {
-                                        unset_readmask(readmask, readId);
-                                    } else {
-                                        SRA_DUMP_DBG(3, (" %u", readId));
+                                    if ( ( FastqArgs.is_platform_cs_native &&
+                                           ( strncmp( &b[ 1 ], colorStr, xLen) == 0 || strcmp( &b[ read_len - xLen + 1 ], colorStr ) == 0 ) ) ||
+                                           ( strncmp( b, baseStr, xLen ) == 0 || strcmp( &b[ read_len - xLen ], baseStr ) == 0 ) )
+                                    {
+                                        unset_readmask( readmask, readId );
+                                    }
+                                    else
+                                    {
+                                        SRA_DUMP_DBG( 3, ( " %u", readId ) );
                                     }
                                 }
                             }
                         }
                     }
                     *key = "";
-                } else {
+                }
+                else
+                {
                     uint32_t xLen = spot_len < strLen ? spot_len : strLen;
-                    IF_BUF((FastqReaderBase(self->reader, 0, self->kdbuf->base, KDataBufferBytes(self->kdbuf), NULL)), self->kdbuf, spot_len) {
+                    IF_BUF( ( FastqReaderBase( self->reader, 0, self->kdbuf->base, KDataBufferBytes( self->kdbuf ), NULL ) ), self->kdbuf, spot_len )
+                    {
                         const char* b = self->kdbuf->base;
-                        if( (FastqArgs.is_platform_cs_native &&
-                             (strncmp(&b[1], colorStr, xLen) == 0 || strcmp(&b[spot_len - xLen + 1], colorStr) == 0)) ||
-                            (strncmp(b, baseStr, xLen) == 0 || strcmp(&b[spot_len - xLen], baseStr) == 0) ) {
-                        } else {
+                        if ( ( FastqArgs.is_platform_cs_native &&
+                               ( strncmp( &b[ 1 ], colorStr, xLen ) == 0 || strcmp( &b[ spot_len - xLen + 1 ], colorStr ) == 0 ) ) ||
+                               ( strncmp( b, baseStr, xLen ) == 0 || strcmp( &b[ spot_len - xLen ], baseStr ) == 0 ) )
+                        {
+                        }
+                        else
+                        {
                             *key = "";
-                            SRA_DUMP_DBG(3, (" whole spot"));
+                            SRA_DUMP_DBG( 3, ( " whole spot" ) );
                         }
                     }
                 }
-                SRA_DUMP_DBG(3, (" key '%s'\n", *key));
+                SRA_DUMP_DBG( 3, ( " key '%s'\n", *key ) );
             }
-        } else if( GetRCObject(rc) == rcRow && GetRCState(rc) == rcNotFound ) {
-            SRA_DUMP_DBG(3, ("%s skipped %u row\n", __func__, spot));
+        }
+        else if ( GetRCObject( rc ) == rcRow && GetRCState( rc ) == rcNotFound )
+        {
+            SRA_DUMP_DBG( 3, ( "%s skipped %u row\n", __func__, spot ) );
             rc = 0;
         }
     }
     return rc;
 }
 
-typedef struct FastqQFilterFactory_struct {
+
+typedef struct FastqQFilterFactory_struct
+{
     const char* accession;
     const SRATable* table;
     const FastqReader* reader;
     KDataBuffer kdbuf;
 } FastqQFilterFactory;
 
-static
-rc_t FastqQFilterFactory_Init(const SRASplitterFactory* cself)
+
+static rc_t FastqQFilterFactory_Init( const SRASplitterFactory* cself )
 {
     rc_t rc = 0;
-    FastqQFilterFactory* self = (FastqQFilterFactory*)cself;
+    FastqQFilterFactory* self = ( FastqQFilterFactory* )cself;
 
-    if( self == NULL ) {
-        rc = RC(rcExe, rcType, rcConstructing, rcParam, rcNull);
-    } else if( (rc = KDataBufferMakeBytes(&self->kdbuf, DATABUFFERINITSIZE)) == 0 ) {
-        rc = FastqReaderMake(&self->reader, self->table, self->accession,
+    if ( self == NULL )
+    {
+        rc = RC( rcExe, rcType, rcConstructing, rcParam, rcNull );
+    }
+    else
+    {
+        rc = KDataBufferMakeBytes( &self->kdbuf, DATABUFFERINITSIZE );
+        if ( rc == 0 )
+        {
+            rc = FastqReaderMake( &self->reader, self->table, self->accession,
                              /* preserve orig spot format to save on conversions */
                              FastqArgs.is_platform_cs_native, false, FastqArgs.fasta > 0, false, 
                              false, !FastqArgs.applyClip, 0,
-                             FastqArgs.offset, '\0', 0, 0);
-    }
-    return rc;
-}
-
-static
-rc_t FastqQFilterFactory_NewObj(const SRASplitterFactory* cself, const SRASplitter** splitter)
-{
-    rc_t rc = 0;
-    FastqQFilterFactory* self = (FastqQFilterFactory*)cself;
-
-    if( self == NULL ) {
-        rc = RC(rcExe, rcType, rcExecuting, rcParam, rcNull);
-    } else {
-        if( (rc = SRASplitter_Make(splitter, sizeof(FastqQFilter), FastqQFilter_GetKey, NULL, NULL, NULL)) == 0 ) {
-            ((FastqQFilter*)(*splitter))->reader = self->reader;
-            ((FastqQFilter*)(*splitter))->kdbuf = &self->kdbuf;
+                             FastqArgs.offset, '\0', 0, 0 );
         }
     }
     return rc;
 }
 
-static
-void FastqQFilterFactory_Release(const SRASplitterFactory* cself)
-{
-    if( cself != NULL ) {
-        FastqQFilterFactory* self = (FastqQFilterFactory*)cself;
-        KDataBufferWhack(&self->kdbuf);
-        FastqReaderWhack(self->reader);
-    }
-}
 
-static
-rc_t FastqQFilterFactory_Make(const SRASplitterFactory** cself, const char* accession, const SRATable* table)
+static rc_t FastqQFilterFactory_NewObj( const SRASplitterFactory* cself, const SRASplitter** splitter )
 {
     rc_t rc = 0;
-    FastqQFilterFactory* obj = NULL;
+    FastqQFilterFactory* self = ( FastqQFilterFactory* )cself;
 
-    if( cself == NULL || accession == NULL || table == NULL ) {
-        rc = RC(rcExe, rcType, rcConstructing, rcParam, rcNull);
-    } else if( (rc = SRASplitterFactory_Make(cself, eSplitterSpot, sizeof(*obj),
-                                             FastqQFilterFactory_Init,
-                                             FastqQFilterFactory_NewObj,
-                                             FastqQFilterFactory_Release)) == 0 ) {
-        obj = (FastqQFilterFactory*)*cself;
-        obj->accession = accession;
-        obj->table = table;
+    if ( self == NULL )
+    {
+        rc = RC( rcExe, rcType, rcExecuting, rcParam, rcNull );
+    }
+    else
+    {
+        rc = SRASplitter_Make( splitter, sizeof( FastqQFilter ), FastqQFilter_GetKey, NULL, NULL, NULL );
+        if ( rc == 0 )
+        {
+            ( (FastqQFilter*)(*splitter) )->reader = self->reader;
+            ( (FastqQFilter*)(*splitter) )->kdbuf = &self->kdbuf;
+        }
     }
     return rc;
 }
 
+
+static void FastqQFilterFactory_Release( const SRASplitterFactory* cself )
+{
+    if ( cself != NULL )
+    {
+        FastqQFilterFactory* self = ( FastqQFilterFactory* )cself;
+        KDataBufferWhack( &self->kdbuf );
+        FastqReaderWhack( self->reader );
+    }
+}
+
+
+static rc_t FastqQFilterFactory_Make( const SRASplitterFactory** cself,
+                                      const char* accession, const SRATable* table )
+{
+    rc_t rc = 0;
+    FastqQFilterFactory* obj = NULL;
+
+    if ( cself == NULL || accession == NULL || table == NULL )
+    {
+        rc = RC( rcExe, rcType, rcConstructing, rcParam, rcNull );
+    }
+    else
+    {
+        rc = SRASplitterFactory_Make( cself, eSplitterSpot, sizeof( *obj ),
+                                      FastqQFilterFactory_Init,
+                                      FastqQFilterFactory_NewObj,
+                                      FastqQFilterFactory_Release );
+        if ( rc == 0 )
+        {
+            obj = ( FastqQFilterFactory* )*cself;
+            obj->accession = accession;
+            obj->table = table;
+        }
+    }
+    return rc;
+}
+
+
 /* ============== FASTQ min read length filter ============================ */
 
-typedef struct FastqReadLenFilter_struct {
+
+typedef struct FastqReadLenFilter_struct
+{
     const FastqReader* reader;
 } FastqReadLenFilter;
 
-static
-rc_t FastqReadLenFilter_GetKey(const SRASplitter* cself, const char** key, spotid_t spot, readmask_t* readmask)
+
+static rc_t FastqReadLenFilter_GetKey( const SRASplitter* cself, const char** key,
+                                       spotid_t spot, readmask_t* readmask )
 {
     rc_t rc = 0;
-    FastqReadLenFilter* self = (FastqReadLenFilter*)cself;
+    FastqReadLenFilter* self = ( FastqReadLenFilter* )cself;
 
-    if( self == NULL || key == NULL ) {
-        rc = RC(rcExe, rcNode, rcExecuting, rcParam, rcInvalid);
-    } else {
+    if ( self == NULL || key == NULL )
+    {
+        rc = RC( rcExe, rcNode, rcExecuting, rcParam, rcInvalid );
+    }
+    else
+    {
         uint32_t num_reads = 0, spot_len = 0;
 
         *key = NULL;
-        if( rc == 0 && (rc = FastqReaderSeekSpot(self->reader, spot)) == 0 ) {
-            if( (rc = FastqReader_SpotInfo(self->reader, NULL, NULL, NULL, NULL, &spot_len, &num_reads)) == 0 ) {
-                SRA_DUMP_DBG(3, ("%s %u row reads:", __func__, spot));
-                if( FastqArgs.split_spot ) {
+        rc = FastqReaderSeekSpot( self->reader, spot );
+        if ( rc == 0 )
+        {
+            rc = FastqReader_SpotInfo( self->reader, NULL, NULL, NULL, NULL, &spot_len, &num_reads );
+            if ( rc == 0 )
+            {
+                SRA_DUMP_DBG( 3, ( "%s %u row reads:", __func__, spot ) );
+                if ( FastqArgs.split_spot )
+                {
                     uint32_t readId;
                     INSDC_coord_len read_len = 0;
-                    for(readId = 0; rc == 0 && readId < num_reads; readId++) {
-                        if( isset_readmask(readmask, readId) ) {
-                            if( (rc = FastqReader_SpotReadInfo(self->reader, readId + 1, NULL, NULL, NULL, NULL, &read_len)) == 0 ) {
-                                if( read_len < FastqArgs.minReadLen ) {
-                                    unset_readmask(readmask, readId);
-                                } else {
-                                    SRA_DUMP_DBG(3, (" %u", readId));
+                    for ( readId = 0; rc == 0 && readId < num_reads; readId++ )
+                    {
+                        if ( isset_readmask( readmask, readId ) )
+                        {
+                            rc = FastqReader_SpotReadInfo( self->reader, readId + 1, NULL, NULL, NULL, NULL, &read_len );
+                            if ( rc == 0 )
+                            {
+                                if ( read_len < FastqArgs.minReadLen )
+                                {
+                                    unset_readmask( readmask, readId );
+                                }
+                                else
+                                {
+                                    SRA_DUMP_DBG( 3, ( " %u", readId ) );
                                 }
                             }
                         }
                     }
                     *key = "";
-                } else {
-                    if( spot_len >= FastqArgs.minReadLen ) {
+                }
+                else
+                {
+                    if ( spot_len >= FastqArgs.minReadLen )
+                    {
                         *key = "";
-                        SRA_DUMP_DBG(3, (" whole spot"));
+                        SRA_DUMP_DBG( 3, ( " whole spot" ) );
                     }
                 }
-                SRA_DUMP_DBG(3, ("\n"));
+                SRA_DUMP_DBG( 3, ( "\n" ) );
             }
-        } else if( GetRCObject(rc) == rcRow && GetRCState(rc) == rcNotFound ) {
-            SRA_DUMP_DBG(3, ("%s skipped %u row\n", __func__, spot));
+        }
+        else if ( GetRCObject( rc ) == rcRow && GetRCState( rc ) == rcNotFound )
+        {
+            SRA_DUMP_DBG( 3, ( "%s skipped %u row\n", __func__, spot ) );
             rc = 0;
         }
     }
     return rc;
 }
 
-typedef struct FastqReadLenFilterFactory_struct {
+
+typedef struct FastqReadLenFilterFactory_struct
+{
     const char* accession;
     const SRATable* table;
     const FastqReader* reader;
 } FastqReadLenFilterFactory;
 
-static
-rc_t FastqReadLenFilterFactory_Init(const SRASplitterFactory* cself)
+
+static rc_t FastqReadLenFilterFactory_Init( const SRASplitterFactory* cself )
 {
     rc_t rc = 0;
-    FastqReadLenFilterFactory* self = (FastqReadLenFilterFactory*)cself;
+    FastqReadLenFilterFactory* self = ( FastqReadLenFilterFactory* )cself;
 
-    if( self == NULL ) {
-        rc = RC(rcExe, rcType, rcConstructing, rcParam, rcNull);
-    } else {
-        rc = FastqReaderMake(&self->reader, self->table, self->accession,
+    if ( self == NULL )
+    {
+        rc = RC( rcExe, rcType, rcConstructing, rcParam, rcNull );
+    }
+    else
+    {
+        rc = FastqReaderMake( &self->reader, self->table, self->accession,
                              /* preserve orig spot format to save on conversions */
-                             FastqArgs.is_platform_cs_native, false, FastqArgs.fasta > 0, false, 
-                             false, !FastqArgs.applyClip, 0,
-                             FastqArgs.offset, '\0', 0, 0);
+                              FastqArgs.is_platform_cs_native, false, FastqArgs.fasta > 0, false, 
+                              false, !FastqArgs.applyClip, 0,
+                              FastqArgs.offset, '\0', 0, 0 );
     }
     return rc;
 }
 
-static
-rc_t FastqReadLenFilterFactory_NewObj(const SRASplitterFactory* cself, const SRASplitter** splitter)
+
+static rc_t FastqReadLenFilterFactory_NewObj( const SRASplitterFactory* cself, const SRASplitter** splitter )
 {
     rc_t rc = 0;
-    FastqReadLenFilterFactory* self = (FastqReadLenFilterFactory*)cself;
+    FastqReadLenFilterFactory* self = ( FastqReadLenFilterFactory* )cself;
 
-    if( self == NULL ) {
-        rc = RC(rcExe, rcType, rcExecuting, rcParam, rcNull);
-    } else {
-        if( (rc = SRASplitter_Make(splitter, sizeof(FastqReadLenFilter), FastqReadLenFilter_GetKey, NULL, NULL, NULL)) == 0 ) {
-            ((FastqReadLenFilter*)(*splitter))->reader = self->reader;
+    if ( self == NULL )
+    {
+        rc = RC( rcExe, rcType, rcExecuting, rcParam, rcNull );
+    }
+    else
+    {
+        rc = SRASplitter_Make( splitter, sizeof( FastqReadLenFilter ),
+                               FastqReadLenFilter_GetKey, NULL, NULL, NULL );
+        if ( rc == 0 )
+        {
+            ( (FastqReadLenFilter*)(*splitter) )->reader = self->reader;
         }
     }
     return rc;
 }
 
-static
-void FastqReadLenFilterFactory_Release(const SRASplitterFactory* cself)
+
+static void FastqReadLenFilterFactory_Release( const SRASplitterFactory* cself )
 {
-    if( cself != NULL ) {
-        FastqReadLenFilterFactory* self = (FastqReadLenFilterFactory*)cself;
-        FastqReaderWhack(self->reader);
+    if ( cself != NULL )
+    {
+        FastqReadLenFilterFactory* self = ( FastqReadLenFilterFactory* )cself;
+        FastqReaderWhack( self->reader );
     }
 }
 
-static
-rc_t FastqReadLenFilterFactory_Make(const SRASplitterFactory** cself, const char* accession, const SRATable* table)
+
+static rc_t FastqReadLenFilterFactory_Make( const SRASplitterFactory** cself,
+                            const char* accession, const SRATable* table )
 {
     rc_t rc = 0;
     FastqReadLenFilterFactory* obj = NULL;
 
-    if( cself == NULL || accession == NULL || table == NULL ) {
-        rc = RC(rcExe, rcType, rcConstructing, rcParam, rcNull);
-    } else if( (rc = SRASplitterFactory_Make(cself, eSplitterSpot, sizeof(*obj),
-                                             FastqReadLenFilterFactory_Init,
-                                             FastqReadLenFilterFactory_NewObj,
-                                             FastqReadLenFilterFactory_Release)) == 0 ) {
-        obj = (FastqReadLenFilterFactory*)*cself;
-        obj->accession = accession;
-        obj->table = table;
+    if ( cself == NULL || accession == NULL || table == NULL )
+    {
+        rc = RC( rcExe, rcType, rcConstructing, rcParam, rcNull );
+    }
+    else
+    {
+        rc = SRASplitterFactory_Make( cself, eSplitterSpot, sizeof( *obj ),
+                                      FastqReadLenFilterFactory_Init,
+                                      FastqReadLenFilterFactory_NewObj,
+                                      FastqReadLenFilterFactory_Release );
+        if ( rc == 0 )
+        {
+            obj = ( FastqReadLenFilterFactory* )*cself;
+            obj->accession = accession;
+            obj->table = table;
+        }
     }
     return rc;
 }
+
 
 /* ============== FASTQ read splitter ============================ */
 
 char* FastqReadSplitter_key_buf = NULL;
 
-typedef struct FastqReadSplitter_struct {
+
+typedef struct FastqReadSplitter_struct
+{
     const FastqReader* reader;
     SRASplitter_Keys* keys;
     uint32_t keys_max;
 } FastqReadSplitter;
 
-static
-rc_t FastqReadSplitter_GetKeySet(const SRASplitter* cself, const SRASplitter_Keys** key, uint32_t* keys, spotid_t spot, const readmask_t* readmask)
+
+static rc_t FastqReadSplitter_GetKeySet( const SRASplitter* cself, const SRASplitter_Keys** key,
+                    uint32_t* keys, spotid_t spot, const readmask_t* readmask )
 {
     rc_t rc = 0;
-    FastqReadSplitter* self = (FastqReadSplitter*)cself;
+    FastqReadSplitter* self = ( FastqReadSplitter* )cself;
     const size_t key_offset = 5;
 
-    if( self == NULL || key == NULL ) {
-        rc = RC(rcExe, rcNode, rcExecuting, rcParam, rcInvalid);
-    } else {
+    if ( self == NULL || key == NULL )
+    {
+        rc = RC( rcExe, rcNode, rcExecuting, rcParam, rcInvalid );
+    }
+    else
+    {
         uint32_t num_reads = 0;
 
         *keys = 0;
-        if( FastqReadSplitter_key_buf == NULL ) {
+        if ( FastqReadSplitter_key_buf == NULL )
+        {
             /* initial alloc key_buf: "  1\0  2\0...\0  9\0 10\0 11\0...\03220..\08192\0" */
-            if( nreads_max > 9999 ) {
+            if ( nreads_max > 9999 )
+            {
                 /* key_offset and sprintf format size are insufficient for keys longer than 4 digits */
-                rc = RC(rcExe, rcNode, rcExecuting, rcBuffer, rcInsufficient);
-            } else if( (FastqReadSplitter_key_buf = malloc(nreads_max * key_offset)) == NULL ) {
-                rc = RC(rcExe, rcNode, rcExecuting, rcMemory, rcExhausted);
-            } else {
-                /* fill buffer w/keys */
-                int i;
-                char* p = FastqReadSplitter_key_buf;
-                for(i = 1; rc == 0 && i <= nreads_max; i++) {
-                    if( sprintf(p, "%4u", i) <= 0 ) {
-                        rc = RC(rcExe, rcNode, rcExecuting, rcTransfer, rcIncomplete);
+                rc = RC( rcExe, rcNode, rcExecuting, rcBuffer, rcInsufficient );
+            }
+            else
+            {
+                FastqReadSplitter_key_buf = malloc( nreads_max * key_offset );
+                if ( FastqReadSplitter_key_buf == NULL )
+                {
+                    rc = RC( rcExe, rcNode, rcExecuting, rcMemory, rcExhausted );
+                }
+                else
+                {
+                    /* fill buffer w/keys */
+                    int i;
+                    char* p = FastqReadSplitter_key_buf;
+                    for ( i = 1; rc == 0 && i <= nreads_max; i++ )
+                    {
+                        if ( sprintf( p, "%4u", i ) <= 0 )
+                        {
+                            rc = RC( rcExe, rcNode, rcExecuting, rcTransfer, rcIncomplete );
+                        }
+                        p += key_offset;
                     }
-                    p += key_offset;
                 }
             }
         }
-        if( rc == 0 && (rc = FastqReaderSeekSpot(self->reader, spot)) == 0 ) {
-            if( (rc = FastqReader_SpotInfo(self->reader, NULL, NULL, NULL, NULL, NULL, &num_reads)) == 0 ) {
-                uint32_t readId, good = 0;
 
-                SRA_DUMP_DBG(3, ("%s %u row reads:", __func__, spot));
-                for(readId = 0; rc == 0 && readId < num_reads; readId++) {
-                    rc = FastqReader_SpotReadInfo(self->reader, readId + 1, NULL, NULL, NULL, NULL, NULL);
-                    if( !isset_readmask(readmask, readId) ) {
-                        continue;
-                    }
-                    if( self->keys_max < (good + 1) ) {
-                        void* p = realloc(self->keys, sizeof(*self->keys) * (good + 1));
-                        if( p == NULL ) {
-                            rc = RC(rcExe, rcNode, rcExecuting, rcMemory, rcExhausted);
-                            break;
-                        } else {
-                            self->keys = p;
-                            self->keys_max = good + 1;
+        if ( rc == 0 )
+        {
+            rc = FastqReaderSeekSpot( self->reader, spot );
+            if ( rc == 0 )
+            {
+                rc = FastqReader_SpotInfo( self->reader, NULL, NULL, NULL, NULL, NULL, &num_reads );
+                if ( rc == 0 )
+                {
+                    uint32_t readId, good = 0;
+
+                    SRA_DUMP_DBG( 3, ( "%s %u row reads:", __func__, spot ) );
+                    for ( readId = 0; rc == 0 && readId < num_reads; readId++ )
+                    {
+                        rc = FastqReader_SpotReadInfo( self->reader, readId + 1, NULL, NULL, NULL, NULL, NULL );
+                        if ( !isset_readmask( readmask, readId ) )
+                        {
+                            continue;
                         }
+                        if ( self->keys_max < ( good + 1 ) )
+                        {
+                            void* p = realloc( self->keys, sizeof( *self->keys ) * ( good + 1 ) );
+                            if ( p == NULL )
+                            {
+                                rc = RC( rcExe, rcNode, rcExecuting, rcMemory, rcExhausted );
+                                break;
+                            }
+                            else
+                            {
+                                self->keys = p;
+                                self->keys_max = good + 1;
+                            }
+                        }
+                        self->keys[ good ].key = &FastqReadSplitter_key_buf[ readId * key_offset ];
+                        while ( self->keys[ good ].key[ 0 ] == ' ' && self->keys[ good ].key[0] != '\0' )
+                        {
+                            self->keys[ good ].key++;
+                        }
+                        clear_readmask( self->keys[ good ].readmask );
+                        set_readmask( self->keys[good].readmask, readId );
+                        SRA_DUMP_DBG( 3, ( " key['%s']+=%u", self->keys[ good ].key, readId ) );
+                        good++;
                     }
-                    self->keys[good].key = &FastqReadSplitter_key_buf[readId * key_offset];
-                    while( self->keys[good].key[0] == ' ' && self->keys[good].key[0] != '\0' ) {
-                        self->keys[good].key++;
+                    if ( rc == 0 )
+                    {
+                        *key = self->keys;
+                        *keys = good;
                     }
-                    clear_readmask(self->keys[good].readmask);
-                    set_readmask(self->keys[good].readmask, readId);
-                    SRA_DUMP_DBG(3, (" key['%s']+=%u", self->keys[good].key, readId));
-                    good++;
+                    SRA_DUMP_DBG( 3, ( "\n" ) );
                 }
-                if( rc == 0 ) {
-                    *key = self->keys;
-                    *keys = good;
-                }
-                SRA_DUMP_DBG(3, ("\n"));
             }
-        } else if( GetRCObject(rc) == rcRow && GetRCState(rc) == rcNotFound ) {
-            SRA_DUMP_DBG(3, ("%s skipped %u row\n", __func__, spot));
-            rc = 0;
+            else if ( GetRCObject( rc ) == rcRow && GetRCState( rc ) == rcNotFound )
+            {
+                SRA_DUMP_DBG( 3, ( "%s skipped %u row\n", __func__, spot ) );
+                rc = 0;
+            }
+        }
+        else if ( GetRCObject( rc ) == rcRow && GetRCState( rc ) == rcNotFound )
+        {
+                SRA_DUMP_DBG( 3, ( "%s skipped %u row\n", __func__, spot ) );
+                rc = 0;
         }
     }
     return rc;
 }
 
-rc_t FastqReadSplitter_Release(const SRASplitter* cself)
+
+rc_t FastqReadSplitter_Release( const SRASplitter* cself )
 {
-    if( cself != NULL ) {
-        FastqReadSplitter* self = (FastqReadSplitter*)cself;
-        free(self->keys);
+    if ( cself != NULL )
+    {
+        FastqReadSplitter* self = ( FastqReadSplitter* )cself;
+        free( self->keys );
     }
     return 0;
 }
 
-typedef struct FastqReadSplitterFactory_struct {
+
+typedef struct FastqReadSplitterFactory_struct
+{
     const char* accession;
     const SRATable* table;
     const FastqReader* reader;
 } FastqReadSplitterFactory;
 
-static
-rc_t FastqReadSplitterFactory_Init(const SRASplitterFactory* cself)
+
+static rc_t FastqReadSplitterFactory_Init( const SRASplitterFactory* cself )
 {
     rc_t rc = 0;
-    FastqReadSplitterFactory* self = (FastqReadSplitterFactory*)cself;
+    FastqReadSplitterFactory* self = ( FastqReadSplitterFactory* )cself;
 
-    if( self == NULL ) {
-        rc = RC(rcExe, rcType, rcConstructing, rcParam, rcNull);
-    } else {
-        rc = FastqReaderMake(&self->reader, self->table, self->accession,
-                             /* preserve orig spot format to save on conversions */
-                             FastqArgs.is_platform_cs_native, false, FastqArgs.fasta > 0, false, 
-                             false, !FastqArgs.applyClip, 0,
-                             FastqArgs.offset, '\0', 0, 0);
+    if ( self == NULL )
+    {
+        rc = RC( rcExe, rcType, rcConstructing, rcParam, rcNull );
+    }
+    else
+    {
+        rc = FastqReaderMake( &self->reader, self->table, self->accession,
+                              /* preserve orig spot format to save on conversions */
+                              FastqArgs.is_platform_cs_native, false, FastqArgs.fasta > 0, false, 
+                              false, !FastqArgs.applyClip, 0,
+                              FastqArgs.offset, '\0', 0, 0 );
     }
     return rc;
 }
 
-static
-rc_t FastqReadSplitterFactory_NewObj(const SRASplitterFactory* cself, const SRASplitter** splitter)
+
+static rc_t FastqReadSplitterFactory_NewObj( const SRASplitterFactory* cself, const SRASplitter** splitter )
 {
     rc_t rc = 0;
-    FastqReadSplitterFactory* self = (FastqReadSplitterFactory*)cself;
+    FastqReadSplitterFactory* self = ( FastqReadSplitterFactory* )cself;
 
-    if( self == NULL ) {
-        rc = RC(rcExe, rcType, rcExecuting, rcParam, rcNull);
-    } else {
-        if( (rc = SRASplitter_Make(splitter, sizeof(FastqReadSplitter), NULL, FastqReadSplitter_GetKeySet, NULL, FastqReadSplitter_Release)) == 0 ) {
-            ((FastqReadSplitter*)(*splitter))->reader = self->reader;
+    if ( self == NULL )
+    {
+        rc = RC( rcExe, rcType, rcExecuting, rcParam, rcNull );
+    }
+    else
+    {
+        rc = SRASplitter_Make( splitter, sizeof( FastqReadSplitter ), NULL,
+                               FastqReadSplitter_GetKeySet, NULL, FastqReadSplitter_Release );
+        if ( rc == 0 )
+        {
+            ( (FastqReadSplitter*)(*splitter) )->reader = self->reader;
         }
     }
     return rc;
 }
 
-static
-void FastqReadSplitterFactory_Release(const SRASplitterFactory* cself)
+
+static void FastqReadSplitterFactory_Release( const SRASplitterFactory* cself )
 {
-    if( cself != NULL ) {
-        FastqReadSplitterFactory* self = (FastqReadSplitterFactory*)cself;
-        FastqReaderWhack(self->reader);
-        free(FastqReadSplitter_key_buf);
+    if ( cself != NULL )
+    {
+        FastqReadSplitterFactory* self = ( FastqReadSplitterFactory* )cself;
+        FastqReaderWhack( self->reader );
+        free( FastqReadSplitter_key_buf );
+        FastqReadSplitter_key_buf = NULL;
     }
 }
 
-static
-rc_t FastqReadSplitterFactory_Make(const SRASplitterFactory** cself, const char* accession, const SRATable* table)
+
+static rc_t FastqReadSplitterFactory_Make( const SRASplitterFactory** cself,
+                const char* accession, const SRATable* table )
 {
     rc_t rc = 0;
     FastqReadSplitterFactory* obj = NULL;
 
-    if( cself == NULL || accession == NULL || table == NULL ) {
-        rc = RC(rcExe, rcType, rcConstructing, rcParam, rcNull);
-    } else if( (rc = SRASplitterFactory_Make(cself, eSplitterRead, sizeof(*obj),
-                                             FastqReadSplitterFactory_Init,
-                                             FastqReadSplitterFactory_NewObj,
-                                             FastqReadSplitterFactory_Release)) == 0 ) {
-        obj = (FastqReadSplitterFactory*)*cself;
-        obj->accession = accession;
-        obj->table = table;
+    if ( cself == NULL || accession == NULL || table == NULL )
+    {
+        rc = RC( rcExe, rcType, rcConstructing, rcParam, rcNull );
+    }
+    else
+    {
+        rc = SRASplitterFactory_Make( cself, eSplitterRead, sizeof( *obj ),
+                                      FastqReadSplitterFactory_Init,
+                                      FastqReadSplitterFactory_NewObj,
+                                      FastqReadSplitterFactory_Release );
+        if ( rc == 0 )
+        {
+            obj = ( FastqReadSplitterFactory* )*cself;
+            obj->accession = accession;
+            obj->table = table;
+        }
     }
     return rc;
 }
+
 
 /* ============== FASTQ 3 read splitter ============================ */
 
 char* Fastq3ReadSplitter_key_buf = NULL;
 
-typedef struct Fastq3ReadSplitter_struct {
+typedef struct Fastq3ReadSplitter_struct
+{
     const FastqReader* reader;
-    SRASplitter_Keys keys[2];
+    SRASplitter_Keys keys[ 2 ];
 } Fastq3ReadSplitter;
 
+
 /* if all active reads len >= minreadlen, reads are splitted into separate files, otherwise on single key "" is returnded for all reads */
-static
-rc_t Fastq3ReadSplitter_GetKeySet(const SRASplitter* cself, const SRASplitter_Keys** key, uint32_t* keys, spotid_t spot, const readmask_t* readmask)
+static rc_t Fastq3ReadSplitter_GetKeySet( const SRASplitter* cself, const SRASplitter_Keys** key,
+            uint32_t* keys, spotid_t spot, const readmask_t* readmask )
 {
     rc_t rc = 0;
-    Fastq3ReadSplitter* self = (Fastq3ReadSplitter*)cself;
+    Fastq3ReadSplitter* self = ( Fastq3ReadSplitter* )cself;
     const size_t key_offset = 5;
 
-    if( self == NULL || key == NULL ) {
-        rc = RC(rcExe, rcNode, rcExecuting, rcParam, rcInvalid);
-    } else {
+    if ( self == NULL || key == NULL )
+    {
+        rc = RC( rcExe, rcNode, rcExecuting, rcParam, rcInvalid );
+    }
+    else
+    {
         uint32_t num_reads = 0;
 
         *keys = 0;
-        if( Fastq3ReadSplitter_key_buf == NULL ) {
+        if ( Fastq3ReadSplitter_key_buf == NULL )
+        {
             /* initial alloc key_buf: "  1\0  2\0...\0  9\0 10\0 11\0...\03220..\08192\0" */
-            if( nreads_max > 9999 ) {
+            if ( nreads_max > 9999 )
+            {
                 /* key_offset and sprintf format size are insufficient for keys longer than 4 digits */
-                rc = RC(rcExe, rcNode, rcExecuting, rcBuffer, rcInsufficient);
-            } else if( (Fastq3ReadSplitter_key_buf = malloc(nreads_max * key_offset)) == NULL ) {
-                rc = RC(rcExe, rcNode, rcExecuting, rcMemory, rcExhausted);
-            } else {
-                /* fill buffer w/keys */
-                int i;
-                char* p = Fastq3ReadSplitter_key_buf;
-                for(i = 1; rc == 0 && i <= nreads_max; i++) {
-                    if( sprintf(p, "%4u", i) <= 0 ) {
-                        rc = RC(rcExe, rcNode, rcExecuting, rcTransfer, rcIncomplete);
+                rc = RC( rcExe, rcNode, rcExecuting, rcBuffer, rcInsufficient );
+            }
+            else
+            {
+                Fastq3ReadSplitter_key_buf = malloc( nreads_max * key_offset );
+                if ( Fastq3ReadSplitter_key_buf == NULL )
+                {
+                    rc = RC( rcExe, rcNode, rcExecuting, rcMemory, rcExhausted );
+                }
+                else
+                {
+                    /* fill buffer w/keys */
+                    int i;
+                    char* p = Fastq3ReadSplitter_key_buf;
+                    for ( i = 1; rc == 0 && i <= nreads_max; i++ )
+                    {
+                        if ( sprintf( p, "%4u", i ) <= 0 )
+                        {
+                            rc = RC( rcExe, rcNode, rcExecuting, rcTransfer, rcIncomplete );
+                        }
+                        p += key_offset;
                     }
-                    p += key_offset;
                 }
             }
         }
-        if( rc == 0 && (rc = FastqReaderSeekSpot(self->reader, spot)) == 0 ) {
-            if( (rc = FastqReader_SpotInfo(self->reader, NULL, NULL, NULL, NULL, NULL, &num_reads)) == 0 ) {
-                uint32_t readId, good  = 0;
-                const uint32_t max_reads = sizeof(self->keys) /sizeof(self->keys[0]);
 
-                SRA_DUMP_DBG(3, ("%s %u row reads:", __func__, spot));
-                for(readId = 0; rc == 0 && readId < num_reads && good < max_reads; readId++) {
-                    rc = FastqReader_SpotReadInfo(self->reader, readId + 1, NULL, NULL, NULL, NULL, NULL);
-                    if( !isset_readmask(readmask, readId) ) {
-                        continue;
-                    }
-                    self->keys[good].key = &Fastq3ReadSplitter_key_buf[good * key_offset];
-                    while( self->keys[good].key[0] == ' ' && self->keys[good].key[0] != '\0' ) {
-                        self->keys[good].key++;
-                    }
-                    clear_readmask(self->keys[good].readmask);
-                    set_readmask(self->keys[good].readmask, readId);
-                    SRA_DUMP_DBG(3, (" key['%s']+=%u", self->keys[good].key, readId));
-                    good++;
-                }
-                if( rc == 0 ) {
-                    *key = self->keys;
-                    *keys = good;
-                    if( good != max_reads ) {
-                        /* some are short -> reset keys to same value for all valid reads */
-                        /* run has just one read -> no suffix */
-                        /* or single file was requested */
-                        for(readId = 0; readId < good; readId++) {
-                            self->keys[readId].key = "";
+        if ( rc == 0 )
+        {
+            rc = FastqReaderSeekSpot( self->reader, spot );
+            if ( rc == 0 )
+            {
+                rc = FastqReader_SpotInfo( self->reader, NULL, NULL, NULL, NULL, NULL, &num_reads );
+                if ( rc == 0 )
+                {
+                    uint32_t readId, good  = 0;
+                    const uint32_t max_reads = sizeof( self->keys ) /sizeof( self->keys[ 0 ] );
+
+                    SRA_DUMP_DBG( 3, ( "%s %u row reads:", __func__, spot ) );
+                    for ( readId = 0; rc == 0 && readId < num_reads && good < max_reads; readId++ )
+                    {
+                        rc = FastqReader_SpotReadInfo( self->reader, readId + 1, NULL, NULL, NULL, NULL, NULL );
+                        if ( !isset_readmask( readmask, readId ) )
+                        {
+                            continue;
                         }
-                        SRA_DUMP_DBG(3, (" all keys joined to ''"));
+                        self->keys[ good ].key = &Fastq3ReadSplitter_key_buf[ good * key_offset ];
+                        while ( self->keys[ good ].key[ 0 ] == ' ' && self->keys[good].key[ 0 ] != '\0' )
+                        {
+                            self->keys[ good ].key++;
+                        }
+                        clear_readmask( self->keys[ good ].readmask );
+                        set_readmask( self->keys[ good ].readmask, readId );
+                        SRA_DUMP_DBG( 3, ( " key['%s']+=%u", self->keys[ good ].key, readId ) );
+                        good++;
                     }
+                    if ( rc == 0 )
+                    {
+                        *key = self->keys;
+                        *keys = good;
+                        if ( good != max_reads )
+                        {
+                            /* some are short -> reset keys to same value for all valid reads */
+                            /* run has just one read -> no suffix */
+                            /* or single file was requested */
+                            for ( readId = 0; readId < good; readId++ )
+                            {
+                                self->keys[ readId ].key = "";
+                            }
+                            SRA_DUMP_DBG( 3, ( " all keys joined to ''" ) );
+                        }
+                    }
+                    SRA_DUMP_DBG( 3, ( "\n" ) );
                 }
-                SRA_DUMP_DBG(3, ("\n"));
             }
-        } else if( GetRCObject(rc) == rcRow && GetRCState(rc) == rcNotFound ) {
-            SRA_DUMP_DBG(3, ("%s skipped %u row\n", __func__, spot));
+            else if ( GetRCObject( rc ) == rcRow && GetRCState( rc ) == rcNotFound )
+            {
+                SRA_DUMP_DBG( 3, ( "%s skipped %u row\n", __func__, spot ) );
+                rc = 0;
+            }
+        }
+        else if ( GetRCObject( rc ) == rcRow && GetRCState( rc ) == rcNotFound )
+        {
+            SRA_DUMP_DBG( 3, ( "%s skipped %u row\n", __func__, spot ) );
             rc = 0;
         }
     }
     return rc;
 }
 
-typedef struct Fastq3ReadSplitterFactory_struct {
+typedef struct Fastq3ReadSplitterFactory_struct
+{
     const char* accession;
     const SRATable* table;
     const FastqReader* reader;
 } Fastq3ReadSplitterFactory;
 
-static
-rc_t Fastq3ReadSplitterFactory_Init(const SRASplitterFactory* cself)
+
+static rc_t Fastq3ReadSplitterFactory_Init( const SRASplitterFactory* cself )
 {
     rc_t rc = 0;
-    Fastq3ReadSplitterFactory* self = (Fastq3ReadSplitterFactory*)cself;
+    Fastq3ReadSplitterFactory* self = ( Fastq3ReadSplitterFactory* )cself;
 
-    if( self == NULL ) {
-        rc = RC(rcExe, rcType, rcConstructing, rcParam, rcNull);
-    } else {
-        rc = FastqReaderMake(&self->reader, self->table, self->accession,
-                             /* preserve orig spot format to save on conversions */
-                             FastqArgs.is_platform_cs_native, false, FastqArgs.fasta > 0, false, 
-                             false, !FastqArgs.applyClip, 0,
-                             FastqArgs.offset, '\0', 0, 0);
+    if ( self == NULL )
+    {
+        rc = RC( rcExe, rcType, rcConstructing, rcParam, rcNull );
+    }
+    else
+    {
+        rc = FastqReaderMake( &self->reader, self->table, self->accession,
+                              /* preserve orig spot format to save on conversions */
+                              FastqArgs.is_platform_cs_native, false, FastqArgs.fasta > 0, false, 
+                              false, !FastqArgs.applyClip, 0,
+                              FastqArgs.offset, '\0', 0, 0 );
     }
     return rc;
 }
 
-static
-rc_t Fastq3ReadSplitterFactory_NewObj(const SRASplitterFactory* cself, const SRASplitter** splitter)
+
+static rc_t Fastq3ReadSplitterFactory_NewObj( const SRASplitterFactory* cself, const SRASplitter** splitter )
 {
     rc_t rc = 0;
-    Fastq3ReadSplitterFactory* self = (Fastq3ReadSplitterFactory*)cself;
+    Fastq3ReadSplitterFactory* self = ( Fastq3ReadSplitterFactory* )cself;
 
-    if( self == NULL ) {
-        rc = RC(rcExe, rcType, rcExecuting, rcParam, rcNull);
-    } else {
-        if( (rc = SRASplitter_Make(splitter, sizeof(Fastq3ReadSplitter), NULL, Fastq3ReadSplitter_GetKeySet, NULL, NULL)) == 0 ) {
-            ((Fastq3ReadSplitter*)(*splitter))->reader = self->reader;
+    if ( self == NULL )
+    {
+        rc = RC( rcExe, rcType, rcExecuting, rcParam, rcNull );
+    }
+    else
+    {
+        rc = SRASplitter_Make( splitter, sizeof( Fastq3ReadSplitter ),
+                               NULL, Fastq3ReadSplitter_GetKeySet, NULL, NULL );
+        if ( rc == 0 )
+        {
+            ( (Fastq3ReadSplitter*)(*splitter) )->reader = self->reader;
         }
     }
     return rc;
 }
 
-static
-void Fastq3ReadSplitterFactory_Release(const SRASplitterFactory* cself)
+
+static void Fastq3ReadSplitterFactory_Release( const SRASplitterFactory* cself )
 {
-    if( cself != NULL ) {
-        Fastq3ReadSplitterFactory* self = (Fastq3ReadSplitterFactory*)cself;
-        FastqReaderWhack(self->reader);
-        free(Fastq3ReadSplitter_key_buf);
+    if ( cself != NULL )
+    {
+        Fastq3ReadSplitterFactory* self = ( Fastq3ReadSplitterFactory* )cself;
+        FastqReaderWhack( self->reader );
+        free( Fastq3ReadSplitter_key_buf );
     }
 }
 
-static
-rc_t Fastq3ReadSplitterFactory_Make(const SRASplitterFactory** cself, const char* accession, const SRATable* table)
+
+static rc_t Fastq3ReadSplitterFactory_Make( const SRASplitterFactory** cself,
+                    const char* accession, const SRATable* table )
 {
     rc_t rc = 0;
     Fastq3ReadSplitterFactory* obj = NULL;
 
-    if( cself == NULL || accession == NULL || table == NULL ) {
-        rc = RC(rcExe, rcType, rcConstructing, rcParam, rcNull);
-    } else if( (rc = SRASplitterFactory_Make(cself, eSplitterRead, sizeof(*obj),
-                                             Fastq3ReadSplitterFactory_Init,
-                                             Fastq3ReadSplitterFactory_NewObj,
-                                             Fastq3ReadSplitterFactory_Release)) == 0 ) {
-        obj = (Fastq3ReadSplitterFactory*)*cself;
-        obj->accession = accession;
-        obj->table = table;
+    if ( cself == NULL || accession == NULL || table == NULL ) 
+    {
+        rc = RC( rcExe, rcType, rcConstructing, rcParam, rcNull );
+    }
+    else
+    {
+        rc = SRASplitterFactory_Make( cself, eSplitterRead, sizeof( *obj ),
+                                      Fastq3ReadSplitterFactory_Init,
+                                      Fastq3ReadSplitterFactory_NewObj,
+                                      Fastq3ReadSplitterFactory_Release );
+        if ( rc == 0 )
+        {
+            obj = ( Fastq3ReadSplitterFactory* )*cself;
+            obj->accession = accession;
+            obj->table = table;
+        }
     }
     return rc;
 }
 
+
 /* ============== FASTQ formatter object  ============================ */
 
-typedef struct FastqFormatterSplitter_struct {
+
+typedef struct FastqFormatterSplitter_struct
+{
     const char* accession;
     const FastqReader* reader;
-    KDataBuffer* b[5];
-    size_t bsz[5]; /* fifth is for fasta line wrap */
+    KDataBuffer* b[ 5 ];
+    size_t bsz[ 5 ]; /* fifth is for fasta line wrap */
 } FastqFormatterSplitter;
 
-static
-rc_t FastqFormatterSplitter_WrapLine(const KDataBuffer* src, size_t src_sz, KDataBuffer* dst, size_t* dst_sz, const uint64_t width)
+
+static rc_t FastqFormatterSplitter_WrapLine( const KDataBuffer* src, size_t src_sz,
+                                             KDataBuffer* dst, size_t* dst_sz, const uint64_t width )
 {
     rc_t rc = 0;
-    size_t sz = src_sz + (src_sz - 1) / width;
+    size_t sz = src_sz + ( src_sz - 1 ) / width;
 
-    if( KDataBufferBytes(dst) < sz ) {
-        SRA_DUMP_DBG(10, ("%s grow buffer from %u to %u\n", __func__, KDataBufferBytes(dst), sz + 10));
-        rc = KDataBufferResize(dst, sz + 10);
+    if ( KDataBufferBytes( dst ) < sz )
+    {
+        SRA_DUMP_DBG( 10, ( "%s grow buffer from %u to %u\n", __func__, KDataBufferBytes( dst ), sz + 10 ) );
+        rc = KDataBufferResize( dst, sz + 10 );
     }
-    if( rc == 0 ) {
+    if ( rc == 0 )
+    {
         const char* s = src->base;
         char* d = dst->base;
         *dst_sz = sz = src_sz;
-        while( sz > 0 ) {
-            memcpy(d, s, sz > width ? width : sz);
-            if( sz <= width ) {
+        while ( sz > 0 )
+        {
+            memcpy( d, s, sz > width ? width : sz );
+            if ( sz <= width )
+            {
                 break;
             }
             d += width;
@@ -1778,17 +2280,24 @@ rc_t FastqFormatterSplitter_WrapLine(const KDataBuffer* src, size_t src_sz, KDat
     return rc;
 }
 
-static
-rc_t FastqFormatterSplitter_DumpByRead(const SRASplitter* cself, spotid_t spot, const readmask_t* readmask)
+
+static rc_t FastqFormatterSplitter_DumpByRead( const SRASplitter* cself, spotid_t spot, const readmask_t* readmask )
 {
     rc_t rc = 0;
-    FastqFormatterSplitter* self = (FastqFormatterSplitter*)cself;
+    FastqFormatterSplitter* self = ( FastqFormatterSplitter* )cself;
 
-    if( self == NULL ) {
-        rc = RC(rcExe, rcType, rcExecuting, rcParam, rcNull);
-    } else {
-        if( (rc = FastqReaderSeekSpot(self->reader, spot)) == 0 ) {
-            if( (rc = SRASplitter_FileActivate(cself, FastqArgs.file_extension)) == 0 ) {
+    if ( self == NULL )
+    {
+        rc = RC( rcExe, rcType, rcExecuting, rcParam, rcNull );
+    }
+    else 
+    {
+        rc = FastqReaderSeekSpot( self->reader, spot );
+        if ( rc == 0 )
+        {
+            rc = SRASplitter_FileActivate( cself, FastqArgs.file_extension );
+            if ( rc == 0 )
+            {
                 DeflineData def_data;
                 const char* spot_name = NULL, *spot_group = NULL, *read_name = NULL;
                 uint32_t readIdx, spot_len = 0;
@@ -1796,243 +2305,364 @@ rc_t FastqFormatterSplitter_DumpByRead(const SRASplitter* cself, spotid_t spot, 
                 size_t sname_sz, sgrp_sz;
                 INSDC_coord_len rlabel_sz = 0, read_len = 0;
 
-                if( FastqArgs.b_defline || FastqArgs.q_defline ) {
-                    rc = FastqReader_SpotInfo(self->reader, &spot_name, &sname_sz, &spot_group, &sgrp_sz, &spot_len, &num_reads);
-                } else {
-                    rc = FastqReader_SpotInfo(self->reader, NULL, NULL, NULL, NULL, NULL, &num_reads);
+                if ( FastqArgs.b_defline || FastqArgs.q_defline )
+                {
+                    rc = FastqReader_SpotInfo( self->reader, &spot_name, &sname_sz, &spot_group, &sgrp_sz, &spot_len, &num_reads );
+                }
+                else
+                {
+                    rc = FastqReader_SpotInfo( self->reader, NULL, NULL, NULL, NULL, NULL, &num_reads );
                 }
 
-                for(readId = 1, readIdx = 1; rc == 0 && readId <= num_reads; readId++, readIdx++) {
-                    if( !isset_readmask(readmask, readId - 1) ) {
+                for ( readId = 1, readIdx = 1; rc == 0 && readId <= num_reads; readId++, readIdx++ )
+                {
+                    if ( !isset_readmask( readmask, readId - 1 ) )
+                    {
                         continue;
                     }
-                    if( FastqArgs.b_defline || FastqArgs.q_defline ) {
-                        if( (rc = FastqReader_SpotReadInfo(self->reader, readId, NULL, &read_name, &rlabel_sz, NULL, &read_len)) == 0 ) {
-                            rc = Defline_Bind(&def_data, self->accession, &spot, spot_name, sname_sz, spot_group, sgrp_sz,
-                                              &spot_len, &readIdx, read_name, rlabel_sz, &read_len);
+                    if ( FastqArgs.b_defline || FastqArgs.q_defline )
+                    {
+                        rc = FastqReader_SpotReadInfo( self->reader, readId, NULL, &read_name, &rlabel_sz, NULL, &read_len );
+                        if ( rc == 0 )
+                        {
+                            rc = Defline_Bind( &def_data, self->accession, &spot, spot_name, sname_sz, spot_group, sgrp_sz,
+                                               &spot_len, &readIdx, read_name, rlabel_sz, &read_len );
                         }
                     }
-                    if( rc == 0 ) {
-                        if( FastqArgs.b_defline ) {
-                            IF_BUF((Defline_Build(FastqArgs.b_defline, &def_data, self->b[0]->base,
-                                    KDataBufferBytes(self->b[0]), &self->bsz[0])), self->b[0], self->bsz[0]);
-                        } else {
-                            IF_BUF((FastqReaderBaseName(self->reader, readId, &FastqArgs.dumpCs, self->b[0]->base,
-                                    KDataBufferBytes(self->b[0]), &self->bsz[0])), self->b[0], self->bsz[0]);
+                    if ( rc == 0 )
+                    {
+                        if ( FastqArgs.b_defline )
+                        {
+                            IF_BUF( ( Defline_Build( FastqArgs.b_defline, &def_data, self->b[0]->base,
+                                      KDataBufferBytes( self->b[0] ), &self->bsz[0] ) ), self->b[0], self->bsz[0] );
+                        }
+                        else
+                        {
+                            IF_BUF( ( FastqReaderBaseName( self->reader, readId, &FastqArgs.dumpCs, self->b[0]->base,
+                                      KDataBufferBytes( self->b[0] ), &self->bsz[0] ) ), self->b[0], self->bsz[0] );
                         }
                     }
-                    if( rc == 0 ) {
-                        if( FastqArgs.fasta > 0 ) {
-                            IF_BUF((FastqReaderBase(self->reader, readId, self->b[4]->base, KDataBufferBytes(self->b[4]),
-                                    &self->bsz[4])), self->b[4], self->bsz[4]) {
-                                rc = FastqFormatterSplitter_WrapLine(self->b[4], self->bsz[4], self->b[1], &self->bsz[1], FastqArgs.fasta);
+                    if ( rc == 0 )
+                    {
+                        if ( FastqArgs.fasta > 0 )
+                        {
+                            IF_BUF( ( FastqReaderBase( self->reader, readId, self->b[4]->base, KDataBufferBytes( self->b[4] ),
+                                      &self->bsz[4] ) ), self->b[4], self->bsz[4] )
+                            {
+                                rc = FastqFormatterSplitter_WrapLine( self->b[4], self->bsz[4], self->b[1], &self->bsz[1], FastqArgs.fasta );
                             }
-                        } else {
-                            IF_BUF((FastqReaderBase(self->reader, readId, self->b[1]->base,
-                                   KDataBufferBytes(self->b[1]), &self->bsz[1])), self->b[1], self->bsz[1]);
+                        }
+                        else
+                        {
+                            IF_BUF( ( FastqReaderBase( self->reader, readId, self->b[1]->base,
+                                      KDataBufferBytes( self->b[1] ), &self->bsz[1] ) ), self->b[1], self->bsz[1] );
                         }
                     }
-                    if( !FastqArgs.fasta && rc == 0 ) {
-                        if( FastqArgs.q_defline ) {
-                            IF_BUF((Defline_Build(FastqArgs.q_defline, &def_data, self->b[2]->base,
-                                    KDataBufferBytes(self->b[2]), &self->bsz[2])), self->b[2], self->bsz[2]);
-                        } else {
-                            IF_BUF((FastqReaderQualityName(self->reader, readId, &FastqArgs.dumpCs, self->b[2]->base,
-                                    KDataBufferBytes(self->b[2]), &self->bsz[2])), self->b[2], self->bsz[2]);
+                    if ( !FastqArgs.fasta && rc == 0 )
+                    {
+                        if ( FastqArgs.q_defline )
+                        {
+                            IF_BUF( ( Defline_Build( FastqArgs.q_defline, &def_data, self->b[2]->base,
+                                      KDataBufferBytes( self->b[2] ), &self->bsz[2] ) ), self->b[2], self->bsz[2] );
                         }
-                        if( rc == 0 ) {
-                            IF_BUF((FastqReaderQuality(self->reader, readId, self->b[3]->base,
-                                    KDataBufferBytes(self->b[3]), &self->bsz[3])), self->b[3], self->bsz[3]);
+                        else
+                        {
+                            IF_BUF( ( FastqReaderQualityName( self->reader, readId, &FastqArgs.dumpCs, self->b[2]->base,
+                                      KDataBufferBytes( self->b[2] ), &self->bsz[2] ) ), self->b[2], self->bsz[2] );
                         }
-                    } else if( ((char*)(self->b[0]->base))[0] == '@' ) {
-                        ((char*)(self->b[0]->base))[0] = '>';
+                        if ( rc == 0 )
+                        {
+                            IF_BUF( ( FastqReaderQuality( self->reader, readId, self->b[3]->base,
+                                      KDataBufferBytes( self->b[3] ), &self->bsz[3] ) ), self->b[3], self->bsz[3] );
+                        }
                     }
-                    for(k = 0; rc == 0 && k < (FastqArgs.fasta ? 2 : 4); k++) {
-                        if( (rc = SRASplitter_FileWrite(cself, spot, self->b[k]->base, self->bsz[k])) == 0 ) {
-                            rc = SRASplitter_FileWrite(cself, spot, "\n", 1);
+                    else if ( ( (char*)(self->b[0]->base))[0] == '@' )
+                    {
+                        ( (char*)(self->b[0]->base) )[0] = '>';
+                    }
+                    for ( k = 0; rc == 0 && k < ( FastqArgs.fasta ? 2 : 4); k++ )
+                    {
+                        rc = SRASplitter_FileWrite( cself, spot, self->b[ k ]->base, self->bsz[ k ] );
+                        if ( rc == 0 )
+                        {
+                            rc = SRASplitter_FileWrite( cself, spot, "\n", 1 );
                         }
                     }
                 }
             }
-        } else if( GetRCObject(rc) == rcRow && GetRCState(rc) == rcNotFound ) {
-            SRA_DUMP_DBG(3, ("%s skipped %u row\n", __func__, spot));
+        }
+        else if ( GetRCObject( rc ) == rcRow && GetRCState( rc ) == rcNotFound )
+        {
+            SRA_DUMP_DBG( 3, ( "%s skipped %u row\n", __func__, spot ) );
             rc = 0;
         }
     }
     return rc;
 }
 
-static
-rc_t FastqFormatterSplitter_DumpBySpot(const SRASplitter* cself, spotid_t spot, const readmask_t* readmask)
+
+static rc_t Fasta_dump( const SRASplitter* cself, FastqFormatterSplitter* self, spotid_t spot, uint32_t columns )
+{
+    uint32_t readId;
+    rc_t rc = FastqFormatterSplitter_WrapLine( self->b[4], self->bsz[4], self->b[1], &self->bsz[1], columns );
+    for ( readId = 0; rc == 0 && readId < 2; readId++ )
+    {
+        rc = SRASplitter_FileWrite( cself, spot, self->b[readId]->base, self->bsz[ readId ] );
+        if ( rc == 0 )
+        {
+            rc = SRASplitter_FileWrite( cself, spot, "\n", 1 );
+        }
+    }
+    return rc;
+}
+
+
+static rc_t FastqFormatterSplitter_DumpBySpot( const SRASplitter* cself, spotid_t spot, const readmask_t* readmask )
 {
     rc_t rc = 0;
-    FastqFormatterSplitter* self = (FastqFormatterSplitter*)cself;
+    FastqFormatterSplitter* self = ( FastqFormatterSplitter* )cself;
 
-    if( self == NULL ) {
-        rc = RC(rcExe, rcType, rcExecuting, rcParam, rcNull);
-    } else {
-        if( (rc = FastqReaderSeekSpot(self->reader, spot)) == 0 ) {
+    if ( self == NULL )
+    {
+        rc = RC( rcExe, rcType, rcExecuting, rcParam, rcNull );
+    }
+    else
+    {
+        rc = FastqReaderSeekSpot( self->reader, spot );
+        if ( rc == 0 )
+        {
             uint32_t num_reads, readId;
 
-            rc = FastqReader_SpotInfo(self->reader, NULL, NULL, NULL, NULL, NULL, &num_reads);
-            for(readId = 0; rc == 0 && readId < num_reads; readId++) {
+            rc = FastqReader_SpotInfo( self->reader, NULL, NULL, NULL, NULL, NULL, &num_reads );
+            for ( readId = 0; rc == 0 && readId < num_reads; readId++ )
+            {
                 /* if any read in readmask is not set - skip whole spot */
-                if( !isset_readmask(readmask, readId) ) {
+                if ( !isset_readmask( readmask, readId ) )
+                {
                     return 0;
                 }
             }
-            if( rc == 0 && (rc = SRASplitter_FileActivate(cself, FastqArgs.file_extension)) == 0 ) {
-                DeflineData def_data;
-                const char* spot_name = NULL, *spot_group = NULL;
-                uint32_t spot_len = 0;
-                size_t writ, sname_sz, sgrp_sz;
-                const int base_i = FastqArgs.fasta ? 4 : 1;
+            if ( rc == 0 )
+            {
+                rc = SRASplitter_FileActivate( cself, FastqArgs.file_extension );
+                if ( rc == 0 )
+                {
+                    DeflineData def_data;
+                    const char* spot_name = NULL, *spot_group = NULL;
+                    uint32_t spot_len = 0;
+                    size_t writ, sname_sz, sgrp_sz;
+                    const int base_i = FastqArgs.fasta ? 4 : 1;
 
-                if( FastqArgs.b_defline || FastqArgs.q_defline ) {
-                    if( (rc = FastqReader_SpotInfo(self->reader, &spot_name, &sname_sz, &spot_group, &sgrp_sz, &spot_len, NULL)) == 0 ) {
-                        rc = Defline_Bind(&def_data, self->accession, &spot, spot_name, sname_sz, spot_group, sgrp_sz, 
-                                          &spot_len, &readId, NULL, 0, &spot_len);
-                    }
-                }
-                if( rc == 0 ) {
-                    if( FastqArgs.b_defline ) {
-                        IF_BUF((Defline_Build(FastqArgs.b_defline, &def_data, self->b[0]->base,
-                                KDataBufferBytes(self->b[0]), &self->bsz[0])), self->b[0], self->bsz[0]);
-                    } else {
-                        IF_BUF((FastqReaderBaseName(self->reader, 0, &FastqArgs.dumpCs, self->b[0]->base,
-                                KDataBufferBytes(self->b[0]), &self->bsz[0])), self->b[0], self->bsz[0]);
-                    }
-                    self->bsz[base_i] = 0;
-                    if( !FastqArgs.fasta && rc == 0 ) {
-                        if( FastqArgs.q_defline ) {
-                            IF_BUF((Defline_Build(FastqArgs.q_defline, &def_data, self->b[2]->base,
-                                    KDataBufferBytes(self->b[2]), &self->bsz[2])), self->b[2], self->bsz[2]);
-                        } else {
-                            IF_BUF((FastqReaderQualityName(self->reader, 0, &FastqArgs.dumpCs, self->b[2]->base,
-                                    KDataBufferBytes(self->b[2]), &self->bsz[2])), self->b[2], self->bsz[2]);
+                    if ( FastqArgs.b_defline || FastqArgs.q_defline )
+                    {
+                        rc = FastqReader_SpotInfo( self->reader, &spot_name, &sname_sz,
+                                                   &spot_group, &sgrp_sz, &spot_len, NULL );
+                        if ( rc == 0 )
+                        {
+                            rc = Defline_Bind( &def_data, self->accession, &spot, spot_name,
+                                               sname_sz, spot_group, sgrp_sz, 
+                                               &spot_len, &readId, NULL, 0, &spot_len );
                         }
-                        self->bsz[3] = 0;
-                    } else if( ((char*)(self->b[0]->base))[0] == '@' ) {
-                        ((char*)(self->b[0]->base))[0] = '>';
                     }
-                }
-                for(readId = 1; rc == 0 && readId <= num_reads; readId++) {
-                    IF_BUF((FastqReaderBase(self->reader, readId, &((char*)(self->b[base_i]->base))[self->bsz[base_i]],
-                            KDataBufferBytes(self->b[base_i]) - self->bsz[base_i], &writ)), self->b[base_i], self->bsz[base_i] + writ) {
-                        self->bsz[base_i] += writ;
-                        if( !FastqArgs.fasta ) {
-                            IF_BUF((FastqReaderQuality(self->reader, readId, &((char*)(self->b[3]->base))[self->bsz[3]],
-                                    KDataBufferBytes(self->b[3]) - self->bsz[3], &writ)), self->b[3], self->bsz[3] + writ) {
-                                self->bsz[3] += writ;
+
+                    if ( rc == 0 )
+                    {
+                        if ( FastqArgs.b_defline )
+                        {
+                            IF_BUF( ( Defline_Build( FastqArgs.b_defline, &def_data, self->b[0]->base,
+                                      KDataBufferBytes( self->b[0] ), &self->bsz[0] ) ), self->b[0], self->bsz[0] );
+                        }
+                        else
+                        {
+                            IF_BUF( ( FastqReaderBaseName( self->reader, 0, &FastqArgs.dumpCs, self->b[0]->base,
+                                      KDataBufferBytes( self->b[0] ), &self->bsz[0] ) ), self->b[0], self->bsz[0] );
+                        }
+                        self->bsz[ base_i ] = 0;
+                        if ( !FastqArgs.fasta && rc == 0 )
+                        {
+                            if ( FastqArgs.q_defline )
+                            {
+                                IF_BUF( ( Defline_Build( FastqArgs.q_defline, &def_data, self->b[2]->base,
+                                          KDataBufferBytes( self->b[2] ), &self->bsz[2] ) ), self->b[2], self->bsz[2] );
+                            }
+                            else
+                            {
+                                IF_BUF( ( FastqReaderQualityName( self->reader, 0, &FastqArgs.dumpCs, self->b[2]->base,
+                                          KDataBufferBytes( self->b[2] ), &self->bsz[2] ) ), self->b[2], self->bsz[2] );
+                            }
+                            self->bsz[3] = 0;
+                        }
+                        else if ( ( (char*)(self->b[0]->base) )[0] == '@' )
+                        {
+                            ( (char*)(self->b[0]->base) )[0] = '>';
+                        }
+                    }
+
+                    for ( readId = 1; rc == 0 && readId <= num_reads; readId++ )
+                    {
+                        IF_BUF( ( FastqReaderBase( self->reader, readId, &( (char*)(self->b[base_i]->base) )[ self->bsz[ base_i ] ],
+                                  KDataBufferBytes( self->b[ base_i ] ) - self->bsz[ base_i ], &writ) ), self->b[ base_i ], self->bsz[ base_i ] + writ )
+                        {
+                            self->bsz[base_i] += writ;
+                            if ( !FastqArgs.fasta )
+                            {
+                                IF_BUF( ( FastqReaderQuality( self->reader, readId, &( (char*)(self->b[3]->base) )[ self->bsz[3] ],
+                                        KDataBufferBytes( self->b[3] ) - self->bsz[3], &writ ) ), self->b[3], self->bsz[3] + writ )
+                                {
+                                    self->bsz[ 3 ] += writ;
+                                }
+                            }
+                        }
+                    }
+
+                    if ( rc == 0 )
+                    {
+                        if ( FastqArgs.fasta > 0 )
+                        {
+                            /* special printint of fasta-output ( line-wrap... ) */
+                            rc = Fasta_dump( cself, self, spot, FastqArgs.fasta );
+                        }
+                        else
+                        {
+                            for ( readId = 0; rc == 0 && readId < 4; readId++ )
+                            {
+                                rc = SRASplitter_FileWrite( cself, spot, self->b[readId]->base, self->bsz[ readId ] );
+                                if ( rc == 0 )
+                                {
+                                    rc = SRASplitter_FileWrite( cself, spot, "\n", 1 );
+                                }
                             }
                         }
                     }
                 }
-                if( FastqArgs.fasta && rc == 0 ) {
-                    rc = FastqFormatterSplitter_WrapLine(self->b[4], self->bsz[4], self->b[1], &self->bsz[1], FastqArgs.fasta);
-                }
-                for(readId = 0; rc == 0 && readId < (FastqArgs.fasta ? 2 : 4); readId++) {
-                    if( (rc = SRASplitter_FileWrite(cself, spot, self->b[readId]->base, self->bsz[readId])) == 0 ) {
-                        rc = SRASplitter_FileWrite(cself, spot, "\n", 1);
-                    }
-                }
             }
-        } else if( GetRCObject(rc) == rcRow && GetRCState(rc) == rcNotFound ) {
-            SRA_DUMP_DBG(3, ("%s skipped %u row\n", __func__, spot));
+        }
+        else if ( GetRCObject( rc ) == rcRow && GetRCState( rc ) == rcNotFound )
+        {
+            SRA_DUMP_DBG( 3, ( "%s skipped %u row\n", __func__, spot ) );
             rc = 0;
         }
     }
     return rc;
 }
 
-typedef struct FastqFormatterFactory_struct {
+
+typedef struct FastqFormatterFactory_struct
+{
     const char* accession;
     const SRATable* table;
     const FastqReader* reader;
-    KDataBuffer buf[5]; /* fifth is for fasta line wrap */
+    KDataBuffer buf[ 5 ]; /* fifth is for fasta line wrap */
 } FastqFormatterFactory;
 
-static
-rc_t FastqFormatterFactory_Init(const SRASplitterFactory* cself)
+
+static rc_t FastqFormatterFactory_Init( const SRASplitterFactory* cself )
 {
     rc_t rc = 0;
-    FastqFormatterFactory* self = (FastqFormatterFactory*)cself;
+    FastqFormatterFactory* self = ( FastqFormatterFactory* )cself;
 
-    if( self == NULL ) {
-        rc = RC(rcExe, rcType, rcConstructing, rcParam, rcNull);
-    } else if( (rc = FastqReaderMake(&self->reader, self->table, self->accession,
-                                     FastqArgs.dumpCs, FastqArgs.dumpOrigFmt, FastqArgs.fasta > 0, FastqArgs.dumpCs,
-                                     FastqArgs.readIds, !FastqArgs.applyClip, 0,
-                                     FastqArgs.offset, FastqArgs.desiredCsKey[0], 0, 0)) == 0 ) {
-        int i;
-        for(i = 0; rc == 0 && i < sizeof(self->buf)/sizeof(self->buf[0]); i++) {
-            rc = KDataBufferMakeBytes(&self->buf[i], DATABUFFERINITSIZE);
-        }
+    if ( self == NULL )
+    {
+        rc = RC( rcExe, rcType, rcConstructing, rcParam, rcNull );
     }
-    return rc;
-}
-
-static
-rc_t FastqFormatterFactory_NewObj(const SRASplitterFactory* cself, const SRASplitter** splitter)
-{
-    rc_t rc = 0;
-    FastqFormatterFactory* self = (FastqFormatterFactory*)cself;
-
-    if( self == NULL ) {
-        rc = RC(rcExe, rcType, rcExecuting, rcParam, rcNull);
-    } else {
-        if( (rc = SRASplitter_Make(splitter, sizeof(FastqFormatterSplitter), NULL, NULL,
-                                   FastqArgs.split_spot ?
-                                            FastqFormatterSplitter_DumpByRead :
-                                            FastqFormatterSplitter_DumpBySpot, NULL)) == 0 ) {
+    else
+    {
+        rc = FastqReaderMake( &self->reader, self->table, self->accession,
+                     FastqArgs.dumpCs, FastqArgs.dumpOrigFmt, FastqArgs.fasta > 0, FastqArgs.dumpCs,
+                     FastqArgs.readIds, !FastqArgs.applyClip, 0,
+                     FastqArgs.offset, FastqArgs.desiredCsKey[ 0 ], 0, 0 );
+        if ( rc == 0 )
+        {
             int i;
-            ((FastqFormatterSplitter*)(*splitter))->accession = self->accession;
-            ((FastqFormatterSplitter*)(*splitter))->reader = self->reader;
-            for(i = 0; i < sizeof(self->buf)/sizeof(self->buf[0]); i++) {
-                ((FastqFormatterSplitter*)(*splitter))->b[i] = &self->buf[i];
+            for( i = 0; rc == 0 && i < sizeof( self->buf ) / sizeof( self->buf[ 0 ] ); i++ )
+            {
+                rc = KDataBufferMakeBytes( &self->buf[ i ], DATABUFFERINITSIZE );
             }
         }
     }
     return rc;
 }
 
-static
-void FastqFormatterFactory_Release(const SRASplitterFactory* cself)
+
+static rc_t FastqFormatterFactory_NewObj( const SRASplitterFactory* cself, const SRASplitter** splitter )
 {
-    if( cself != NULL ) {
+    rc_t rc = 0;
+    FastqFormatterFactory* self = ( FastqFormatterFactory* )cself;
+
+    if ( self == NULL )
+    {
+        rc = RC( rcExe, rcType, rcExecuting, rcParam, rcNull );
+    }
+    else
+    {
+        rc = SRASplitter_Make ( splitter, sizeof( FastqFormatterSplitter ), NULL, NULL,
+                                FastqArgs.split_spot ?
+                                    FastqFormatterSplitter_DumpByRead :
+                                    FastqFormatterSplitter_DumpBySpot, NULL );
+        if ( rc == 0 )
+        {
+            int i;
+            ( (FastqFormatterSplitter*)(*splitter) )->accession = self->accession;
+            ( (FastqFormatterSplitter*)(*splitter) )->reader = self->reader;
+            for ( i = 0; i < sizeof( self->buf ) / sizeof( self->buf[ 0 ] ); i++ )
+            {
+                ( (FastqFormatterSplitter*)(*splitter) )->b[ i ] = &self->buf[ i ];
+            }
+        }
+    }
+    return rc;
+}
+
+
+static void FastqFormatterFactory_Release( const SRASplitterFactory* cself )
+{
+    if ( cself != NULL )
+    {
         int i;
-        FastqFormatterFactory* self = (FastqFormatterFactory*)cself;
-        FastqReaderWhack(self->reader);
-        for(i = 0; i < sizeof(self->buf)/sizeof(self->buf[0]); i++) {
-            KDataBufferWhack(&self->buf[i]);
+        FastqFormatterFactory* self = ( FastqFormatterFactory* )cself;
+        FastqReaderWhack( self->reader );
+        for ( i = 0; i < sizeof( self->buf ) / sizeof( self->buf[ 0 ] ); i++ )
+        {
+            KDataBufferWhack( &self->buf[ i ] );
         }
     }
 }
 
-static
-rc_t FastqFormatterFactory_Make(const SRASplitterFactory** cself, const char* accession, const SRATable* table)
+
+static rc_t FastqFormatterFactory_Make( const SRASplitterFactory** cself,
+                const char* accession, const SRATable* table )
 {
     rc_t rc = 0;
     FastqFormatterFactory* obj = NULL;
 
-    if( cself == NULL || accession == NULL || table == NULL ) {
-        rc = RC(rcExe, rcType, rcConstructing, rcParam, rcNull);
-    } else if( (rc = SRASplitterFactory_Make(cself, eSplitterFormat, sizeof(*obj),
-                                             FastqFormatterFactory_Init,
-                                             FastqFormatterFactory_NewObj,
-                                             FastqFormatterFactory_Release)) == 0 ) {
-        obj = (FastqFormatterFactory*)*cself;
-        obj->accession = accession;
-        obj->table = table;
+    if ( cself == NULL || accession == NULL || table == NULL )
+    {
+        rc = RC( rcExe, rcType, rcConstructing, rcParam, rcNull );
+    }
+    else
+    {
+        rc = SRASplitterFactory_Make( cself, eSplitterFormat, sizeof( *obj ),
+                                      FastqFormatterFactory_Init,
+                                      FastqFormatterFactory_NewObj,
+                                      FastqFormatterFactory_Release );
+        if ( rc == 0 )
+        {
+            obj = (FastqFormatterFactory*)*cself;
+            obj->accession = accession;
+            obj->table = table;
+        }
     }
     return rc;
 }
 
+
 /* ### External entry points ##################################################### */
+
 
 const char UsageDefaultName[] = "fastq-dump";
 
-rc_t CC UsageSummary (const char * progname)
+
+rc_t CC UsageSummary ( const char * progname )
 {
     return 0;
 }
@@ -2043,224 +2673,306 @@ ver_t CC KAppVersion( void )
 }
 
 
-rc_t FastqDumper_Usage(const SRADumperFmt* fmt, const SRADumperFmt_Arg* core_args)
+rc_t FastqDumper_Usage( const SRADumperFmt* fmt, const SRADumperFmt_Arg* core_args, int first )
 {
     int i, j;
     /* known core options */
-    const SRADumperFmt_Arg* core[13];
+    const SRADumperFmt_Arg* core[ 13 ];
 
-    memset(core, 0, sizeof(core));
-    for(i = 0; core_args[i].abbr != NULL || core_args[i].full != NULL; i++) {
-        const char* nm = core_args[i].abbr;
-        nm = nm ? nm : core_args[i].full;
-        if( strcmp(nm, "A") == 0 ) {
-            core[0] = &core_args[i];
-        } else if( strcmp(nm, "O") == 0 ) {
-            core[1] = &core_args[i];
-        } else if( strcmp(nm, "N") == 0 ) {
-            core[2] = &core_args[i];
-        } else if( strcmp(nm, "X") == 0 ) {
-            core[3] = &core_args[i];
-        } else if( strcmp(nm, "G") == 0 ) {
-            core[4] = &core_args[i];
-        } else if( strcmp(nm, "spot-groups") == 0 ) {
-            core[5] = &core_args[i];
-        } else if( strcmp(nm, "R") == 0 ) {
-            core[6] = &core_args[i];
-        } else if( strcmp(nm, "T") == 0 ) {
-            core[7] = &core_args[i];
-        } else if( strcmp(nm, "K") == 0 ) {
-            core[8] = &core_args[i];
-        } else if( strcmp(nm, "table") == 0 ) {
-            core[9] = &core_args[i];
-        } else if( strcmp(nm, "Z") == 0 ) {
-            core[10] = &core_args[i];
-        } else if( strcmp(nm, "gzip") == 0 ) {
-            core[11] = &core_args[i];
-        } else if( strcmp(nm, "bzip2") == 0 ) {
-            core[12] = &core_args[i];
+    memset( (void*)core, 0, sizeof( core ) );
+    for ( i = first; core_args[i].abbr != NULL || core_args[ i ].full != NULL; i++ )
+    {
+        const char* nm = core_args[ i ].abbr;
+        nm = nm ? nm : core_args[ i ].full;
+        if ( strcmp( nm, "A" ) == 0 )
+        {
+            core[ 0 ] = &core_args[ i ];
+        }
+        else if ( strcmp( nm, "O" ) == 0 )
+        {
+            core[ 1 ] = &core_args[ i ];
+        }
+        else if ( strcmp( nm, "N" ) == 0 )
+        {
+            core[ 2 ] = &core_args[ i ];
+        }
+        else if ( strcmp( nm, "X" ) == 0 )
+        {
+            core[ 3 ] = &core_args[ i ];
+        }
+        else if ( strcmp( nm, "G" ) == 0 )
+        {
+            core[ 4 ] = &core_args[ i ];
+        }
+        else if ( strcmp( nm, "spot-groups" ) == 0 )
+        {
+            core[ 5 ] = &core_args[ i ];
+        }
+        else if ( strcmp( nm, "R" ) == 0 )
+        {
+            core[ 6 ] = &core_args[ i ];
+        }
+        else if ( strcmp( nm, "T" ) == 0 )
+        {
+            core[ 7 ] = &core_args[ i ];
+        }
+        else if ( strcmp( nm, "K" ) == 0 )
+        {
+            core[ 8 ] = &core_args[ i ];
+        }
+        else if ( strcmp( nm, "table" ) == 0 )
+        {
+            core[ 9 ] = &core_args[ i ];
+        }
+        else if ( strcmp( nm, "Z" ) == 0 )
+        {
+            core[ 10 ] = &core_args[ i ];
+        }
+        else if ( strcmp( nm, "gzip" ) == 0 )
+        {
+            core[ 11 ] = &core_args[ i ];
+        }
+        else if ( strcmp( nm, "bzip2" ) == 0 )
+        {
+            core[ 12 ] = &core_args[ i ];
         }
     }
 
 #define OARG(arg,msg) (arg ? HelpOptionLine((arg)->abbr, (arg)->full, (arg)->param, \
                        msg ? msg : (const char**)((arg)->descr)) : ((void)(0)))
 
-    OUTMSG(("INPUT\n"));
-    OARG(core[0], NULL);
-    OARG(core[9], NULL);
+    OUTMSG(( "INPUT\n" ));
+    OARG( core[ 0 ], NULL );
+    OARG( core[ 9 ], NULL );
 
-    OUTMSG(("\nPROCESSING\n"));
-    OUTMSG(("\nRead Splitting                     Sequence data may be used in raw form or\n"));
-    OUTMSG(("                                     split into individual reads\n"));
-    OARG(&fmt->arg_desc[0], NULL);
+    OUTMSG(( "\nPROCESSING\n" ));
+    OUTMSG(( "\nRead Splitting                     Sequence data may be used in raw form or\n"));
+    OUTMSG(( "                                     split into individual reads\n" ));
+    OARG( &fmt->arg_desc[ 0 ], NULL);
 
-    OUTMSG(("\nFull Spot Filters                  Applied to the full spot independently\n"));
-    OUTMSG(("                                     of --%s\n", fmt->arg_desc[0].full));
-    OARG(core[2], NULL);
-    OARG(core[3], NULL);
-    OARG(core[5], NULL);
-    OARG(&fmt->arg_desc[1], NULL);
+    OUTMSG(( "\nFull Spot Filters                  Applied to the full spot independently\n" ));
+    OUTMSG(( "                                     of --%s\n", fmt->arg_desc[0].full ));
+    OARG( core[ 2 ], NULL );
+    OARG( core[ 3 ], NULL );
+    OARG( core[ 5 ], NULL );
+    OARG( &fmt->arg_desc[ 1 ], NULL );
 
-    OUTMSG(("\nCommon Filters                     Applied to spots when --%s is not\n",
-                                                  fmt->arg_desc[0].full));
-    OUTMSG(("                                     set, otherwise - to individual reads\n"));
-    OARG(&fmt->arg_desc[2], NULL);
-    OARG(core[6], NULL);
-    OARG(&fmt->arg_desc[3], NULL);
+    OUTMSG(( "\nCommon Filters                     Applied to spots when --%s is not\n",
+                                                  fmt->arg_desc[0].full ));
+    OUTMSG(( "                                     set, otherwise - to individual reads\n" ));
+    OARG( &fmt->arg_desc[ 2 ], NULL );
+    OARG( core[ 6 ], NULL );
+    OARG( &fmt->arg_desc[ 3 ], NULL );
 
-    OUTMSG(("\nFilters based on alignments        Filters are active when alignment\n"));
-    OUTMSG(("                                     data are present\n"));
-    OARG(&fmt->arg_desc[16], NULL);
-    OARG(&fmt->arg_desc[17], NULL);
-    OARG(&fmt->arg_desc[18], NULL);
-    OARG(&fmt->arg_desc[19], NULL);
+    OUTMSG(( "\nFilters based on alignments        Filters are active when alignment\n" ));
+    OUTMSG(( "                                     data are present\n" ));
+    OARG( &fmt->arg_desc[ 16 ], NULL );
+    OARG( &fmt->arg_desc[ 17 ], NULL );
+    OARG( &fmt->arg_desc[ 18 ], NULL );
+    OARG( &fmt->arg_desc[ 19 ], NULL );
 
-    OUTMSG(("\nFilters for individual reads       Applied only with --%s set\n",
-                                                  fmt->arg_desc[0].full));
-    OARG(&fmt->arg_desc[4], NULL);
+    OUTMSG(( "\nFilters for individual reads       Applied only with --%s set\n",
+                                                  fmt->arg_desc[0].full ));
+    OARG( &fmt->arg_desc[ 4 ], NULL );
 
-    OUTMSG(("\nOUTPUT\n"));
-    OARG(core[1], NULL);
-    OARG(core[10], NULL);
-    OARG(core[11], NULL);
-    OARG(core[12], NULL);
+    OUTMSG(( "\nOUTPUT\n" ));
+    OARG( core[ 1 ], NULL );
+    OARG( core[ 10 ], NULL );
+    OARG( core[ 11 ], NULL  );
+    OARG( core[ 12 ], NULL);
 
-    OUTMSG(("\nMultiple File Options              Setting these options will produce more\n"));
-    OUTMSG(("                                     than 1 file, each of which will be suffixed\n"));
-    OUTMSG(("                                     according to splitting criteria.\n"));
-    OARG(&fmt->arg_desc[5], NULL);
-    OARG(&fmt->arg_desc[6], NULL);
-    OARG(core[4], NULL);
-    OARG(core[6], NULL);
-    OARG(core[7], NULL);
-    OARG(core[8], NULL);
+    OUTMSG(( "\nMultiple File Options              Setting these options will produce more\n" ));
+    OUTMSG(( "                                     than 1 file, each of which will be suffixed\n" ));
+    OUTMSG(( "                                     according to splitting criteria.\n" ));
+    OARG( &fmt->arg_desc[ 5 ], NULL );
+    OARG( &fmt->arg_desc[ 6 ], NULL );
+    OARG( core[ 4 ], NULL );
+    OARG( core[ 6 ], NULL );
+    OARG( core[ 7 ], NULL );
+    OARG( core[ 8 ], NULL );
 
-    OUTMSG(("\nFORMATTING\n"));
-    OUTMSG(("\nSequence\n"));
-    OARG(&fmt->arg_desc[7], NULL);
-    OARG(&fmt->arg_desc[8], NULL);
+    OUTMSG(( "\nFORMATTING\n" ));
+    OUTMSG(( "\nSequence\n" ));
+    OARG( &fmt->arg_desc[ 7 ], NULL );
+    OARG( &fmt->arg_desc[ 8 ], NULL );
 
-    OUTMSG(("\nQuality\n"));
-    OARG(&fmt->arg_desc[9], NULL);
-    OARG(&fmt->arg_desc[10], NULL);
+    OUTMSG(( "\nQuality\n" ));
+    OARG( &fmt->arg_desc[ 9 ], NULL );
+    OARG( &fmt->arg_desc[ 10 ], NULL );
 
-    OUTMSG(("\nDefline\n"));
-    OARG(&fmt->arg_desc[11], NULL);
-    OARG(&fmt->arg_desc[12], NULL);
-    OARG(&fmt->arg_desc[13], NULL);
-    OARG(&fmt->arg_desc[14], NULL);
-    OARG(&fmt->arg_desc[15], NULL);
+    OUTMSG(( "\nDefline\n" ));
+    OARG( &fmt->arg_desc[ 11 ], NULL );
+    OARG( &fmt->arg_desc[ 12 ], NULL );
+    OARG( &fmt->arg_desc[ 13 ], NULL );
+    OARG( &fmt->arg_desc[ 14 ], NULL );
+    OARG( &fmt->arg_desc[ 15 ], NULL );
 
-    OUTMSG(("OTHER:\n"));
-    for(i = 0; core_args[i].abbr != NULL || core_args[i].full != NULL; i++) {
+    OUTMSG(( "OTHER:\n" ));
+    for ( i = 0; core_args[ i ].abbr != NULL || core_args[ i ].full != NULL; i++ )
+    {
         bool print = true;
-        for(j = 0; j < sizeof(core) / sizeof(core[0]); j++) {
-            if( core[j] == &core_args[i] ) {
+        for ( j = 0; j < sizeof( core ) / sizeof( core[ 0 ] ); j++ )
+        {
+            if ( core[ j ] == &core_args[ i ] )
+            {
                 print = false;
                 break;
             }
         }
-        if( print ) {
-            OARG(&core_args[i], NULL);
+        if ( print )
+        {
+            OARG( &core_args[ i ], NULL );
         }
     }
     return 0;
 }
 
-rc_t FastqDumper_Release(const SRADumperFmt* fmt)
+
+rc_t FastqDumper_Release( const SRADumperFmt* fmt )
 {
-    if( fmt == NULL ) {
-        return RC(rcExe, rcFormatter, rcDestroying, rcParam, rcInvalid);
-    } else {
-        Defline_Release(FastqArgs.b_defline);
-        Defline_Release(FastqArgs.q_defline);
-        free(FastqArgs.alregion);
+    if ( fmt == NULL )
+    {
+        return RC( rcExe, rcFormatter, rcDestroying, rcParam, rcInvalid );
+    }
+    else
+    {
+        Defline_Release( FastqArgs.b_defline );
+        Defline_Release( FastqArgs.q_defline );
+        free( FastqArgs.alregion );
     }
     return 0;
 }
 
-bool FastqDumper_AddArg(const SRADumperFmt* fmt, GetArg* f, int* i, int argc, char *argv[])
+
+bool FastqDumper_AddArg( const SRADumperFmt* fmt, GetArg* f, int* i, int argc, char *argv[] )
 {
     const char* arg = NULL;
 
-    if( fmt == NULL || f == NULL || i == NULL || argv == NULL ) {
-        LOGERR(klogErr, RC(rcExe, rcArgv, rcReading, rcParam, rcInvalid), "null param");
+    if ( fmt == NULL || f == NULL || i == NULL || argv == NULL )
+    {
+        LOGERR( klogErr, RC( rcExe, rcArgv, rcReading, rcParam, rcInvalid ), "null param" );
         return false;
-    } else if( f(fmt, "M", "minReadLen", i, argc, argv, &arg) ) {
-        FastqArgs.minReadLen = AsciiToU32(arg, NULL, NULL);
-    } else if( f(fmt, "W", "clip", i, argc, argv, NULL) ) {
+    }
+    else if ( f( fmt, "M", "minReadLen", i, argc, argv, &arg ) )
+    {
+        FastqArgs.minReadLen = AsciiToU32( arg, NULL, NULL );
+    }
+    else if ( f( fmt, "W", "clip", i, argc, argv, NULL ) )
+    {
         FastqArgs.applyClip = true;
-    } else if( f(fmt, "F", "origfmt", i, argc, argv, NULL) ) {
+    }
+    else if ( f( fmt, "F", "origfmt", i, argc, argv, NULL ) )
+    {
         FastqArgs.dumpOrigFmt = true;
-    } else if( f(fmt, "C", "dumpcs", i, argc, argv, NULL) ) {
-        int k = (*i) + 1;
+    }
+    else if ( f( fmt, "C", "dumpcs", i, argc, argv, NULL ) )
+    {
+        int k = ( *i ) + 1;
         FastqArgs.dumpCs = true;
-        if( k < argc && strlen(argv[k]) == 1 && strchr("acgtACGT", argv[k][0]) != NULL ) {
-            FastqArgs.desiredCsKey = argv[k];
+        if ( k < argc && strlen( argv[ k ] ) == 1 && strchr( "acgtACGT", argv[ k ][ 0 ] ) != NULL )
+        {
+            FastqArgs.desiredCsKey = argv[ k ];
             *i = k;
         }
-    } else if( f(fmt, "B", "dumpbase", i, argc, argv, NULL) ) {
+    }
+    else if ( f( fmt, "B", "dumpbase", i, argc, argv, NULL ) )
+    {
         FastqArgs.dumpBase = true;
-    } else if( f(fmt, "Q", "offset", i, argc, argv, &arg) ) {
-        FastqArgs.offset = AsciiToU32(arg, NULL, NULL);
-    } else if( f(fmt, "I", "readids", i, argc, argv, NULL) ) {
+    }
+    else if ( f( fmt, "Q", "offset", i, argc, argv, &arg ) )
+    {
+        FastqArgs.offset = AsciiToU32( arg, NULL, NULL );
+    }
+    else if ( f( fmt, "I", "readids", i, argc, argv, NULL ) )
+    {
         FastqArgs.readIds = true;
-    } else if( f(fmt, "E", "qual-filter", i, argc, argv, NULL) ) {
+    }
+    else if ( f( fmt, "E", "qual-filter", i, argc, argv, NULL ) )
+    {
         FastqArgs.qual_filter = true;
-    } else if( f(fmt, "DB", "defline-seq", i, argc, argv, &arg) ) {
+    }
+    else if ( f( fmt, "DB", "defline-seq", i, argc, argv, &arg ) )
+    {
         FastqArgs.b_deffmt = arg;
-    } else if( f(fmt, "DQ", "defline-qual", i, argc, argv, &arg) ) {
+    }
+    else if ( f( fmt, "DQ", "defline-qual", i, argc, argv, &arg ) )
+    {
         FastqArgs.q_deffmt = arg;
-    } else if( f(fmt, "TR", "skip-technical", i, argc, argv, NULL) ) {
+    }
+    else if ( f( fmt, "TR", "skip-technical", i, argc, argv, NULL ) )
+    {
         FastqArgs.skipTechnical = true;
-    } else if( f(fmt, "SF", "split-files", i, argc, argv, NULL) ) {
+    }
+    else if ( f( fmt, "SF", "split-files", i, argc, argv, NULL ) )
+    {
         FastqArgs.split_spot = true;
         FastqArgs.split_files = true;
-    } else if( f(fmt, NULL, "split-3", i, argc, argv, NULL) ) {
+    }
+    else if ( f( fmt, NULL, "split-3", i, argc, argv, NULL ) )
+    {
         FastqArgs.split_3 = true;
         FastqArgs.split_spot = true;
         FastqArgs.maxReads = 2;
         FastqArgs.skipTechnical = true;
-    } else if( f(fmt, "SL", "split-spot", i, argc, argv, NULL) ) {
+    }
+    else if ( f( fmt, "SL", "split-spot", i, argc, argv, NULL ) )
+    {
         FastqArgs.split_spot = true;
-    } else if( f(fmt, "HS", "helicos", i, argc, argv, NULL) ) {
+    }
+    else if ( f( fmt, "HS", "helicos", i, argc, argv, NULL ) )
+    {
         FastqArgs.b_deffmt = "@$sn";
         FastqArgs.q_deffmt =  "+";
-    } else if( f(fmt, "FA", "fasta", i, argc, argv, NULL) ) {
+    }
+    else if ( f( fmt, "FA", "fasta", i, argc, argv, NULL ) )
+    {
         int k = (*i) + 1;
         FastqArgs.fasta = 70;
-        if( k < argc && isdigit(argv[k][0]) ) {
+        if ( k < argc && isdigit( argv[ k ][ 0 ] ) )
+        {
             char* endp = NULL;
             errno = 0;
-            FastqArgs.fasta = strtou64(argv[k], &endp, 10);
-            if( errno != 0 || endp == NULL || *endp != '\0' ) {
+            FastqArgs.fasta = strtou64( argv[ k ], &endp, 10 );
+            if ( errno != 0 || endp == NULL || *endp != '\0' )
+            {
                 return false;
             }
             *i = k;
-            if( FastqArgs.fasta == 0 ) {
+            if ( FastqArgs.fasta == 0 )
+            {
                 FastqArgs.fasta = ~0;
             }
         }
         FastqArgs.file_extension = ".fasta";
-    } else if( f(fmt, NULL, "aligned", i, argc, argv, NULL) ) {
+    }
+    else if ( f( fmt, NULL, "aligned", i, argc, argv, NULL ) )
+    {
         FastqArgs.aligned = true;
-    } else if( f(fmt, NULL, "unaligned", i, argc, argv, NULL) ) {
+    }
+    else if ( f( fmt, NULL, "unaligned", i, argc, argv, NULL ) )
+    {
         FastqArgs.unaligned = true;
-    } else if( f(fmt, NULL, "aligned-region", i, argc, argv, &arg) ) {
+    }
+    else if ( f( fmt, NULL, "aligned-region", i, argc, argv, &arg ) )
+    {
         /* name[:[from][-[to]]] */
-        TAlignedRegion* r = realloc(FastqArgs.alregion, sizeof(*FastqArgs.alregion) * ++FastqArgs.alregion_qty);
-        if( r == NULL ) {
+        TAlignedRegion* r = realloc( FastqArgs.alregion, sizeof( *FastqArgs.alregion ) * ++FastqArgs.alregion_qty );
+        if ( r == NULL )
+        {
             return false;
         }
         FastqArgs.alregion = r;
-        r = &FastqArgs.alregion[FastqArgs.alregion_qty - 1];
-        r->name = strchr(arg, ':');
+        r = &FastqArgs.alregion[ FastqArgs.alregion_qty - 1 ];
+        r->name = strchr( arg, ':' );
         r->from = 0;
         r->to = 0;
-        if( r->name == NULL ) {
+        if ( r->name == NULL )
+        {
             r->name = arg;
-            r->name_len = strlen(arg);
-        } else {
+            r->name_len = strlen( arg );
+        }
+        else
+        {
             const char* c;
             uint64_t* v;
 
@@ -2269,250 +2981,407 @@ bool FastqDumper_AddArg(const SRADumperFmt* fmt, GetArg* f, int* i, int argc, ch
             r->name = arg;
 
             v = &r->from;
-            while(*++c != '\0') {
-                if( *c == '-' ) {
+            while ( *++c != '\0')
+            {
+                if ( *c == '-' )
+                {
                     v = &r->to;
-                } else if( *c == '+' ) {
-                    if( *v != 0 ) {
+                }
+                else if ( *c == '+' )
+                {
+                    if ( *v != 0 )
+                    {
                         return false;
                     }
-                } else if( !isdigit(*c) ) {
+                }
+                else if ( !isdigit( *c ) )
+                {
                     return false;
-                } else {
-                    *v = *v * 10 + (*c - '0');
+                }
+                else
+                {
+                    *v = *v * 10 + ( *c - '0' );
                 }
             }
-            if( r->from > r->to && r->to != 0 ) {
+            if ( r->from > r->to && r->to != 0 )
+            {
                 uint64_t x = r->from;
                 r->from = r->to;
                 r->to = x;
             }
         }
-    } else if( f(fmt, NULL, "matepair-distance", i, argc, argv, &arg) ) {
+    }
+    else if ( f( fmt, NULL, "matepair-distance", i, argc, argv, &arg ) )
+    {
         /* from[-to] | [from]-to | unknown */
-        if( strcmp(arg, "unknown") == 0 ) {
+        if ( strcmp( arg, "unknown" ) == 0 )
+        {
             FastqArgs.mp_dist_unknown = true;
-        } else {
+        }
+        else
+        {
             uint64_t* v;
-            TMatepairDistance* p = realloc(FastqArgs.mp_dist, sizeof(*FastqArgs.mp_dist) * ++FastqArgs.mp_dist_qty);
-            if( p == NULL ) {
+            TMatepairDistance* p = realloc( FastqArgs.mp_dist, sizeof( *FastqArgs.mp_dist ) * ++FastqArgs.mp_dist_qty );
+            if ( p == NULL )
+            {
                 return false;
             }
             FastqArgs.mp_dist = p;
-            p = &FastqArgs.mp_dist[FastqArgs.mp_dist_qty - 1];
+            p = &FastqArgs.mp_dist[ FastqArgs.mp_dist_qty - 1 ];
             p->from = 0;
             p->to = 0;
 
             v = &p->from;
-            while(*++arg != '\0') {
-                if( *arg == '-' ) {
+            while ( *++arg != '\0' )
+            {
+                if ( *arg == '-' )
+                {
                     v = &p->to;
-                } else if( *arg == '+' ) {
-                    if( *v != 0 ) {
+                }
+                else if ( *arg == '+' )
+                {
+                    if ( *v != 0 )
+                    {
                         return false;
                     }
-                } else if( !isdigit(*arg) ) {
+                }
+                else if ( !isdigit( *arg ) )
+                {
                     return false;
-                } else {
-                    *v = *v * 10 + (*arg - '0');
+                }
+                else
+                {
+                    *v = *v * 10 + ( *arg - '0' );
                 }
             }
-            if( p->from > p->to && p->to != 0 ) {
+            if ( p->from > p->to && p->to != 0 )
+            {
                 uint64_t x = p->from;
                 p->from = p->to;
                 p->to = x;
             }
-            if( p->from == 0 && p->to == 0 ) {
+            if ( p->from == 0 && p->to == 0 )
+            {
                 FastqArgs.mp_dist_qty--;
             }
         }
-    } else {
+    }
+    else
+    {
         return false;
     }
     return true;
 }
 
-rc_t FastqDumper_Factories(const SRADumperFmt* fmt, const SRASplitterFactory** factory)
+
+rc_t FastqDumper_Factories( const SRADumperFmt* fmt, const SRASplitterFactory** factory )
 {
     rc_t rc = 0;
     const SRASplitterFactory* parent = NULL, *child = NULL;
 
-    if( fmt == NULL || factory == NULL ) {
-        return RC(rcExe, rcFormatter, rcReading, rcParam, rcInvalid);
+    if ( fmt == NULL || factory == NULL )
+    {
+        return RC( rcExe, rcFormatter, rcReading, rcParam, rcInvalid );
     }
     *factory = NULL;
     {
         const SRAColumn* c = NULL;
-        if( (rc = SRATableOpenColumnRead(fmt->table, &c, "PLATFORM", sra_platform_id_t)) == 0 ) {
-            const INSDC_SRA_platform_id* platform;
+        rc = SRATableOpenColumnRead( fmt->table, &c, "PLATFORM", sra_platform_id_t );
+        if ( rc == 0 )
+        {
+            const INSDC_SRA_platform_id * platform;
             bitsz_t o, z;
-            if( (rc = SRAColumnRead(c, 1, (const void **)&platform, &o, &z)) == 0 ) {
-                if( !FastqArgs.dumpCs && !FastqArgs.dumpBase ) {
-                    if( *platform == SRA_PLATFORM_ABSOLID ) {
+            rc = SRAColumnRead( c, 1, ( const void ** )&platform, &o, &z );
+            if ( rc == 0 )
+            {
+                if ( !FastqArgs.dumpCs && !FastqArgs.dumpBase )
+                {
+                    if ( platform != NULL && *platform == SRA_PLATFORM_ABSOLID )
+                    {
                         FastqArgs.dumpCs = true;
-                    } else {
+                    }
+                    else
+                    {
                         FastqArgs.dumpBase = true;
                     }
                 }
-                if( *platform == SRA_PLATFORM_ABSOLID ) {
+                if ( platform != NULL && *platform == SRA_PLATFORM_ABSOLID )
+                {
                     FastqArgs.is_platform_cs_native = true;
                 }
             }
-            SRAColumnRelease(c);
-        } else if( GetRCState(rc) == rcNotFound && GetRCObject(rc) == rcColumn ) {
+            SRAColumnRelease( c );
+        }
+        else if ( GetRCState( rc ) == rcNotFound && GetRCObject( rc ) == rcColumn )
+        {
             rc = 0;
         }
     }
-    if( (FastqArgs.aligned || FastqArgs.unaligned) && !(FastqArgs.aligned && FastqArgs.unaligned) ) {
-        if( (rc = AlignedFilterFactory_Make(&child, fmt->table, FastqArgs.aligned, FastqArgs.unaligned)) == 0 ) {
-            if( parent != NULL ) {
-                if( (rc = SRASplitterFactory_AddNext(parent, child)) != 0 ) {
+
+    if ( ( FastqArgs.aligned || FastqArgs.unaligned ) && !( FastqArgs.aligned && FastqArgs.unaligned ) )
+    {
+        rc = AlignedFilterFactory_Make( &child, fmt->table, FastqArgs.aligned, FastqArgs.unaligned );
+        if ( rc == 0 )
+        {
+            if ( parent != NULL )
+            {
+                rc = SRASplitterFactory_AddNext( parent, child );
+                if ( rc != 0 )
+                {
                     SRASplitterFactory_Release(child);
-                } else {
+                }
+                else
+                {
                     parent = child;
                 }
-            } else {
+            }
+            else
+            {
                 parent = child;
                 *factory = parent;
             }
         }
     }
-    if( FastqArgs.alregion_qty > 0 ) {
-        if( (rc = AlignRegionFilterFactory_Make(&child, fmt->table, FastqArgs.alregion, FastqArgs.alregion_qty)) == 0 ) {
-            if( parent != NULL ) {
-                if( (rc = SRASplitterFactory_AddNext(parent, child)) != 0 ) {
-                    SRASplitterFactory_Release(child);
-                } else {
+
+    if ( FastqArgs.alregion_qty > 0 )
+    {
+        rc = AlignRegionFilterFactory_Make( &child, fmt->table, FastqArgs.alregion, FastqArgs.alregion_qty );
+        if ( rc == 0 )
+        {
+            if ( parent != NULL )
+            {
+                rc = SRASplitterFactory_AddNext( parent, child );
+                if ( rc != 0 )
+                {
+                    SRASplitterFactory_Release( child );
+                }
+                else
+                {
                     parent = child;
                 }
-            } else {
+            }
+            else
+            {
                 parent = child;
                 *factory = parent;
             }
         }
     }
-    if( FastqArgs.mp_dist_unknown || FastqArgs.mp_dist_qty > 0 ) {
-        if( (rc = AlignPairDistanceFilterFactory_Make(&child, fmt->table,
-                                        FastqArgs.mp_dist_unknown, FastqArgs.mp_dist, FastqArgs.mp_dist_qty)) == 0 ) {
-            if( parent != NULL ) {
-                if( (rc = SRASplitterFactory_AddNext(parent, child)) != 0 ) {
+
+    if ( FastqArgs.mp_dist_unknown || FastqArgs.mp_dist_qty > 0 )
+    {
+        rc = AlignPairDistanceFilterFactory_Make( &child, fmt->table,
+                FastqArgs.mp_dist_unknown, FastqArgs.mp_dist, FastqArgs.mp_dist_qty);
+        if ( rc == 0 )
+        {
+            if ( parent != NULL )
+            {
+                rc = SRASplitterFactory_AddNext( parent, child );
+                if ( rc != 0 )
+                {
                     SRASplitterFactory_Release(child);
-                } else {
+                }
+                else
+                {
                     parent = child;
                 }
-            } else {
+            }
+            else
+            {
                 parent = child;
                 *factory = parent;
             }
         }
     }
-    if( rc == 0 && FastqArgs.skipTechnical && FastqArgs.split_spot ) {
-        if( (rc = FastqBioFilterFactory_Make(&child, fmt->accession, fmt->table)) == 0 ) {
-            if( parent != NULL ) {
-                if( (rc = SRASplitterFactory_AddNext(parent, child)) != 0 ) {
-                    SRASplitterFactory_Release(child);
-                } else {
+
+    if ( rc == 0 && FastqArgs.skipTechnical && FastqArgs.split_spot )
+    {
+        rc = FastqBioFilterFactory_Make( &child, fmt->accession, fmt->table );
+        if ( rc == 0 )
+        {
+            if ( parent != NULL )
+            {
+                rc = SRASplitterFactory_AddNext( parent, child );
+                if ( rc != 0 )
+                {
+                    SRASplitterFactory_Release( child );
+                }
+                else
+                {
                     parent = child;
                 }
-            } else {
+            }
+            else
+            {
                 parent = child;
                 *factory = parent;
             }
         }
     }
-    if( rc == 0 && FastqArgs.maxReads > 0 ) {
-        if( (rc = FastqRNumberFilterFactory_Make(&child, fmt->accession, fmt->table)) == 0 ) {
-            if( parent != NULL ) {
-                if( (rc = SRASplitterFactory_AddNext(parent, child)) != 0 ) {
-                    SRASplitterFactory_Release(child);
-                } else {
+
+    if ( rc == 0 && FastqArgs.maxReads > 0 )
+    {
+        rc = FastqRNumberFilterFactory_Make( &child, fmt->accession, fmt->table );
+        if ( rc == 0 )
+        {
+            if ( parent != NULL )
+            {
+                rc = SRASplitterFactory_AddNext( parent, child );
+                if ( rc != 0 )
+                {
+                    SRASplitterFactory_Release( child );
+                }
+                else
+                {
                     parent = child;
                 }
-            } else {
+            }
+            else
+            {
                 parent = child;
                 *factory = parent;
             }
         }
     }
-    if( rc == 0 && FastqArgs.qual_filter ) {
-        if( (rc = FastqQFilterFactory_Make(&child, fmt->accession, fmt->table)) == 0 ) {
-            if( parent != NULL ) {
-                if( (rc = SRASplitterFactory_AddNext(parent, child)) != 0 ) {
-                    SRASplitterFactory_Release(child);
-                } else {
+
+    if ( rc == 0 && FastqArgs.qual_filter )
+    {
+        rc = FastqQFilterFactory_Make( &child, fmt->accession, fmt->table );
+        if ( rc == 0 )
+        {
+            if ( parent != NULL )
+            {
+                rc = SRASplitterFactory_AddNext( parent, child );
+                if ( rc != 0 )
+                {
+                    SRASplitterFactory_Release( child );
+                }
+                else
+                {
                     parent = child;
                 }
-            } else {
+            }
+            else
+            {
                 parent = child;
                 *factory = parent;
             }
         }
     }
-    if( rc == 0 ) {
-        if( (rc = FastqReadLenFilterFactory_Make(&child, fmt->accession, fmt->table)) == 0 ) {
-            if( parent != NULL ) {
-                if( (rc = SRASplitterFactory_AddNext(parent, child)) != 0 ) {
-                    SRASplitterFactory_Release(child);
-                } else {
+
+    if ( rc == 0 )
+    {
+        rc = FastqReadLenFilterFactory_Make( &child, fmt->accession, fmt->table );
+        if ( rc == 0 )
+        {
+            if ( parent != NULL )
+            {
+                rc = SRASplitterFactory_AddNext( parent, child );
+                if ( rc != 0 )
+                {
+                    SRASplitterFactory_Release( child );
+                }
+                else
+                {
                     parent = child;
                 }
-            } else {
+            }
+            else
+            {
                 parent = child;
                 *factory = parent;
             }
         }
     }
-    if( rc == 0 ) {
-        if( FastqArgs.split_3 ) {
-            if( (rc = Fastq3ReadSplitterFactory_Make(&child, fmt->accession, fmt->table)) == 0 ) {
-                if( parent != NULL ) {
-                    if( (rc = SRASplitterFactory_AddNext(parent, child)) != 0 ) {
-                        SRASplitterFactory_Release(child);
-                    } else {
+
+    if ( rc == 0 )
+    {
+        if ( FastqArgs.split_3 )
+        {
+            rc = Fastq3ReadSplitterFactory_Make( &child, fmt->accession, fmt->table );
+            if ( rc == 0 )
+            {
+                if ( parent != NULL )
+                {
+                    rc = SRASplitterFactory_AddNext( parent, child );
+                    if ( rc != 0 )
+                    {
+                        SRASplitterFactory_Release( child );
+                    }
+                    else
+                    {
                         parent = child;
                     }
-                } else {
+                }
+                else
+                {
                     parent = child;
                     *factory = parent;
                 }
             }
-        } else if( FastqArgs.split_files ) {
-            if( (rc = FastqReadSplitterFactory_Make(&child, fmt->accession, fmt->table)) == 0 ) {
-                if( parent != NULL ) {
-                    if( (rc = SRASplitterFactory_AddNext(parent, child)) != 0 ) {
+        }
+        else if ( FastqArgs.split_files )
+        {
+            rc = FastqReadSplitterFactory_Make( &child, fmt->accession, fmt->table );
+            if ( rc == 0 )
+            {
+                if ( parent != NULL )
+                {
+                    rc = SRASplitterFactory_AddNext( parent, child );
+                    if ( rc != 0 )
+                    {
                         SRASplitterFactory_Release(child);
-                    } else {
+                    }
+                    else
+                    {
                         parent = child;
                     }
-                } else {
+                }
+                else
+                {
                     parent = child;
                     *factory = parent;
                 }
             }
         }
     }
-    if( rc == 0 ) {
-        if( FastqArgs.b_deffmt != NULL ) {
-            rc = Defline_Parse(&FastqArgs.b_defline, FastqArgs.b_deffmt);
+
+    if ( rc == 0 )
+    {
+        if ( FastqArgs.b_deffmt != NULL )
+        {
+            rc = Defline_Parse( &FastqArgs.b_defline, FastqArgs.b_deffmt );
         }
-        if( FastqArgs.q_deffmt != NULL ) {
-            rc = Defline_Parse(&FastqArgs.q_defline, FastqArgs.q_deffmt);
+        if ( FastqArgs.q_deffmt != NULL )
+        {
+            rc = Defline_Parse( &FastqArgs.q_defline, FastqArgs.q_deffmt );
         }
-        if( rc == 0 && (rc = FastqFormatterFactory_Make(&child, fmt->accession, fmt->table)) == 0 ) {
-            if( parent != NULL ) {
-                if( (rc = SRASplitterFactory_AddNext(parent, child)) != 0 ) {
-                    SRASplitterFactory_Release(child);
+        if ( rc == 0 )
+        {
+            rc = FastqFormatterFactory_Make( &child, fmt->accession, fmt->table );
+            if ( rc == 0 )
+            {
+                if ( parent != NULL )
+                {
+                    rc = SRASplitterFactory_AddNext( parent, child );
+                    if ( rc != 0 ) 
+                    {
+                        SRASplitterFactory_Release( child );
+                    }
                 }
-            } else {
-                *factory = child;
+                else
+                {
+                    *factory = child;
+                }
             }
         }
     }
     return rc;
 }
 
+
 /* main entry point of the file */
-rc_t SRADumper_Init(SRADumperFmt* fmt)
+rc_t SRADumper_Init( SRADumperFmt* fmt )
 {
     static const SRADumperFmt_Arg arg[] =
         {
@@ -2572,11 +3441,12 @@ rc_t SRADumper_Init(SRADumperFmt* fmt)
             {NULL, NULL, NULL, {NULL}}
         };
 
-    if( fmt == NULL ) {
-        return RC(rcExe, rcFileFormat, rcConstructing, rcParam, rcNull);
+    if ( fmt == NULL )
+    {
+        return RC( rcExe, rcFileFormat, rcConstructing, rcParam, rcNull );
     }
 
-    memset(&FastqArgs, 0, sizeof(FastqArgs));
+    memset( &FastqArgs, 0, sizeof( FastqArgs ) );
     FastqArgs.is_platform_cs_native = false;
     FastqArgs.maxReads = 0;
     FastqArgs.skipTechnical = false;

@@ -59,7 +59,9 @@ enum ETableWriterAlgn_ColNames {
     ewalgn_cn_HAS_REF_OFFSET,
     ewalgn_cn_MISMATCH,
     ewalgn_cn_REF_OFFSET,
-    ewalgn_cn_Last = ewalgn_cn_REF_OFFSET
+    ewalgn_cn_EVIDENCE_ALIGNMENT_IDS,
+    ewalgn_cn_ALIGN_GROUP,
+    ewalgn_cn_Last = ewalgn_cn_ALIGN_GROUP
 };
 
 typedef uint8_t ETableWriterAlgn_TableType;
@@ -95,6 +97,7 @@ typedef struct TableWriterAlgnData_struct {
     TableWriterData global_ref_start; /* used only for sorted */
     TableWriterData has_mismatch;  /* mandatory only for primary */
     TableWriterData mismatch; /* mandatory only for primary */
+
     INSDC_coord_len ref_len; /* projection on refseq is same for all alleles! */
     /* tmp data, never saved to db */
     /* recalculated offset in reference based on CIGAR and circularity in Compression */
@@ -105,6 +108,7 @@ typedef struct TableWriterAlgnData_struct {
     TableWriterData ref_orientation;
     TableWriterData ref_ploidy;
     TableWriterData mapq;
+    TableWriterData align_group; /* set length to 0 if not used */
 
     /* used only only in secondary */
     TableWriterData mate_ref_orientation;
@@ -112,6 +116,9 @@ typedef struct TableWriterAlgnData_struct {
     TableWriterData mate_ref_pos;
     TableWriterData mate_align_id;
     TableWriterData template_len;
+
+    /* used only in for ewalgn_tabletype_EvidenceInterval table type */
+    TableWriterData alingment_ids;
 } TableWriterAlgnData;
 
 typedef struct TableWriterAlgn TableWriterAlgn;
@@ -134,7 +141,7 @@ ALIGN_EXTERN rc_t CC TableWriterAlgn_Write(const TableWriterAlgn* cself, const T
 ALIGN_EXTERN rc_t CC TableWriterAlgn_TmpKeyStart(const TableWriterAlgn* cself);
 
 /* retrieve TMP_KEY value by rowid */
-ALIGN_EXTERN rc_t CC TableWriterAlgn_TmpKey(const TableWriterAlgn* cself, int64_t rowid, uint32_t* key_id);
+ALIGN_EXTERN rc_t CC TableWriterAlgn_TmpKey(const TableWriterAlgn* cself, int64_t rowid, uint64_t* key_id);
 
 /* assign a SPOT_ID value to row */
 ALIGN_EXTERN rc_t CC TableWriterAlgn_Write_SpotId(const TableWriterAlgn* cself, int64_t rowid, int64_t spot_id);

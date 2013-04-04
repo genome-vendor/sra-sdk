@@ -67,9 +67,8 @@
  * Hide any definition of sun that might have come from sun compilers
  * or the like
  */
-#ifdef sun
 #undef sun
-#endif
+#undef SUN
 
 
 #define PASTE_2(a,b)   a##b

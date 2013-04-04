@@ -166,6 +166,7 @@ rc_t helper_parse_schema( const VDBManager *my_manager,
 }
 
 
+#if TOOLS_USE_SRAPATH != 0
 static char *translate_accession( SRAPath *my_sra_path,
                            const char *accession,
                            const size_t bufsize )
@@ -182,7 +183,6 @@ static char *translate_accession( SRAPath *my_sra_path,
     }
     else if ( GetRCState( rc ) == rcInsufficient )
     {
-        /* bufsize was insufficient ---> repeat */
         free( res );
         return translate_accession( my_sra_path, accession, bufsize * 2 );
     }
@@ -193,15 +193,10 @@ static char *translate_accession( SRAPath *my_sra_path,
     }
     return res;
 }
+#endif
 
 
-/*
- * tries to interpret the given string in path as a accession
- * and returns the path of the found accession back in path
- * if it is possible, if not the original value of path remains unchanged
- * rc = 0 if the given path is a file-system-path or we are not
- * (weakly) linked against the sra-path-library
-*/
+#if TOOLS_USE_SRAPATH != 0
 rc_t helper_resolve_accession( const KDirectory *my_dir, char ** path )
 {
     SRAPath *my_sra_path;
@@ -233,6 +228,7 @@ rc_t helper_resolve_accession( const KDirectory *my_dir, char ** path )
     }
     return rc;
 }
+#endif
 
 
 /*

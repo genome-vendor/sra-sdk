@@ -66,7 +66,9 @@ void KTimeMake ( KTime *kt, struct tm const *t )
     kt -> month = t -> tm_mon;
     kt -> day = t -> tm_mday - 1;
     kt -> weekday = t -> tm_wday;
+#if !defined(__SunOS)  &&  !defined(__sun__)
     kt -> tzoff = ( int16_t ) ( t -> tm_gmtoff / 60 );
+#endif
     kt -> hour = ( uint8_t ) t -> tm_hour;
     kt -> minute = ( uint8_t ) t -> tm_min;
     kt -> second = ( uint8_t ) t -> tm_sec;

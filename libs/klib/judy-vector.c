@@ -633,7 +633,10 @@ LIB_EXPORT rc_t CC KVectorVisit ( const KVector *self, bool reverse,
             JError_t err;
             Word_t first, last, idx;
 
-            first = last = 0;
+	    /** Judy1First searches for first value higher then first**/ 
+            first = 0;
+	    /** Judy1Last searches for first value lower then last **/
+            last = (Word_t)-1;
 
             if ( self -> nancy_bool )
             {

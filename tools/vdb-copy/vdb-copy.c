@@ -212,14 +212,14 @@ static rc_t vdb_copy_redact_cell( const VCursor * src_cursor, VCursor * dst_curs
                 if ( show_redact )
                 {
                     char * c = ( char * )col->r_val->value;
-                    OUTMSG (( "redacting #%lu %s -> 0x%.02x\n", row_id, col->dst_cast, *c ));
+                    KOutMsg( "redacting #%lu %s -> 0x%.02x\n", row_id, col->dst_cast, *c );
                 }
                 redact_val_fill_buffer( col->r_val, rbuf, new_size );
             }
             else
             {
                 if ( show_redact )
-                    OUTMSG (( "redacting #%lu %s -> 0\n", row_id, col->dst_cast ));
+                    KOutMsg( "redacting #%lu %s -> 0\n", row_id, col->dst_cast );
                 memset( rbuf->buffer, 0, new_size );
             }
 
@@ -252,8 +252,8 @@ static rc_t vdb_copy_cell( const VCursor * src_cursor, VCursor * dst_cursor,
     uint32_t elem_bits;
 
     /*
-    OUTMSG (( " - copy cell %s ( src_idx=%u / dst_idx=%u )\n", 
-              col->name, col->src_idx, col->dst_idx ));
+    KOutMsg( " - copy cell %s ( src_idx=%u / dst_idx=%u )\n", 
+              col->name, col->src_idx, col->dst_idx );
     */
     rc = VCursorCellData( src_cursor, col->src_idx, &elem_bits,
                           &buffer, &offset_in_bits, &number_of_elements );
@@ -269,8 +269,8 @@ static rc_t vdb_copy_cell( const VCursor * src_cursor, VCursor * dst_cursor,
     if ( rc != 0 ) return rc;
 
     /*
-    OUTMSG (( "bit-offset = %u / elements = %u / element-bits = %u\n", 
-       offset_in_bits, number_of_elements, elem_bits ));
+    KOutMsg( "bit-offset = %u / elements = %u / element-bits = %u\n", 
+       offset_in_bits, number_of_elements, elem_bits );
     */
     rc = VCursorWrite( dst_cursor, col->dst_idx, elem_bits,
                        buffer, offset_in_bits, number_of_elements );
@@ -427,61 +427,69 @@ static rc_t vdb_copy_row_loop( const p_context ctx,
 
     fract_digits = vdb_copy_calc_fract_digits( iter );
     count = 0;
-    while ( ( num_gen_iterator_next( iter, &row_id ) == 0 )&&
-            ( rc == 0 ) )
+    rc = num_gen_iterator_next( iter, &row_id );
+    while ( rc == 0 )
     {
         rc = Quitting();    /* to be able to cancel the loop by signal */
-        if ( rc != 0 ) break;
-
-        rc = VCursorSetRowId( src_cursor, row_id );
-        if ( rc != 0 )
-        {
-            PLOGERR( klogInt, (klogInt, rc,
-                     "VCursorSetRowId(src) row #$(row_nr) failed",
-                     "row_nr=%lu", row_id ));
-        }
         if ( rc == 0 )
         {
-            rc = VCursorOpenRow( src_cursor );
+            rc = VCursorSetRowId( src_cursor, row_id );
             if ( rc != 0 )
-            {
                 PLOGERR( klogInt, (klogInt, rc,
-                         "VCursorOpenRow(src) row #$(row_nr) failed",
+                         "VCursorSetRowId(src) row #$(row_nr) failed",
                          "row_nr=%lu", row_id ));
-            }
-            else
+
+            if ( rc == 0 )
             {
-                bool pass_flag = true;
-                bool redact_flag = false;
-                rc_t rc1;
-
-                if ( filter_col_def != NULL )
-                    vdb_copy_read_row_flags( ctx, src_cursor,
-                                filter_col_def->src_idx, &pass_flag, &redact_flag );
-                if ( pass_flag )
+                rc = VCursorOpenRow( src_cursor );
+                if ( rc != 0 )
+                    PLOGERR( klogInt, (klogInt, rc,
+                             "VCursorOpenRow(src) row #$(row_nr) failed",
+                             "row_nr=%lu", row_id ));
+                else
                 {
-                    rc = vdb_copy_row( src_cursor, dst_cursor,
-                                       columns, row_id,
-                                       &rbuf, redact_flag, ctx->show_redact );
-                    if ( rc == 0 ) count++;
+                    bool pass_flag = true;
+                    bool redact_flag = false;
+
+                    if ( filter_col_def != NULL )
+                        vdb_copy_read_row_flags( ctx, src_cursor,
+                                    filter_col_def->src_idx, &pass_flag, &redact_flag );
+                    if ( pass_flag )
+                        rc = vdb_copy_row( src_cursor, dst_cursor,
+                                           columns, row_id,
+                                           &rbuf, redact_flag, ctx->show_redact );
+
+                    if ( rc == 0 )
+                    {
+                        count++;
+                        rc = VCursorCloseRow( src_cursor );
+                        if ( rc != 0 )
+                            PLOGERR( klogInt, ( klogInt, rc,
+                                     "VCursorCloseRow(src) row #$(row_nr) failed",
+                                     "row_nr=%lu", row_id ) );
+                    }
+                }
+                rc = num_gen_iterator_next( iter, &row_id );
+                if ( ctx->show_progress )
+                {
+                    if ( num_gen_iterator_percent( iter, fract_digits, &percent ) == 0 )
+                        update_progressbar( progress, fract_digits, percent );
                 }
 
-                rc1 = VCursorCloseRow( src_cursor );
-                if ( rc1 != 0 )
-                {
-                    PLOGERR( klogInt, ( klogInt, rc1,
-                             "VCursorCloseRow(src) row #$(row_nr) failed",
-                             "row_nr=%lu", row_id ) );
-                }
             }
         }
-        if ( ctx->show_progress )
-            if ( num_gen_iterator_percent( iter, fract_digits, &percent ) == 0 )
-                update_progressbar( progress, fract_digits, percent );
-
     }
+
+    /* set rc to zero for num_gen_iterator_next() reached last id */
+    if ( GetRCModule( rc ) == rcVDB && 
+         GetRCTarget( rc ) == rcNoTarg && 
+         GetRCContext( rc ) == rcReading &&
+         GetRCObject( rc ) == rcId &&
+         GetRCState( rc ) == rcInvalid )
+        rc = 0;
+
     if ( ctx->show_progress )
-        OUTMSG(( "\n" ));
+        KOutMsg( "\n" );
     destroy_progressbar( progress );
 
     PLOGMSG( klogInfo, ( klogInfo, "\n $(row_cnt) rows copied", "row_cnt=%lu", count ));
@@ -516,7 +524,7 @@ static rc_t vdb_copy_make_dst_table( const p_context ctx,
     {
         /* load it from a file */
         /*
-        OUTMSG (( "we are using '%s'\n", cctx->legacy_schema_file ));
+        KOutMsg( "we are using '%s'\n", cctx->legacy_schema_file );
         */
         if ( *dst_schema == NULL )
         {
@@ -674,7 +682,8 @@ static rc_t vdb_copy_prepare_legacy_tab( const p_context ctx,
 }
 
 
-static rc_t vdb_copy_find_out_what_columns_to_use( const VTable * src_table, 
+static rc_t vdb_copy_find_out_what_columns_to_use( const VTable * src_table,
+                                                   const char * tablename,
                                                    col_defs * columns, 
                                                    const char * requested,
                                                    const char * excluded )
@@ -696,7 +705,7 @@ static rc_t vdb_copy_find_out_what_columns_to_use( const VTable * src_table,
         DISP_RC( rc, "vdb_copy_find_out_what_columns_to_use:col_defs_mark_requested_columns() failed" );
         if ( rc == 0 && excluded != NULL )
         {
-            rc = col_defs_exclude_these_columns( columns, excluded );
+            rc = col_defs_exclude_these_columns( columns, tablename, excluded );
             DISP_RC( rc, "vdb_copy_find_out_what_columns_to_use:col_defs_unmark_writable_columns() failed" );
         }
     }
@@ -915,7 +924,8 @@ static rc_t vdb_copy_table2( const p_context ctx,
 
 static rc_t vdb_copy_table( const p_context ctx,
                             VDBManager * vdb_mgr,
-                            const VTable * src_table )
+                            const VTable * src_table,
+                            const char * tablename )
 {
     const VSchema * src_schema;
     rc_t rc = VTableOpenSchema ( src_table, &src_schema );
@@ -927,7 +937,7 @@ static rc_t vdb_copy_table( const p_context ctx,
         DISP_RC( rc, "vdb_copy_table:col_defs_init() failed" );
         if ( rc == 0 )
         {
-            rc = vdb_copy_find_out_what_columns_to_use( src_table, columns,
+            rc = vdb_copy_find_out_what_columns_to_use( src_table, tablename, columns,
                                                         ctx->columns, ctx->excluded_columns );
             if ( rc == 0 )
             {
@@ -1001,7 +1011,8 @@ static rc_t vdb_copy_cur_2_cur( const p_context ctx,
                             col_defs_unmark_do_not_redact_columns( columns,
                                             ctx->config.do_not_redact_columns );
 
-                            OUTMSG(( "copy of >%s<\n", tab_name ));
+                            if ( ctx->show_progress )
+                                KOutMsg( "copy of >%s<\n", tab_name );
 
                             vdb_copy_find_filter_and_redact_columns( schema,
                                                    columns, &(ctx->config), type_matcher );
@@ -1034,7 +1045,7 @@ static rc_t vdb_copy_tab_2_tab( const p_context ctx,
         DISP_RC( rc, "vdb_copy_tab_2_tab:col_defs_init() failed" );
         if ( rc == 0 )
         {
-            rc = vdb_copy_find_out_what_columns_to_use( src_tab, columns, 
+            rc = vdb_copy_find_out_what_columns_to_use( src_tab, tab_name, columns, 
                                                         NULL, ctx->excluded_columns );
             if ( rc == 0 )
             {
@@ -1352,7 +1363,7 @@ static rc_t vdb_copy_perform( const p_context ctx,
             if ( rc == 0 )
             {
                 /*********************************************/
-                rc = vdb_copy_table( ctx, vdb_mgr, src_table );
+                rc = vdb_copy_table( ctx, vdb_mgr, src_table, NULL );
                 /*********************************************/
                 DISP_RC( rc, "vdb_copy_perform:vdb_copy_table() failed" );
                 VTableRelease( src_table );
@@ -1394,6 +1405,7 @@ static rc_t vdb_copy_main( const p_context ctx )
     {
         KConfig * config_mgr;
 
+#if TOOLS_USE_SRAPATH != 0
         if ( !ctx->dont_check_accession )
             ctx->dont_check_accession = helper_is_this_a_filesystem_path( ctx->src_path );
         if ( !ctx->dont_check_accession )
@@ -1401,6 +1413,7 @@ static rc_t vdb_copy_main( const p_context ctx )
             rc_t rc1 = helper_resolve_accession( directory, (char**)&( ctx->src_path ) );
             DISP_RC( rc1, "vdb_copy_main:helper_check_accession() failed" );
         }
+#endif
 
         rc = helper_make_config_mgr( &config_mgr, ctx->kfg_path );
         DISP_RC( rc, "vdb_copy_main:helper_make_config_mgr() failed" );

@@ -39,7 +39,7 @@
 #include <string.h>
 #include <assert.h>
 
-#define IDX2_READ_FILE_BUFFER 32 * 1024
+#define IDX2_READ_FILE_BUFFER 1024 * 1024
 
 
 /*--------------------------------------------------------------------------

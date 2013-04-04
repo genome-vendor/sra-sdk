@@ -181,7 +181,7 @@ struct VDBManager
      *  wd-native character set giving path to table
      */
     inline rc_t OpenTable ( const VTable **tbl, struct VSchema const *schema,
-        const char *path, ... ) throw()
+        const char *path, ... ) const throw ()
     {
         va_list args;
         va_start ( args, path );
@@ -190,11 +190,11 @@ struct VDBManager
         return rc;
     }
     inline rc_t OpenTable ( const VTable **tbl, struct VSchema const *schema,
-        const char *path, va_list args ) throw()
+        const char *path, va_list args ) const throw ()
     { return VDBManagerVOpenTableRead ( this, tbl, schema, path, args ); }
 
     inline rc_t OpenTable ( VTable **tbl, struct VSchema const *schema,
-        const char *path, ... ) throw()
+        const char *path, ... ) throw ()
     {
         va_list args;
         va_start ( args, path );
@@ -203,7 +203,7 @@ struct VDBManager
         return rc;
     }
     inline rc_t OpenTable ( VTable **tbl, struct VSchema const *schema,
-        const char *path, va_list args ) throw()
+        const char *path, va_list args ) throw ()
     { return VDBManagerVOpenTableUpdate ( this, tbl, schema, path, args ); }
 
 

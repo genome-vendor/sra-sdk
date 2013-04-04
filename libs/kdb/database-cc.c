@@ -110,7 +110,8 @@ rc_t KDatabaseCheckTables (const KDatabase *self, uint32_t depth, int level, CCR
                 rc = KDatabaseOpenTableRead (self, & tbl, nfo.objName);
                 if (rc == 0)
                 {
-                    rc = KTableConsistencyCheck (tbl, depth + 1, level, report, ctx);
+                    rc = KTableConsistencyCheck (tbl, depth + 1, level, report,
+                        ctx, SRA_PLATFORM_UNDEFINED);
                     KTableRelease (tbl);
                 }
             }
@@ -157,6 +158,7 @@ rc_t KDatabaseCheckIndices (const KDatabase *self, uint32_t depth, uint32_t leve
         return rc;
     }
 
+/* TEST    assert(0); */
     rc = KNamelistCount (list, & n);
     if (rc == 0)
     {
@@ -272,7 +274,12 @@ rc_t CC KDatabaseConsistencyCheck (const KDatabase *self,
 {
     rc_t rc = 0;
     uint32_t type;
-    
+
+    bool indexOnly = level & CC_INDEX_ONLY;
+    if (indexOnly) {
+        level &= ~CC_INDEX_ONLY;
+    }
+
     if (self == NULL)
         return RC (rcDB, rcDatabase, rcValidating, rcSelf, rcNull);
     
@@ -321,7 +328,7 @@ rc_t CC KDatabaseConsistencyCheck (const KDatabase *self,
     if (rc == 0)
         rc = KDatabaseCheckTables (self, depth, level, report, ctx);
 
-    if (rc == 0)    
+    if (rc == 0)
         rc = KDatabaseCheckIndices (self, depth, level, report, ctx);
 
     if (rc == 0)

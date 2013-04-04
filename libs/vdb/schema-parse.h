@@ -175,6 +175,7 @@ enum
     kw_typeset,
     kw_validate,
     kw_version,
+    kw_view,
     kw_virtual,
     kw_void,
     kw_writeonly,
@@ -201,6 +202,10 @@ struct SchemaEnv
     uint32_t schema_param_types_absent : 1;
     uint32_t mixed_fact_param_list : 1;
     uint32_t script_function_called_schema : 1;
+
+    /* V1 SWITCHES */
+    uint32_t default_view_decl : 1;
+    uint32_t has_view_keyword : 1;
 };
 
 /* SCHEMA_LANG_VERSION

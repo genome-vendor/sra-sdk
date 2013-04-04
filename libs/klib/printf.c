@@ -89,7 +89,9 @@
 #define KEEP_OCT_PREFIX_IF_ZERO               STDC_COMPATIBILITY
 #define OCTAL_PREFIX_COUNTS_TOWARD_PRECISION  STDC_COMPATIBILITY
 #define HEX_PREFIX_FOLLOWS_CASE               STDC_COMPATIBILITY
-#define EMULATE_SMALLINT_EXTENSION_BUG      ( STDC_COMPATIBILITY && _ARCH_BITS == 32 )
+/* Present in 2.3.3 (from SLES 9.3), absent in 2.5 (from CentOS 5.6) */
+#define EMULATE_SMALLINT_EXTENSION_BUG      ( STDC_COMPATIBILITY && defined(__GLIBC__) && (__GLIBC__ < 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ < 5) ) )
+#define ZERO_PAD_ONLY_NUMBERS               ( !STDC_COMPATIBILITY || defined(__GLIBC__) )
 
 #define USE_LIB_FLOAT 1
 
@@ -873,8 +875,10 @@ rc_t string_flush_vprintf ( char *dst, size_t bsize, const KWrtHandler *flush,
             /* sign makes no sense */
             use_sign = 0;
 
+#if ZERO_PAD_ONLY_NUMBERS
             /* padding is always with spaces */
             padding = ' ';
+#endif
 
             /* other than that, we can treat it as an integer */
             goto insert_integer;
@@ -892,6 +896,10 @@ rc_t string_flush_vprintf ( char *dst, size_t bsize, const KWrtHandler *flush,
             if ( ! have_precision )
                 precision = -1;
 
+#if ZERO_PAD_ONLY_NUMBERS
+            /* padding is always with spaces */
+            padding = ' ';
+#endif
             /* test for buffer flush */
             if ( flush != NULL && didx < bsize )
             {
@@ -917,7 +925,7 @@ rc_t string_flush_vprintf ( char *dst, size_t bsize, const KWrtHandler *flush,
                 for ( ; len < min_field_width; ++ didx, ++ len )
                 {
                     if ( didx < bsize )
-                        dst [ didx ] = ' ';
+                        dst [ didx ] = padding;
                 }
             }
 
@@ -1882,9 +1890,11 @@ rc_t parse_format_string ( const char *fmt_str, va_list vargs,
             return RC ( rcText, rcString, rcFormatting, rcFormat, rcUnrecognized );
         }
 
+#if ZERO_PAD_ONLY_NUMBERS
         /* handle zero padding for non-numeric cases */
         if ( ! numeric && fmt [ fmt_idx ] . left_fill == '0' )
             fmt [ fmt_idx ] . left_fill = ' ';
+#endif
 
         /* argument format */
         if ( has_index )
@@ -1992,7 +2002,11 @@ rc_t parse_format_string ( const char *fmt_str, va_list vargs,
                 break;
 
             case 's':
-
+#if STDC_COMPATIBILITY
+                if ( args [ arg_idx ] . p == NULL ) {
+                    args [ arg_idx ] . p = NULL_STRING_TEXT;
+                }
+#endif
                 /* NUL-terminated string issues */
                 if ( args [ arg_idx ] . p != NULL && infinite_first )
                 {
@@ -2204,7 +2218,7 @@ rc_t flush_buffer ( KBufferedWrtHandler *out )
         rc_t rc = 0;
         size_t num_writ, flushed;
 
-        assert ( out -> cur != 0 );
+/*        assert ( out -> cur != 0 ); */
 
         for ( flushed = 0; flushed < out -> cur; flushed += num_writ )
         {
@@ -2522,7 +2536,11 @@ rc_t structured_print_engine ( KBufferedWrtHandler *out,
                 f . type_cast = 0;
                 f . type = sptString;
                 if ( f . u . f . precision < S . len )
+#if STDC_COMPATIBILITY  &&  !defined(__GLIBC__)
+                    S . size = S . len = f . u . f . precision;
+#else
                     StringInit ( & S, "", 0, 0 );
+#endif                    
             }
             else
             {
@@ -2927,7 +2945,7 @@ rc_t structured_print_engine ( KBufferedWrtHandler *out,
             /* record if we are comma separating below and capture length of integer portion */
             int_len = 0;
             comma_sep = f . thousands_separate;
-            if ( comma_sep )
+            /* if ( comma_sep ) */
             {
                 for ( ; isdigit ( text [ int_len ] ); ++ int_len )
                     ( void ) 0;
@@ -3135,7 +3153,7 @@ rc_t structured_print_engine ( KBufferedWrtHandler *out,
         /* left padding */
         if ( left_pad != 0 )
         {
-            rc = print_padding ( out, left_pad, ' ' );
+            rc = print_padding ( out, left_pad, f . left_fill );
             if ( rc != 0 )
                 return rc;
         }

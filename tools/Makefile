@@ -39,15 +39,21 @@ SUBDIRS = \
 	sra-dump \
 	sra-load \
 	sra-pileup \
-	sam-dump \
 	bam-loader \
+	srapath \
 	sra-stat \
 	vdb-copy \
 	sra-dbcc \
 	vdb-config \
 	align-info \
+	prefetch \
 	nenctool \
-	nencvalid
+	nencvalid \
+	vdb-decrypt \
+	vdb-validate \
+	sra-sort \
+	cg-load \
+    fastq-loader
 
 default: $(SUBDIRS)
 
@@ -105,6 +111,17 @@ $(SUBDIRS_TAG):
 
 .PHONY: tag $(SUBDIRS_TAG)
 
+#-------------------------------------------------------------------------------
+# runtests
+#
+SUBDIRS_RUNTESTS = $(addsuffix _runtests, bam-loader fastq-loader)
+
+runtests: std $(SUBDIRS_RUNTESTS)
+
+$(SUBDIRS_RUNTESTS):
+	@ $(MAKE) -C $(subst _runtests,,$@) runtests
+
+.PHONY: runtests $(SUBDIRS_RUNTESTS)
 
 #-------------------------------------------------------------------------------
 # pass-through

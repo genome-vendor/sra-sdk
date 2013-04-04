@@ -23,6 +23,7 @@
 * ===========================================================================
 *
 */
+
 #include "vdb-config.vers.h"
 
 #include <kapp/main.h>
@@ -90,12 +91,16 @@ static const char* USAGE_MOD[] = { "print external modules", NULL };
 
 #define ALIAS_OUT    "o"
 #define OPTION_OUT   "output"
-static const char* USAGE_OUT[] =
-{ "output type: one of (x n) where 'x' is xml (default), 'n' is native", NULL };
+static const char* USAGE_OUT[] = { "output type: one of (x n), "
+    "where 'x' is xml (default), 'n' is native", NULL };
 
 #define ALIAS_CFG    "p"
 #define OPTION_CFG   "cfg"
 static const char* USAGE_CFG[] = { "print current configuration", NULL };
+
+#define ALIAS_SET    "s"
+#define OPTION_SET   "set"
+static const char* USAGE_SET[] = { "set configuration node value", NULL };
 
 OptDef Options[] =
 {                                         /* needs_value, required */
@@ -107,6 +112,7 @@ OptDef Options[] =
     , { OPTION_MOD, ALIAS_MOD, NULL, USAGE_MOD, 1, false, false }
     , { OPTION_NEW, ALIAS_NEW, NULL, USAGE_NEW, 1, false, false }
     , { OPTION_OUT, ALIAS_OUT, NULL, USAGE_OUT, 1, true , false }
+    , { OPTION_SET, ALIAS_SET, NULL, USAGE_SET, 1, true , false }
 };
 
 rc_t CC UsageSummary (const char * progname) {
@@ -141,7 +147,9 @@ rc_t CC Usage(const Args* args) {
     HelpOptionLine (ALIAS_ENV, OPTION_ENV, NULL, USAGE_ENV);
     HelpOptionLine (ALIAS_MOD, OPTION_MOD, NULL, USAGE_MOD);
     KOutMsg ("\n");
-    HelpOptionLine (ALIAS_OUT, OPTION_OUT, NULL, USAGE_OUT);
+    HelpOptionLine (ALIAS_SET, OPTION_SET, "name=value", USAGE_SET);
+    KOutMsg ("\n");
+    HelpOptionLine (ALIAS_OUT, OPTION_OUT, "x | n", USAGE_OUT);
 
     KOutMsg ("\n");
 
@@ -155,8 +163,6 @@ rc_t CC Usage(const Args* args) {
 const char UsageDefaultName[] = "vdb-config";
 
 ver_t CC KAppVersion(void) { return VDB_CONFIG_VERS; }
-
-static rc_t ArgsRelease(Args* self) { return ArgsWhack(self); }
 
 static void Indent(bool xml, int n) {
     if (!xml)
@@ -176,6 +182,7 @@ static rc_t KConfigNodeReadData(const KConfigNode* self,
     assert(*num_read <= blen);
     return rc;
 }
+
 #define VDB_CONGIG_OUTMSG(args) do { if (xml) { OUTMSG(args); } } while (false)
 static rc_t KConfigNodePrintChildNames(bool xml, const KConfigNode* self,
     const char* name, int indent, const char* aFullpath)
@@ -263,6 +270,9 @@ typedef struct Params {
 
     bool xml;
 
+    const char* setValue;
+
+    bool modeSetNode;
     bool modeCreate;
     bool modeShowCfg;
     bool modeShowEnv;
@@ -385,6 +395,28 @@ static rc_t ParamsConstruct(int argc, char* argv[], Params* prm) {
             ++count;
         }
 
+        rc = ArgsOptionCount(args, OPTION_SET, &pcount);
+        if (rc) {
+            LOGERR(klogErr, rc, "Failure to get '" OPTION_SET "' argument");
+            break;
+        }
+        if (pcount) {
+            rc = ArgsOptionValue(args, OPTION_SET, 0, &prm->setValue);
+            if (rc == 0) {
+                const char* p = strchr(prm->setValue, '=');
+                if (p == NULL || *(p + 1) == '\0') {
+                    rc = RC(rcExe, rcArgv, rcParsing, rcParam, rcInvalid);
+                    LOGERR(klogErr, rc, "Bad " OPTION_SET " value");
+                    break;
+                }
+                prm->modeSetNode = true;
+                prm->modeCreate = prm->modeShowCfg = prm->modeShowEnv
+                    = prm->modeShowFiles = prm->modeShowLoadPath
+                    = prm->modeShowModules = false;
+                count = 1;
+            }
+        }
+
         rc = ArgsOptionCount(args, OPTION_ALL, &pcount);
         if (rc) {
             LOGERR(klogErr, rc, "Failure to get '" OPTION_ALL "' argument");
@@ -393,7 +425,8 @@ static rc_t ParamsConstruct(int argc, char* argv[], Params* prm) {
         if (pcount
             || ( !prm->modeShowCfg && ! prm->modeShowLoadPath
               && !prm->modeShowEnv && !prm->modeShowFiles
-              && !prm->modeShowModules && !prm->modeCreate ))
+              && !prm->modeShowModules && !prm->modeCreate
+              && !prm->modeSetNode ))
             /* show all by default */
         {
             prm->modeShowCfg = prm->modeShowEnv = prm->modeShowFiles = true;
@@ -809,6 +842,57 @@ static rc_t ShowModules(const KConfig* cfg, const Params* prm) {
     return rc;
 }
 
+static rc_t SetNode(KConfig* cfg, const Params* prm) {
+    rc_t rc = 0;
+
+    KConfigNode* node = NULL;
+    char* name = NULL;
+    char* val  = NULL;
+
+    assert(cfg && prm && prm->setValue);
+
+    name = strdup(prm->setValue);
+    if (name == NULL)
+    {   return RC(rcExe, rcStorage, rcAllocating, rcMemory, rcExhausted); }
+
+    val = strchr(name, '=');
+    if (val == NULL || *(val + 1) == '\0') {
+        rc_t rc = RC(rcExe, rcArgv, rcParsing, rcParam, rcInvalid);
+        LOGERR(klogErr, rc, "Bad " OPTION_SET " value");
+    }
+
+    if (rc == 0) {
+        *(val++) = '\0';
+
+        rc = KConfigOpenNodeUpdate(cfg, &node, name);
+        if (rc != 0) {
+            PLOGERR(klogErr, (klogErr, rc,
+                "Cannot open node '$(name)' for update", "name=%s", name));
+        }
+    }
+
+    if (rc == 0) {
+        assert(val);
+        rc = KConfigNodeWrite(node, val, strlen(val));
+        if (rc != 0) {
+            PLOGERR(klogErr, (klogErr, rc,
+                "Cannot write value '$(val) to node '$(name)'",
+                "val=%s,name=%s", val, name));
+        }
+    }
+
+    if (rc == 0) {
+        rc = KConfigCommit(cfg);
+        DISP_RC(rc, "while calling KConfigCommit");
+    }
+
+    free(name);
+    name = NULL;
+
+    RELEASE(KConfigNode, node);
+    return rc;
+}
+
 static rc_t ShowConfig(const KConfig* cfg, Params* prm) {
     rc_t rc = 0;
     bool hasAny = false;
@@ -851,9 +935,12 @@ static rc_t ShowConfig(const KConfig* cfg, Params* prm) {
             }
             else {
                 char *c = memrchr(root, '/', len);
-                if (c != NULL)
-                {   nodeName = c + 1; }
-                else { nodeName = root; }
+                if (c != NULL) {
+                    nodeName = c + 1;
+                }
+                else {
+                    nodeName = root;
+                }
             }
             assert(nodeName && nodeName[0]);
             nodeNameL = strlen(nodeName);
@@ -935,17 +1022,26 @@ static rc_t ShowConfig(const KConfig* cfg, Params* prm) {
                 }
             }
             if (rc == 0) {
-                if (nodeName[0] != '/')
-                {   VDB_CONGIG_OUTMSG(("</%.*s>\n", nodeNameL, nodeName)); }
-                else { VDB_CONGIG_OUTMSG(("</Config>\n")); }
+                if (nodeName[0] != '/') {
+                    VDB_CONGIG_OUTMSG(("</%.*s>\n", nodeNameL, nodeName));
+                }
+                else {
+                    VDB_CONGIG_OUTMSG(("</Config>\n"));
+                }
             }
         }
 
         RELEASE(KConfigNode, node);
         RELEASE(KNamelist, names);
 
-        if (rc == 0 && hasAny)
-        {   OUTMSG(("\n")); }
+        if (rc == 0) {
+            if (hasAny) {
+                OUTMSG(("\n"));
+            }
+            else if (nodeNameL > 0 && nodeName != NULL) {
+                VDB_CONGIG_OUTMSG(("<%.*s/>\n", nodeNameL, nodeName));
+            }
+        }
 
         if (!hasQuery)
         {   break; }
@@ -993,7 +1089,8 @@ static void ShowEnv(const Params* prm) {
     const char * env_list [] = {
         "KLIB_CONFIG",
         "VDB_CONFIG",
-        "VDBCONFIG"
+        "VDBCONFIG",
+        "LD_LIBRARY_PATH"
     };
     int i = 0;
 
@@ -1029,6 +1126,8 @@ rc_t CC KMain(int argc, char* argv[]) {
     }
 
     if (rc == 0) {
+        if (prm.modeSetNode)
+        {   rc = SetNode(cfg, &prm); }
         if (prm.modeShowCfg)
         {   rc = ShowConfig(cfg, &prm); }
         if (prm.modeShowFiles) {
