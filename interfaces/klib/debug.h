@@ -61,7 +61,7 @@ extern "C" {
 
 /*
  * To add a new module, just add it to the list in MODULE_NAMES but as a 
- * parameters to the macro "_module"
+ * parameter to the macro "_module"
  *
  * Then add the conditions for that module.  There must be at least one.
  * Put them in the macro "_condition"
@@ -102,10 +102,10 @@ extern "C" {
  */
 
 #define MODULE_NAMES() \
-    _module(APP)  _module(KDB) _module(REF)   _module(LEGREF) \
+    _module(APP)  _module(BLAST) _module(KDB) _module(REF)   _module(LEGREF) \
     _module(KFS)  _module(XML)   _module(VDB) _module(SRA)    \
     _module(XARC) _module(ALIGN) _module(KFG) _module(KRYPTO) \
-    _module(SEARCH) _module(LOADLIB) _module(VFS) _module(AES)
+    _module(SEARCH) _module(LOADLIB) _module(VFS) _module(AES) _module(ARGS)
 
 #define APP_CONDITIONS() \
     _condition(APP,0)  _condition(APP,1)  _condition(APP,2)  _condition(APP,3)  \
@@ -124,6 +124,9 @@ extern "C" {
     _condition(APP,52) _condition(APP,53) _condition(APP,54) _condition(APP,55) \
     _condition(APP,56) _condition(APP,57) _condition(APP,58) _condition(APP,59) \
     _condition(APP,60) _condition(APP,61) _condition(APP,62) _condition(APP,63) 
+
+#define BLAST_CONDITIONS() \
+    _condition(BLAST,BLAST)
 
 #define KDB_CONDITIONS() \
     _condition(KDB,KDB)
@@ -163,10 +166,11 @@ extern "C" {
     _condition(XARC,ARC)
 
 #define ALIGN_CONDITIONS() \
-    _condition(ALIGN,WRITER) _condition(ALIGN,COMPRESS) 
+    _condition(ALIGN,WRITER) _condition(ALIGN,COMPRESS) _condition(ALIGN,COVERAGE) \
+    _condition(ALIGN,BAM) _condition(ALIGN,BGZF) _condition(ALIGN,CFG)
 
 #define KFG_CONDITIONS() \
-    _condition(KFG,LOAD) 
+    _condition(KFG,LOAD) _condition(KFG,NODE)
 
 #define KRYPTO_CONDITIONS() \
     _condition(KRYPTO,STS) \
@@ -176,13 +180,17 @@ extern "C" {
 
 #define AES_CONDITIONS() \
     _condition(AES,KEYEXP) _condition(AES,CIPHER) \
-    _condition(AES,INVKEYEXP) _condition(AES,INVCIPHER)
+    _condition(AES,INVKEYEXP) _condition(AES,INVCIPHER) \
+    _condition(AES,OBJECT)
 
 #define SEARCH_CONDITIONS() \
     _condition(SEARCH,MYERS)
 
 #define LOADLIB_CONDITIONS() \
     _condition(LOADLIB,PBAR) _condition(LOADLIB,FILE) _condition(LOADLIB,XLOG)
+
+#define ARGS_CONDITIONS() \
+    _condition(ARGS,WRITER)
 
 /*
  * Nothing below here needs to be changed when just adding new modules

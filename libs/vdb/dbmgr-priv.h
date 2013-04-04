@@ -47,13 +47,6 @@
 #define KONST
 #endif
 
-#if _DEBUGGING && 0
-#define VDBM_PAGE_SIZE 256
-#elif _DEBUGGING && 0
-#define VDBM_PAGE_SIZE ( 256 * 1024 )
-#else
-#define VDBM_PAGE_SIZE ( 32 * 1024 )
-#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -66,27 +59,6 @@ extern "C" {
 struct KDBManager;
 struct VSchema;
 struct VLinker;
-
-
-/*--------------------------------------------------------------------------
- * VDBMem
- *  a page of pooled memory
- */
-typedef struct VDBMem VDBMem;
-struct VDBMem
-{
-    DLNode n;
-    uint8_t page [ VDBM_PAGE_SIZE ];
-};
-
-#undef VDBM_PAGE_SIZE
-
-
-/* Release
- *  return memory block to pool
- *  or delete it if pool is already full
- */
-void CC VDBMemRelease ( DLNode *self, void *mgr );
 
 
 /*--------------------------------------------------------------------------
@@ -108,13 +80,6 @@ struct VDBManager
     void *user;
     void ( CC * user_whack ) ( void *data );
 
-    /* memory pool, max buffers to keep, count in pool */
-    DLList mpool;
-    uint32_t plimit;
-    uint32_t pcount;
-    uint32_t mlimit; /* alloc'ed limit */ 
-    uint32_t mcount; /* alloc'ed count */
-
     /* open references */
     KRefcount refcount;
 };
@@ -133,13 +98,6 @@ rc_t VDBManagerSever ( const VDBManager *self );
  *  load paths for linker
  */
 rc_t VDBManagerConfigPaths ( VDBManager *self, bool update );
-
-
-/* MakeMem
- *  pops a buffer from pool
- *  or allocates a new one on demand
- */
-rc_t VDBManagerMakeMem ( VDBManager *self, VDBMem **mem );
 
 
 /*--------------------------------------------------------------------------

@@ -79,15 +79,12 @@ rc_t VProdResolveColumn ( const VProdResolve *self,
     vcol = VCursorCacheGet ( & curs -> col, & scol -> cid );
     if ( vcol == NULL )
     {
-#if OPEN_COLUMN_ALTERS_ROW
-        uint32_t idx;
-#endif
         rc = VCursorMakeColumn ( curs, & vcol, scol );
         if ( rc != 0 )
             return rc;
 
 #if OPEN_COLUMN_ALTERS_ROW
-        rc = VectorAppend ( & curs -> row, & idx, vcol );
+        rc = VectorAppend ( & curs -> row, & vcol -> ord, vcol );
         if ( rc != 0 )
         {
             VColumnWhack ( vcol, NULL );
@@ -99,7 +96,8 @@ rc_t VProdResolveColumn ( const VProdResolve *self,
         {
 #if OPEN_COLUMN_ALTERS_ROW
             void *ignore;
-            VectorSwap ( & curs -> row, idx, NULL, & ignore );
+            VectorSwap ( & curs -> row, vcol -> ord, NULL, & ignore );
+            vcol -> ord = 0;
 #endif
             VColumnWhack ( vcol, NULL );
             return rc;

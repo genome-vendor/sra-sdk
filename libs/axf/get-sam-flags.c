@@ -41,6 +41,13 @@
 #include <ctype.h>
 #include <assert.h>
 
+
+/* "properly aligned" fragments according to the aligner
+   may mean minimally that the fragments are on the same
+   chromosome. */
+#define PROPER_ALIGNED_MEANS_SAME_CHROMOSOME 1
+
+
 static
 rc_t CC get_sam_flags_impl(void *data, const VXformInfo *info,
                            int64_t row_id, VRowResult *rslt,
@@ -49,15 +56,14 @@ rc_t CC get_sam_flags_impl(void *data, const VXformInfo *info,
 {
     rc_t 	rc;
     int32_t	*dst;
-    const INSDC_coord_one  *rid = argv[1].u.data.base;
-    const int32_t  	   *tlen = argv[2].u.data.base;
-    const bool	           *ro1 = argv[3].u.data.base;
-    const bool             *ro2 = argv[4].u.data.base;
-    const bool             *sec = argv[5].u.data.base;
+    const INSDC_coord_one  *rid = argv[1].u.data.base; /* SEQ_READ_ID */
+    const int32_t         *tlen = argv[2].u.data.base; /* TEMPLATE_LEN */
+    const bool	           *ro1 = argv[3].u.data.base; /* REF_ORIENTATION */
+    const bool             *ro2 = argv[4].u.data.base; /* MATE_REF_ORIENTATION */
+    const bool             *sec = argv[5].u.data.base; 
     const bool             mate_present = (argv[4].u.data.elem_count > 0 );
     const SRAReadFilter    *flt = argc > 6 ? argv[6].u.data.base : NULL;
 
-    assert(nreads > 0);
     assert(argv[1].u.data.elem_count == 1);
     assert(argv[2].u.data.elem_count == 1);
     assert(argv[3].u.data.elem_count == 1);
@@ -66,10 +72,12 @@ rc_t CC get_sam_flags_impl(void *data, const VXformInfo *info,
     
     
     rc = KDataBufferResize(rslt->data, 1);
-    if(rc != 0) return rc;
+    if(rc != 0)
+        return rc;
     rslt->elem_count=1;
     dst = rslt->data->base;
     dst[0]=0;
+    if(nreads == 0) return 0;
     
     
     rid  += argv[1].u.data.first_elem;
@@ -81,28 +89,36 @@ rc_t CC get_sam_flags_impl(void *data, const VXformInfo *info,
         flt += argv[6].u.data.first_elem;
     
     /***************** SAM FLAGS************
-     Bit  Description
-     0x1 template having multiple fragments in sequencing
-     0x2 each fragment properly aligned according to the aligner
-     0x4 fragment unmapped
-     0x8 next fragment in the template unmapped
-     0x10 SEQ being reverse complemented
-     0x20 SEQ of the next fragment in the template being reversed
-     0x40 the first fragment in the template
-     0x80 the last fragment in the template
+      Bit  Description
+     0x001 template having multiple fragments in sequencing
+     0x002 each fragment properly aligned according to the aligner
+     0x004 fragment unmapped
+     0x008 next fragment in the template unmapped
+     0x010 SEQ being reverse complemented
+     0x020 SEQ of the next fragment in the template being reversed
+     0x040 the first fragment in the template
+     0x080 the last fragment in the template
      0x100 secondary alignment
      0x200 not passing quality controls
      0x400 PCR or optical duplicate
     ****************************/
-    if(ro1[0])      dst[0] |= 0x10;
-    if(sec[0])      dst[0] |= 0x100;
+    if(ro1[0])
+        dst[0] |= 0x10;
+    if(sec[0])
+        dst[0] |= 0x100;
     if(nreads > 1) {
-        if(rid[0] == 1) dst[0] |= 0x40;
-        if (rid[0] == nreads) dst[0] |= 0x80;
+        if(rid[0] == 1)
+            dst[0] |= 0x40;
+        if (rid[0] == nreads)
+            dst[0] |= 0x80;
         dst[0] |= 0x1;
-        if(mate_present){
-            dst[0] |= 0x2;
-            if(ro2[0]) dst[0] |= 0x20;
+        if(mate_present) {
+#if PROPER_ALIGNED_MEANS_SAME_CHROMOSOME
+           if( tlen[0] != 0 )
+#endif
+                dst[0] |= 0x2;
+           if(ro2[0])
+                dst[0] |= 0x20;
         } else {
             dst[0] |= 0x8;
         }

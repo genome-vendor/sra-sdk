@@ -1818,7 +1818,13 @@ rc_t create_fqn_sym ( KSymTable *tbl, KTokenSource *src, KToken *t,
     if ( KTokenizerNext ( kDefaultTokenizer, & src2, & t2 ) -> id == eColon )
     {
         /* and again to find ident or name */
-        if ( KTokenizerNext ( kDefaultTokenizer, & src2, & t2 ) -> id == eIdent || t2 . id == eName )
+        KTokenizerNext ( kDefaultTokenizer, & src2, & t2 );
+
+        /* allow reserved word "view" to be used in schemas <= 1.0 */
+        if ( t2 . id == kw_view && ! env -> has_view_keyword )
+            t2 . id = eIdent;
+
+        if ( t2 . id == eIdent || t2 . id == eName )
         {
             /* create a namespace and go in */
             KSymbol *ns;
@@ -1869,6 +1875,13 @@ rc_t enter_namespace ( KSymTable *tbl, KTokenSource *src, KToken *t,
         case eName:
             rc = create_fqn_sym ( tbl, src, t, env, id, obj );
             break;
+        case kw_view:
+            if ( ! env -> has_view_keyword )
+            {
+                rc = create_fqn_sym ( tbl, src, t, env, id, obj );
+                break;
+            }
+            /* no break */
         default:
             if ( t -> id == id )
                 rc = RC ( rcVDB, rcSchema, rcParsing, rcToken, rcExists );
@@ -1890,7 +1903,6 @@ rc_t create_fqn ( KSymTable *tbl, KTokenSource *src, KToken *t,
         return enter_namespace ( tbl, src, t, env, id, obj );
     case eIdent:
         return create_fqn_sym ( tbl, src, t, env, id, obj );
-
     default:
         if ( t -> id == id )
             return RC ( rcVDB, rcSchema, rcParsing, rcToken, rcExists );

@@ -87,12 +87,14 @@ $(ILIBDIR)/libkapp: $(addprefix $(ILIBDIR)/libkapp.,$(LIBX))
 KAPP_SRC = \
 	main \
 	args \
+	tokenizer \
 	sysmain
 
 KAPP_OBJ = \
 	$(addsuffix .$(OBJX),$(KAPP_SRC))
 
 KAPP_LIB = \
+	-dvfs \
 	-dklib
 
 $(ILIBDIR)/libkapp.$(LIBX): $(KAPP_OBJ)

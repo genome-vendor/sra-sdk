@@ -45,13 +45,6 @@ enum VBlobVariant_t {
 };
 
 
-#ifndef VBlobAddRef
-rc_t VBlobAddRef(const VBlob *self);
-#endif
-#ifndef VBlobRelease
-rc_t VBlobRelease(const VBlob *self);
-#endif
-
 /* Write the row lengths for the rows from start_id thru stop_id, inclusive
  */
 rc_t VBlobWritePageMap( VBlob *self, int64_t start_id, int64_t stop_id, const uint32_t row_length[] );

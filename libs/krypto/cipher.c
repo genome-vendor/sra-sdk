@@ -23,33 +23,73 @@
  * ===========================================================================
  */
 #include <krypto/extern.h>
+#include <klib/defs.h>
 
 #include <krypto/cipher.h>
-#include <krypto/cipher-priv.h>
-#include <krypto/cipher-impl.h>
 #include <krypto/ciphermgr.h>
+#include <krypto/testciphermgr.h>
+#include "cipher-priv.h"
+#include "cipher-impl.h"
 
-#include <klib/refcount.h>
 #include <klib/rc.h>
-#include <klib/out.h>
-
-#include <stdlib.h>
-#include <string.h>
-#include <assert.h>
-
-#define rcBlockCipher rcNoTarg
-#define rcCipher rcNoTarg
 
 
-#define MAX_BLOCK_SIZE (1024)
+static const char KCipherClassName[] = "KCipherClassName";
 
-/* ======================================================================
+/* ----------------------------------------------------------------------
+ * Init
+ *
+ *   Initialize the fields of this object.  The derived class will call this
+ *   during it's initialization.
+ *
+ * self      object to initialze
+ * vt        the virtual table of the derived class
+ * mgr       the cipher manager that is the construction factory block cipher
+ *           objects hold references to the manager while the manager merely
+ *           points at the block ciphers when all block ciphers are destroyed
+ *           the manager loses its references and it too can be destroyed if not
+ *           held elsewhere
+ * name      ASCIZ c-string the name of this class; pointer is expected to remain valid
+ *           for the life of the object
  */
-const char KCipherClassName[] = "KCipher";
+void KCipherInit (KCipher * self,
+                  uint32_t block_size,
+                  const KCipher_vt * vt,
+                  const char * name)
+{
+    KRefcountInit (&self->refcount, 1, KCipherClassName, "init", name);
+    self->block_size = block_size;
+    self->vt.version = vt;
+    self->name = name;
+
+    /* the remaining fields have to be initialized in the derived object init */
+}
 
 
+/* ----------------------------------------------------------------------
+ * Destroy
+ *   base class destruction called during the derived class destruction
+ *
+ * self is the cipher object
+ *
+ * memory release is the repsonsibility of the derived class destructor
+ */
+rc_t KCipherDestroy (KCipher * self)
+{
+    if (self)
+    {
+        KRefcountWhack (&self->refcount, self->name);
+    }
+    return 0;
+}
 
-KRYPTO_EXTERN rc_t CC KCipherAddref (const KCipher * self)
+/* ----------------------------------------------------------------------
+ * AddRef
+ *   add a new owner to this class.  This will mean another instance of 
+ *   KCipher used this Block Cipher
+ */
+KRYPTO_EXTERN
+rc_t CC KCipherAddRef (const KCipher * self)
 {
     if (self)
     {
@@ -62,34 +102,44 @@ KRYPTO_EXTERN rc_t CC KCipherAddref (const KCipher * self)
     return 0;
 }
 
-static
-rc_t KCipherWhack (KCipher * self)
+
+/* ----------------------------------------------------------------------
+ * Release
+ *   
+ */
+static __inline__ rc_t KCipherWhack (KCipher * self)
 {
-    rc_t rc;
-
-    rc = KBlockCipherRelease (self->block_cipher);
-
-    free (self);
-    return rc;
+    switch (self->vt.version->maj)
+    {
+    case 1:
+        return self->vt.v1->destroy (self);
+    }
+    return RC (rcKrypto, rcCipher, rcDestroying, rcInterface, rcBadVersion);
 }
 
 
-KRYPTO_EXTERN rc_t CC KCipherRelease (const KCipher * self)
+KRYPTO_EXTERN
+rc_t CC KCipherRelease (const KCipher * self)
 {
     if ( self != NULL )
     {
-        switch ( KRefcountDrop ( & self -> refcount, KCipherClassName ) )
+        switch (KRefcountDrop ( & self -> refcount, KCipherClassName))
         {
         case krefWhack:
             return KCipherWhack ((KCipher *)self);
+
         case krefLimit:
-            return RC ( rcDB, rcColumn, rcReleasing, rcRange, rcExcessive );
+            return RC ( rcKrypto, rcCipher, rcReleasing, rcRange, rcExcessive );
         }
     }
     return 0;
 }
 
 
+/* ----------------------------------------------------------------------
+ * Some Cipher Methods are really pass through methods to the block cipher
+ *   
+ */
 KRYPTO_EXTERN rc_t CC KCipherBlockSize (const KCipher * self, size_t * bytes)
 {
     if (self == NULL)
@@ -98,11 +148,16 @@ KRYPTO_EXTERN rc_t CC KCipherBlockSize (const KCipher * self, size_t * bytes)
     if (bytes == NULL)
         return RC (rcKrypto, rcCipher, rcAccessing, rcParam, rcNull);
 
-    return (KBlockCipherBlockSize (self->block_cipher, bytes));
+    *bytes = self->block_size;
+
+    return 0;
 }
 
 
-
+/* ----------------------------------------------------------------------
+ * 
+ *   
+ */
 KRYPTO_EXTERN rc_t CC KCipherSetEncryptKey (KCipher * self, const void * user_key, size_t user_key_size)
 {
     if (self == NULL)
@@ -111,11 +166,19 @@ KRYPTO_EXTERN rc_t CC KCipherSetEncryptKey (KCipher * self, const void * user_ke
     if ((user_key == NULL)||(user_key_size == 0))
         return RC (rcKrypto, rcCipher, rcAccessing, rcParam, rcNull);
 
-    return KBlockCipherSetEncryptKey (self->block_cipher, self->encrypt_key,
-                                      user_key, user_key_size);
+    switch (self->vt.version->maj)
+    {
+    case 1:
+        return self->vt.v1->set_encrypt_key (self, user_key, user_key_size);
+    }
+    return RC (rcKrypto, rcCipher, rcUpdating, rcInterface, rcBadVersion);
 }
 
 
+/* ----------------------------------------------------------------------
+ * 
+ *   
+ */
 KRYPTO_EXTERN rc_t CC KCipherSetDecryptKey (KCipher * self, const void * user_key, size_t user_key_size)
 {
     if (self == NULL)
@@ -124,14 +187,20 @@ KRYPTO_EXTERN rc_t CC KCipherSetDecryptKey (KCipher * self, const void * user_ke
     if ((user_key == NULL)||(user_key_size == 0))
         return RC (rcKrypto, rcCipher, rcAccessing, rcParam, rcNull);
 
-    return KBlockCipherSetDecryptKey (self->block_cipher, self->decrypt_key,
-                                      user_key, user_key_size);
+    switch (self->vt.version->maj)
+    {
+    case 1:
+        return self->vt.v1->set_decrypt_key (self, user_key, user_key_size);
+    }
+    return RC (rcKrypto, rcCipher, rcUpdating, rcInterface, rcBadVersion);
 }
 
 
-/*
+
+/* ----------------------------------------------------------------------
+ *  
+ *
  * Set the ivec (Initialization vector or feedback) for the cipher
- * this is done automatically for the longer runs defined below.
  *
  * the size of ivec  must match KCipherBlockSize
  *
@@ -142,84 +211,112 @@ KRYPTO_EXTERN rc_t CC KCipherSetEncryptIVec (KCipher * self, const void * ivec)
     if (self == NULL)
         return RC (rcKrypto, rcCipher, rcAccessing, rcSelf, rcNull);
 
-    else if (ivec == NULL)
+    if (ivec == NULL)
         return RC (rcKrypto, rcCipher, rcAccessing, rcParam, rcNull);
 
-    else
+    switch (self->vt.version->maj)
     {
-        size_t bytes;
-        rc_t rc;
-
-        rc = KBlockCipherBlockSize (self->block_cipher, &bytes);
-        if (rc == 0)
-            memcpy (self->encrypt_ivec, ivec, bytes);
-        return rc;
+    case 1:
+        return self->vt.v1->set_encrypt_ivec (self, ivec);
     }
+    return RC (rcKrypto, rcCipher, rcUpdating, rcInterface, rcBadVersion);
 }
 
 
+/* ----------------------------------------------------------------------
+ * 
+ *   
+ */
 KRYPTO_EXTERN rc_t CC KCipherSetDecryptIVec (KCipher * self, const void * ivec)
 {
     if (self == NULL)
         return RC (rcKrypto, rcCipher, rcAccessing, rcSelf, rcNull);
 
-    else if (ivec == NULL)
+    if (ivec == NULL)
         return RC (rcKrypto, rcCipher, rcAccessing, rcParam, rcNull);
 
-    else
+    switch (self->vt.version->maj)
     {
-        size_t bytes;
-        rc_t rc;
-
-        rc = KBlockCipherBlockSize (self->block_cipher, &bytes);
-        if (rc == 0)
-            memcpy (self->decrypt_ivec, ivec, bytes);
-        return rc;
+    case 1:
+        return self->vt.v1->set_decrypt_ivec (self, ivec);
     }
+    return RC (rcKrypto, rcCipher, rcUpdating, rcInterface, rcBadVersion);
 }
 
 
-
-/*
- * 'in' can equal 'out'
+/* ----------------------------------------------------------------------
+ * 
+ *   
  */
-KRYPTO_EXTERN rc_t CC KCipherEncrypt (const KCipher * self, const void * in,
-                                      void * out)
+KRYPTO_EXTERN rc_t CC KCipherSetEncryptCtrFunc (KCipher * self, cipher_ctr_func func)
 {
-    rc_t rc;
-
     if (self == NULL)
         return RC (rcKrypto, rcCipher, rcAccessing, rcSelf, rcNull);
 
-    else if ((in == NULL) || (out == NULL))
+    if (func == NULL)
         return RC (rcKrypto, rcCipher, rcAccessing, rcParam, rcNull);
 
-    else
+    switch (self->vt.version->maj)
     {
-        rc = KBlockCipherEncrypt (self->block_cipher, in, out,
-                                  self->encrypt_key);
+    case 1:
+        return self->vt.v1->set_encrypt_ctr_func (self, func);
     }
-    return rc;
+    return RC (rcKrypto, rcCipher, rcUpdating, rcInterface, rcBadVersion);
 }
 
 
-KRYPTO_EXTERN rc_t CC KCipherDecrypt (const KCipher * self, const void * in,
-                                      void * out)
+/* ----------------------------------------------------------------------
+ * 
+ *   
+ */
+KRYPTO_EXTERN rc_t CC KCipherSetDecryptCtrFunc (KCipher * self, cipher_ctr_func func)
 {
-    rc_t rc;
-
     if (self == NULL)
         return RC (rcKrypto, rcCipher, rcAccessing, rcSelf, rcNull);
 
-    else if ((in == NULL) || (out == NULL))
+    if (func == NULL)
         return RC (rcKrypto, rcCipher, rcAccessing, rcParam, rcNull);
 
-    else
+    switch (self->vt.version->maj)
     {
-        rc = KBlockCipherDecrypt (self->block_cipher, in, out,
-                                  self->decrypt_key);
+    case 1:
+        return self->vt.v1->set_decrypt_ctr_func (self, func);
     }
-    return rc;
+    return RC (rcKrypto, rcCipher, rcUpdating, rcInterface, rcBadVersion);
+}
+
+
+KRYPTO_EXTERN rc_t CC KCipherEncrypt (KCipher * self, const void * in, void * out)
+{
+    if (self == NULL)
+        return RC (rcKrypto, rcCipher, rcEncoding, rcSelf, rcNull);
+
+    if ((in == NULL) || (out == NULL))
+        return RC (rcKrypto, rcCipher, rcEncoding, rcParam, rcNull);
+
+    switch (self->vt.version->maj)
+    {
+    case 1:
+        return self->vt.v1->encrypt (self, in, out);
+    }
+    return RC (rcKrypto, rcCipher, rcAccessing, rcInterface, rcBadVersion);
+}
+
+
+KRYPTO_EXTERN rc_t CC KCipherDecrypt (KCipher * self, const void * in, void * out)
+{
+    if (self == NULL)
+        return RC (rcKrypto, rcCipher, rcEncoding, rcSelf, rcNull);
+
+    if ((in == NULL) || (out == NULL))
+        return RC (rcKrypto, rcCipher, rcEncoding, rcParam, rcNull);
+
+    switch (self->vt.version->maj)
+    {
+    case 1:
+        return self->vt.v1->decrypt (self, in, out);
+    }
+    return RC (rcKrypto, rcCipher, rcAccessing, rcInterface, rcBadVersion);
 }
 
 
@@ -243,26 +340,12 @@ KRYPTO_EXTERN rc_t CC KCipherDecrypt (const KCipher * self, const void * in,
  * FB: feedback is the next IV in a chained/feedback mode
  */
 
-typedef rc_t (CC * BlockFunc)(const KBlockCipher * self, const void * in, void * out,
-                              const void * key);
-
-
 /* -----
  * NOTE:
  * 'in' can be the same as 'out' but other overlaps are dangers as a block at a
  * time is written. The code does not look for overlaps at this point.
- */
-
-/* ----------
- * Electronic Code Book - simple cipher with no chaining feedback  just iterate
- * simple encrypt/decrypt with the plain, text, cipher text and key/
  *
- * CT = ENC (PT,EK)
- * PT = DEC (CT,DK)
- */
-
-/* -----
- * NOTE: currently an implmentation detail limits us to 8192 bit cipher block
+ * NOTE: currently an implementation detail limits us to 8192 bit cipher block
  * size.  Changing MAX_BLOCK_SIZE in cipher.c can up that limit without 
  * causing any other compatibility issues. 
  *
@@ -271,429 +354,175 @@ typedef rc_t (CC * BlockFunc)(const KBlockCipher * self, const void * in, void *
 /*
  * NOTE: if in and out overlap incorrectly this will fail
  */
-
-static rc_t KBlockCipherECB (const KBlockCipher * self, const void * _in, void * _out,
-                             size_t len, const void * key, bool encrypt)
-{
-    size_t block_size;
-    rc_t rc;
-
-    assert (self);
-    assert (_in);
-    assert (_out);
-    assert (key);
-    assert (len > 0);
-    assert (encrypt == true || encrypt == false);
-
-    rc = KBlockCipherBlockSize (self, &block_size);
-    if (rc)
-        ;
-
-    else if (block_size == 0)
-        rc = RC (rcKrypto, rcCipher, rcEncoding, rcSize, rcInvalid);
-
-    else if (block_size > MAX_BLOCK_SIZE)
-        rc = RC (rcKrypto, rcCipher, rcEncoding, rcSize, rcIncorrect);
-
-    else
-    {
-        BlockFunc func;
-        const char * in;
-        char * out;
-        size_t full_blocks;
-        size_t partial_block_count;
-        char temp [MAX_BLOCK_SIZE];
-
-        if (encrypt)
-            func = KBlockCipherEncrypt;
-        else
-            func = KBlockCipherDecrypt;
-
-        in = _in;
-        out = _out;
-
-        full_blocks = len / block_size;
-        partial_block_count = len % block_size;
-
-        while (full_blocks --)
-        {
-            rc = func (self, in, out, key);
-            in += block_size;
-            out += block_size;
-        }
-        if (partial_block_count)
-        {
-            /* use the temp to prevent read/write past 
-             * claimed size of in and out */
-            memmove (temp, in, partial_block_count);
-            rc = func (self, temp, temp, key);
-            if (rc == 0)
-                memmove (out, temp, partial_block_count);
-        }
+#define BLOCK_FUNC_PASTE(A,B) A##B
+#define BLOCK_FUNC(MODE,METHOD) \
+    KRYPTO_EXTERN rc_t CC BLOCK_FUNC_PASTE(KCipher,MODE)                \
+        (KCipher * self, const void * in, void * out,                   \
+         uint32_t block_count)                                          \
+    {                                                                   \
+        rc_t rc;                                                        \
+                                                                        \
+        if (self == NULL)                                               \
+            rc = RC (rcKrypto, rcCipher, rcEncoding, rcSelf, rcNull);   \
+                                                                        \
+        else if (in == NULL)                                            \
+            rc = RC (rcKrypto, rcCipher, rcEncoding, rcParam, rcNull);  \
+                                                                        \
+        else if (out == NULL)                                           \
+            rc = RC (rcKrypto, rcCipher, rcEncoding, rcParam, rcNull);  \
+                                                                        \
+        else if (block_count == 0)                                      \
+            rc = 0;                                                     \
+                                                                        \
+        else                                                            \
+        {                                                               \
+            switch (self->vt.version->maj)                              \
+            {                                                           \
+            case 1:                                                     \
+                return self->vt.v1->METHOD(self, in, out, block_count); \
+            }                                                           \
+            rc = RC (rcKrypto, rcCipher, rcAccessing, rcInterface,      \
+                     rcBadVersion);                                     \
+        }                                                               \
+                                                                        \
+        return rc;                                                      \
     }
-    return rc;
-}
 
-
-KRYPTO_EXTERN
-rc_t CC KCipherEncryptECB (KCipher * self, const void * in, void * out, size_t len)
-{
-    rc_t rc;
-
-    if (self == NULL)
-        rc = RC (rcKrypto, rcCipher, rcEncoding, rcSelf, rcNull);
-
-    else if ((in == NULL) || (out == NULL))
-        rc = RC (rcKrypto, rcCipher, rcEncoding, rcParam, rcNull);
-
-    if (len == 0)
-        return 0;
-
-    return KBlockCipherECB (self->block_cipher, in, out, len, self->encrypt_key, true);
-}
-
-KRYPTO_EXTERN rc_t CC KCipherDecryptECB (KCipher * self, const void * in, void * out, size_t len)
-{
-    rc_t rc;
-
-    if (self == NULL)
-        rc = RC (rcKrypto, rcCipher, rcEncoding, rcSelf, rcNull);
-
-    else if ((in == NULL) || (out == NULL))
-        rc = RC (rcKrypto, rcCipher, rcEncoding, rcParam, rcNull);
-
-    if (len == 0)
-        return 0;
-
-    return KBlockCipherECB (self->block_cipher, in, out, len, self->decrypt_key, false);
-}
+/* ----------
+ * Electronic Code Book - simple cipher with no chaining feedback  just iterate
+ * simple encrypt/decrypt with the plain, text, cipher text and key/
+ *
+ * CT = ENC (PT,EK)
+ * PT = DEC (CT,DK)
+ */
+BLOCK_FUNC(EncryptECB,encrypt_ecb)
+BLOCK_FUNC(DecryptECB,decrypt_ecb)
 
 /* ----------
  * Cipher-Block Chaining
  * CT = (FB = ENC (PT^IV, EK))
  * PT = DEC ((FB = CT), DK)
  */
-static void out_block (uint8_t * b)
-{
-    int ii;
-    for (ii = 0; ii < 16 ; ++ii)
-        KOutMsg ("%x ", b[ii]);
-}
-
-
-KRYPTO_EXTERN
-rc_t CC KCipherEncryptCBC (KCipher * self, const void * _in, void * _out, size_t len)
-{
-    rc_t rc;
-
-    if (self == NULL)
-        rc = RC (rcKrypto, rcCipher, rcEncoding, rcSelf, rcNull);
-
-    else if ((_in == NULL) || (_out == NULL))
-        rc = RC (rcKrypto, rcCipher, rcEncoding, rcParam, rcNull);
-
-    else
-    {
-        size_t block_size;
-
-        rc = KBlockCipherBlockSize (self->block_cipher, &block_size);
-        if (rc)
-            ;
-
-        else if (block_size == 0)
-            rc = RC (rcKrypto, rcCipher, rcEncoding, rcSize, rcInvalid);
-
-        else if (block_size > MAX_BLOCK_SIZE)
-            rc = RC (rcKrypto, rcCipher, rcEncoding, rcSize, rcIncorrect);
-
-        else
-        {
-            const char * in;
-            char * out;
-            char * ivec;
-            size_t full_blocks;
-            size_t partial_block_count;
-            char temp [MAX_BLOCK_SIZE];
-
-            in = _in;
-            out = _out;
-            ivec = self->encrypt_ivec;
-
-            full_blocks = len / block_size;
-            partial_block_count = len % block_size;
-
-            while (full_blocks --)
-            {
-                uint32_t idx;
-
-                for (idx = 0; idx < block_size; ++idx)
-                    temp[idx] = in[idx] ^ ivec[idx];
-
-                rc = KBlockCipherEncrypt (self->block_cipher, temp, ivec, self->encrypt_key);
-                if (rc)
-                    return rc;
-
-                memmove (out, ivec, block_size);
-
-                in += block_size;
-                out += block_size;
-            }
-            if (partial_block_count)
-            {
-                uint32_t idx;
-
-                memset (temp, 0, block_size);
-
-                for (idx = 0; idx < partial_block_count; ++idx)
-                    temp[idx] = in[idx] ^ ivec[idx];
-
-                rc = KBlockCipherEncrypt (self->block_cipher, temp, ivec, self->encrypt_key);
-                if (rc)
-                    return rc;
-
-                memmove (out, ivec, block_size);
-            }
-
-        }
-    }
-    return rc;
-}
-
-
-
-KRYPTO_EXTERN
-rc_t CC KCipherDecryptCBC (KCipher * self, const void * _in, void * _out, size_t len)
-{
-    rc_t rc;
-
-    if (self == NULL)
-        rc = RC (rcKrypto, rcCipher, rcEncoding, rcSelf, rcNull);
-
-    else if ((_in == NULL) || (_out == NULL))
-        rc = RC (rcKrypto, rcCipher, rcEncoding, rcParam, rcNull);
-
-    else
-    {
-        size_t block_size;
-
-        rc = KBlockCipherBlockSize (self->block_cipher, &block_size);
-        if (rc)
-            ;
-
-        else if (block_size == 0)
-            rc = RC (rcKrypto, rcCipher, rcEncoding, rcSize, rcInvalid);
-
-        else if (block_size > MAX_BLOCK_SIZE)
-            rc = RC (rcKrypto, rcCipher, rcEncoding, rcSize, rcIncorrect);
-
-        else
-        {
-            const char * in;
-            char * out;
-            char * ivec;
-            size_t full_blocks;
-            size_t partial_block_count;
-            char temp [MAX_BLOCK_SIZE];
-
-            in = _in;
-            out = _out;
-            ivec = self->decrypt_ivec;
-
-            full_blocks = len / block_size;
-            partial_block_count = len % block_size;
-
-            while (full_blocks --)
-            {
-                uint32_t idx;
-
-                rc = KBlockCipherDecrypt (self->block_cipher, in, temp, self->decrypt_key);
-                if (rc)
-                    return rc;
-
-                for (idx = 0; idx < block_size; ++idx)
-                    out[idx] = temp[idx] ^ ivec[idx];
-
-                memmove (ivec, in, block_size);
-
-
-                in += block_size;
-                out += block_size;
-            }
-            if (partial_block_count)
-            {
-                uint32_t idx;
-
-                memset (temp, 0, block_size);
-                memmove (temp, in, partial_block_count);
-
-                rc = KBlockCipherDecrypt (self->block_cipher, temp, temp, self->decrypt_key);
-                if (rc)
-                    return rc;
-
-                for (idx = 0; idx < block_size; ++idx)
-                    out[idx] = temp[idx] ^ ivec[idx];
-
-                memmove (ivec, in, block_size);
-            }
-
-        }
-    }
-    return rc;
-}
-
-
-
-/* ----------
- * Cipher Feedback
- * CT = (FB = PT) ^ ENC (IV, EK))
- * PT = (FB = CT) ^ DEC (IV, DK)
- */
-
-#if 0
-KRYPTO_EXTERN rc_t CC KCipherEncryptCFB (KCipher * self, const void * in, void * out, size_t len,
-                                      uint32_t * bits)
-{
-    if (self->uses_openssl)
-    {
-        return KCryptoCipherEncryptCFB (self->block_cipher, in, out, len, bits);
-    }
-    return RC (rcKrypto, rcCipher, rcEncoding, rcFunction, rcUnsupported);
-}
-
-
-KRYPTO_EXTERN rc_t CC KCipherDecryptCFB (KCipher * self, const void * in, void * out, size_t len, uint32_t * bits)
-{
-    if (self->uses_openssl)
-    {
-        return KCryptoCipherDecryptCFB (self->block_cipher, in, out, len, bits);
-    }
-    return RC (rcKrypto, rcCipher, rcEncoding, rcFunction, rcUnsupported);
-}
-#endif
+BLOCK_FUNC(EncryptCBC,encrypt_cbc)
+BLOCK_FUNC(DecryptCBC,decrypt_cbc)
 
 /* ----------
  * Propagating cipher-block chaining
  * FB = PT ^ (CT = ENC ((PT^IV), EK))
  * FB = CT ^ (PT = DEC (CT,DK) ^ IV)
  */
+BLOCK_FUNC(EncryptPCBC,encrypt_pcbc)
+BLOCK_FUNC(DecryptPCBC,decrypt_pcbc)
 
-/* not implmented yet */
+/* ----------
+ * Cipher Feedback
+ * CT = (FB = PT) ^ ENC (IV, EK))
+ * PT = (FB = CT) ^ DEC (IV, DK)
+ */
+BLOCK_FUNC(EncryptCFB,encrypt_cfb)
+BLOCK_FUNC(DecryptCFB,decrypt_cfb)
 
 /* ----------
  * Output Feedback
  * CT = PT ^ (FB = ENC (IV, EK))
  * PT = CT ^ (FB = DEC (IV, DK))
  */
-
-#if 0
-KRYPTO_EXTERN
-rc_t CC KCipherEncryptOFB (KCipher * self, const void * in, void * out, size_t len,
-                        uint32_t * bits)
-{
-    if (self->uses_openssl)
-    {
-        return KCryptoCipherEncryptOFB (self->block_cipher, in, out, len, bits);
-    }
-    return RC (rcKrypto, rcCipher, rcEncoding, rcFunction, rcUnsupported);
-}
-
-KRYPTO_EXTERN
-rc_t CC KCipherDecryptOFB (KCipher * self, const void * in, void * out, size_t len,
-                        uint32_t * bits)
-{
-    if (self->uses_openssl)
-    {
-        return KCryptoCipherDecryptOFB (self->block_cipher, in, out, len, bits);
-    }
-    return RC (rcKrypto, rcCipher, rcEncoding, rcFunction, rcUnsupported);
-}
-#endif
+BLOCK_FUNC(EncryptOFB,encrypt_ofb)
+BLOCK_FUNC(DecryptOFB,decrypt_ofb)
 
 /* Counter
  * IV is a nonce and not re-used as FB
  * CT = PT ^ ENC (N, EK)
  * PT = CT ^ ENC (N, DK) 
- * Note decrypt is encrypt.
- * nonce is a function that given an iv generates the next iv
+ *
+ * The enc_ctr_func (or dec_ctr_func) will be called to update the ivec before
+ * to be the nonce (number used once) before each call to the block cipher 
+ * encrypt function.  The encrypt function is used for decryption mode as well
  */
-#if 0
-KRYPTO_EXTERN rc_t CC KCipherEncryptCTR (KCipher * self, const void * in, void * out, 
-                                   void(*nonce)(void*iv), void * iv)
-{
-    return RC (rcKrypto, rcCipher, rcEncoding, rcFunction, rcUnsupported);
-}
-#endif
+BLOCK_FUNC(EncryptCTR,encrypt_ctr)
+BLOCK_FUNC(DecryptCTR,decrypt_ctr)
 
-rc_t CC KCipherAlloc (KCipher ** obj, const KBlockCipher * block_cipher)
+
+#ifndef USE_SLOW_ONES
+#define USE_SLOW_ONES 0
+#endif
+rc_t KCipherMakeInt (KCipher ** new_cipher, kcipher_type type)
 {
-    void * mem;
-    size_t bsize;
-    size_t ksize;
     rc_t rc;
 
-    if ((obj == NULL) || (block_cipher == NULL))
-        rc = RC (rcKrypto, rcCipher, rcConstructing, rcParam, rcNull);
-    else
+    *new_cipher = NULL;
+
+#if 0
+    rc = KCipherVecAesNiMake (new_cipher, type);
+    if (rc)
     {
-        rc = KBlockCipherBlockSize (block_cipher, &bsize);
-        if (rc == 0)
+        if (GetRCState(rc) == rcUnsupported)
         {
-            rc = KBlockCipherKeySize (block_cipher, &ksize);
-            if (rc == 0)
+#if USE_SLOW_ONES
+            rc = KCipherVecRegMake (new_cipher, type);
+            if (rc)
             {
-                mem = malloc (sizeof (**obj) + 2 * bsize + 2 * ksize);
-                if (mem)
+                if (GetRCState(rc) == rcUnsupported)
                 {
-                    *obj = mem;
-                    return 0;
+                    rc = KCipherVecMake (new_cipher, type);
+                    if (GetRCState(rc) == rcUnsupported)
+                    {
+#endif
+#endif
+                        rc = KCipherByteMake (new_cipher, type);
+#if 0
+#if USE_SLOW_ONES
+                    }
                 }
-                rc =  RC (rcKrypto, rcCipher, rcConstructing, rcMemory,
-                          rcExhausted);
             }
+#endif
         }
     }
+#endif
     return rc;
 }
 
+kcipher_subtype KCipherSubType = ksubcipher_none;
 
-rc_t CC KCipherInit (KCipher * self, const KBlockCipher * block_cipher)
+rc_t KCipherMake (KCipher ** new_cipher, kcipher_type type)
 {
     rc_t rc;
 
-    if (self == NULL)
+    if (new_cipher == NULL)
         rc = RC (rcKrypto, rcCipher, rcConstructing, rcSelf, rcNull);
 
-    else if (block_cipher == NULL)
-        rc = RC (rcKrypto, rcCipher, rcConstructing, rcParam, rcNull);
-
     else
     {
-        size_t bsize;
-
-        rc = KBlockCipherBlockSize (block_cipher, &bsize);
-        if (rc == 0)
+        switch (type)
         {
-            size_t ksize;
-
-            rc = KBlockCipherKeySize (block_cipher, &ksize);
-            if (rc == 0)
+        case kcipher_null:
+        case kcipher_AES:
+            switch (KCipherSubType)
             {
-                rc = KBlockCipherAddRef (block_cipher);
-                if (rc == 0)
-                {
-                    KRefcountInit (&self->refcount, 1, KCipherClassName,
-                                   "init", block_cipher->name);
+            case ksubcipher_byte:
+                rc = KCipherByteMake (new_cipher, type);
+                break;
 
-                    self->block_cipher = block_cipher;
+            case ksubcipher_vec:
+                rc = KCipherVecMake (new_cipher, type);
+                break;
 
-                    StringInitCString (&self->name, block_cipher->name);
+            case ksubcipher_vecreg:
+                rc = KCipherVecRegMake (new_cipher, type);
+                break;
 
-                    self->encrypt_key = (char*)(self + 1);
-                    self->decrypt_key = ((char*)self->encrypt_key) + ksize;
-                    self->encrypt_ivec = ((char*)self->decrypt_key) + ksize;
-                    self->decrypt_ivec = ((char*)self->encrypt_ivec) + bsize;
-                }
+            case ksubcipher_accelerated:
+                rc = KCipherVecAesNiMake (new_cipher, type);
+                break;
+
+            default:
+                rc = KCipherMakeInt (new_cipher, type);
+                break;
             }
+            break;
+        default:
+            rc = RC (rcKrypto, rcCipher, rcConstructing, rcBlockCipher, rcInvalid);
+            break;
         }
     }
     return rc;
@@ -701,3 +530,7 @@ rc_t CC KCipherInit (KCipher * self, const KBlockCipher * block_cipher)
 
 
 
+
+
+
+/* EOF */

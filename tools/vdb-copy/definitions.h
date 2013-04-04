@@ -50,6 +50,8 @@ extern "C" {
 
 #define DB_COPY_ENABLED 1
 
+#define ALLOW_EXTERNAL_CONFIG 1
+
 #define SRA_PF_UNDEF 0
 #define SRA_PF_454 1
 #define SRA_PF_ILLUMINA 2

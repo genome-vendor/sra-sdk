@@ -24,16 +24,14 @@
 *
 */
 
-#ifndef _h_klib_xml_
-#define _h_klib_xml_
+#ifndef _h_kxml_xml_
+#define _h_kxml_xml_
 
 #ifndef _h_klib_extern_
 #include <klib/extern.h>
 #endif
 
-#ifndef _h_klib_defs_
 #include <klib/defs.h>
-#endif
 
 #include <stdarg.h>
 
@@ -332,6 +330,9 @@ KLIB_EXTERN rc_t KXMLMgrMakeDocReadFromMemory ( const KXMLMgr *self,
  */
 struct KDirectory;
 struct KFile;
+struct String;
+struct VFSManager;
+struct VPath;
 
 /* OpenXTocDirRead
  *  open copycat XML as a chroot'd directory
@@ -345,17 +346,32 @@ struct KFile;
  *
  *  "xml" [ IN ] - file containing XML data produced by copycat tool
  */
-KLIB_EXTERN rc_t CC KDirectoryOpenXTocDirRead (const struct KDirectory * self,
-                                               const struct KDirectory ** pnew_dir,
-                                               bool chroot,
-                                               const struct KFile * xml,
-                                               const char * path, ... );
-KLIB_EXTERN rc_t CC KDirectoryVOpenXTocDirRead (const struct KDirectory * self,
-                                                const struct KDirectory ** pnew_dir,
-                                                bool chroot,
-                                                const struct KFile * xml,
-                                                const char * _path,
-                                                va_list args );
+rc_t CC KDirectoryOpenXTocDirRead (const struct KDirectory * self,
+                                   const struct KDirectory ** pnew_dir,
+                                   bool chroot,
+                                   const struct KFile * xml,
+                                   const char * path, ... );
+rc_t CC KDirectoryVOpenXTocDirRead (const struct KDirectory * self,
+                                    const struct KDirectory ** pnew_dir,
+                                    bool chroot,
+                                    const struct KFile * xml,
+                                    const char * _path,
+                                    va_list args );
+rc_t CC KDirectoryOpenXTocDirRead (const struct KDirectory * self,
+                                   const struct KDirectory ** pnew_dir,
+                                   bool chroot,
+                                   const struct KFile * xml,
+                                   const char * path, ... );
+rc_t CC KDirectoryOpenXTocDirReadDir (const struct KDirectory * self,
+                                      const struct KDirectory ** pnew_dir,
+                                      const struct KFile * xml,
+                                      const struct String * spath);
+
+rc_t CC VFSManagerOpenXTocDirRead (const struct VFSManager * self,
+                                   const struct KDirectory ** pnew_dir,
+                                   const struct KFile * xml,
+                                   const struct VPath * path);
+
 
 
 
@@ -363,4 +379,4 @@ KLIB_EXTERN rc_t CC KDirectoryVOpenXTocDirRead (const struct KDirectory * self,
 }
 #endif
 
-#endif /* _h_klib_xml_ */
+#endif /* _h_kxml_xml_ */

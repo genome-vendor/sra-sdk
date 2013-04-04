@@ -81,21 +81,23 @@ static void CC vdfo_print_col_default( void *item, void *data )
     }
 
     /* FINALLY we print the content of a column... */
-    OUTMSG ( ( "%s\n", r_ctx->s_col.buf ) );
+    KOutMsg( "%s\n", r_ctx->s_col.buf );
 }
 
 static rc_t vdfo_print_row_default( const p_row_context r_ctx )
 {
+    rc_t rc = 0;
     if ( r_ctx->ctx->print_row_id )
-        OUTMSG ( ( "ROW-ID = %u\n", r_ctx->row_id ) );
+        rc = KOutMsg( "ROW-ID = %u\n", r_ctx->row_id );
 
-    VectorForEach( &(r_ctx->col_defs->cols), false, vdfo_print_col_default, r_ctx );
+    if ( rc == 0 )
+        VectorForEach( &(r_ctx->col_defs->cols), false, vdfo_print_col_default, r_ctx );
 
-    if ( r_ctx->ctx->lf_after_row > 0 )
+    if ( rc == 0 && r_ctx->ctx->lf_after_row > 0 )
     {
         uint16_t i=0;
-        while ( i++ < r_ctx->ctx->lf_after_row )
-            OUTMSG ( ( "\n" ) );
+        while ( i++ < r_ctx->ctx->lf_after_row && rc == 0 )
+            rc = KOutMsg( "\n" );
     }
     return 0;
 }
@@ -138,7 +140,7 @@ static rc_t vdfo_print_row_csv( const p_row_context r_ctx )
     {
         r_ctx->col_nr = 0;
         VectorForEach( &(r_ctx->col_defs->cols), false, vdfo_print_col_csv, r_ctx );
-        OUTMSG (( "%s\n", r_ctx->s_col.buf ));
+        rc = KOutMsg( "%s\n", r_ctx->s_col.buf );
     }
     return rc;
 }
@@ -152,9 +154,9 @@ static void CC vdfo_print_col_xml( void *item, void *data )
     if ( my_col_def->valid == false ) return;
     if ( my_col_def->excluded == true ) return;
 
-    OUTMSG (( " <%s>\n", my_col_def->name ));
-    OUTMSG (( "%s", my_col_def->content.buf ));
-    OUTMSG (( " </%s>\n", my_col_def->name ));
+    KOutMsg( " <%s>\n", my_col_def->name );
+    KOutMsg( "%s", my_col_def->content.buf );
+    KOutMsg( " </%s>\n", my_col_def->name );
 }
 
 static rc_t vdfo_print_row_xml( const p_row_context r_ctx )
@@ -163,9 +165,12 @@ static rc_t vdfo_print_row_xml( const p_row_context r_ctx )
     DISP_RC( rc, "dump_str_clear() failed" )
     if ( rc == 0 )
     {
-        OUTMSG ( ( "<row_%lu>\n", r_ctx->row_id ) );
-        VectorForEach( &(r_ctx->col_defs->cols), false, vdfo_print_col_xml, r_ctx );
-        OUTMSG ( ( "</row_%lu>\n\n", r_ctx->row_id ) );
+        rc = KOutMsg( "<row>\n" );
+        if ( rc  == 0 )
+        {
+            VectorForEach( &(r_ctx->col_defs->cols), false, vdfo_print_col_xml, r_ctx );
+            rc = KOutMsg( "</row>\n");
+        }
     }
     return rc;
 }
@@ -203,7 +208,7 @@ static void CC vdfo_print_col_json( void *item, void *data )
     }
 
     if ( rc == 0 )
-        OUTMSG ( ( ",\n\"%s\":%s", my_col_def->name, my_col_def->content.buf ) );
+        KOutMsg( ",\n\"%s\":%s", my_col_def->name, my_col_def->content.buf );
 }
 
 static rc_t vdfo_print_row_json( const p_row_context r_ctx )
@@ -212,10 +217,16 @@ static rc_t vdfo_print_row_json( const p_row_context r_ctx )
     DISP_RC( rc, "dump_str_clear() failed" )
     if ( rc == 0 )
     {
-        OUTMSG ( ( "{\n" ) );
-        OUTMSG ( ( "\"row_id\": %lu", r_ctx->row_id ) );
-        VectorForEach( &(r_ctx->col_defs->cols), false, vdfo_print_col_json, r_ctx );
-        OUTMSG ( ( "\n},\n\n" ) );
+        rc = KOutMsg( "{\n" );
+        if ( rc == 0 )
+        {
+            rc = KOutMsg( "\"row_id\": %lu", r_ctx->row_id );
+            if ( rc == 0 )
+            {
+                VectorForEach( &(r_ctx->col_defs->cols), false, vdfo_print_col_json, r_ctx );
+                rc = KOutMsg( "\n},\n\n" );
+            }
+        }
     }
     return rc;
 }
@@ -234,7 +245,7 @@ static void CC vdfo_print_col_piped( void *item, void *data )
     if ( my_col_def->excluded == true ) return;
 
     /* first we print the row_id and the column-name for every column! */
-    OUTMSG ( ( "%lu, %s: ", r_ctx->row_id, my_col_def->name ) );
+    KOutMsg( "%lu, %s: ", r_ctx->row_id, my_col_def->name );
 
     if ( ( my_col_def->type_desc.domain == vtdAscii )||
          ( my_col_def->type_desc.domain == vtdUnicode ) )
@@ -257,7 +268,7 @@ static void CC vdfo_print_col_piped( void *item, void *data )
     }
 
     if ( rc == 0 )
-        OUTMSG ( ( "%s\n", my_col_def->content.buf ) );
+        KOutMsg( "%s\n", my_col_def->content.buf );
 }
 
 
@@ -294,7 +305,7 @@ static rc_t vdfo_print_row_piped( const p_row_context r_ctx )
     if ( rc == 0 )
     {
         VectorForEach( &(r_ctx->col_defs->cols), false, vdfo_print_col_piped, r_ctx );
-        OUTMSG ( ( "\n" ) );
+        rc = KOutMsg( "\n" );
     }
     return rc;
 }
@@ -307,7 +318,7 @@ static rc_t vdfo_print_row_tab( const p_row_context r_ctx )
     {
         r_ctx->col_nr = 0;
         VectorForEach( &(r_ctx->col_defs->cols), false, vdfo_print_col_tab, r_ctx );
-        OUTMSG (( "%s\n", r_ctx->s_col.buf ));
+        rc = KOutMsg( "%s\n", r_ctx->s_col.buf );
     }
     return rc;
 }

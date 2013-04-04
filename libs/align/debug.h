@@ -40,6 +40,16 @@
 #define ALIGN_C_DBGERR(rc) if(rc != 0) {ALIGN_C_DBGF(("%s:%u: %R\n", __func__, __LINE__, rc));}
 #define ALIGN_C_DBGERRP(fmt, rc, ...) if(rc != 0) {ALIGN_C_DBGF(("%s:%u: %R " fmt "\n", __func__, __LINE__, rc, __VA_ARGS__));}
 
+#define ALIGN_R_DBGF(msg) DBGMSG(DBG_ALIGN, DBG_FLAG(DBG_ALIGN_COVERAGE), msg)
+#define ALIGN_R_DBG(fmt, ...) ALIGN_R_DBGF(("%s:%u: " fmt "\n", __func__, __LINE__, __VA_ARGS__))
+#define ALIGN_R_DBGERR(rc) if(rc != 0) {ALIGN_R_DBGF(("%s:%u: %R\n", __func__, __LINE__, rc));}
+#define ALIGN_R_DBGERRP(fmt, rc, ...) if(rc != 0) {ALIGN_R_DBGF(("%s:%u: %R " fmt "\n", __func__, __LINE__, rc, __VA_ARGS__));}
+
+#define ALIGN_CF_DBGF(msg) DBGMSG(DBG_ALIGN, DBG_FLAG(DBG_ALIGN_CFG), msg)
+#define ALIGN_CF_DBG(fmt, ...) ALIGN_CF_DBGF(("%s:%u: " fmt "\n", __func__, __LINE__, __VA_ARGS__))
+#define ALIGN_CF_DBGERR(rc) if(rc != 0) {ALIGN_CF_DBGF(("%s:%u: %R\n", __func__, __LINE__, rc));}
+#define ALIGN_CF_DBGERRP(fmt, rc, ...) if(rc != 0) {ALIGN_CF_DBGF(("%s:%u: %R " fmt "\n", __func__, __LINE__, rc, __VA_ARGS__));}
+
 #else
 
 #define ALIGN_DBGF(msg) ((void)0)
@@ -51,6 +61,16 @@
 #define ALIGN_C_DBG(fmt, ...) ((void)0)
 #define ALIGN_C_DBGERR(rc) ((void)0)
 #define ALIGN_C_DBGERRP(fmt, rc, ...) ((void)0)
+
+#define ALIGN_R_DBGF(msg) ((void)0)
+#define ALIGN_R_DBG(fmt, ...) ((void)0)
+#define ALIGN_R_DBGERR(rc) ((void)0)
+#define ALIGN_R_DBGERRP(fmt, rc, ...) ((void)0)
+
+#define ALIGN_CF_DBGF(msg) ((void)0)
+#define ALIGN_CF_DBG(fmt, ...) ((void)0)
+#define ALIGN_CF_DBGERR(rc) ((void)0)
+#define ALIGN_CF_DBGERRP(fmt, rc, ...) ((void)0)
 
 #endif
 

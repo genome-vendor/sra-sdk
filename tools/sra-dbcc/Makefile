@@ -43,15 +43,13 @@ ALL_TOOLS = \
 #------------------------------------------------------------------------------
 # outer targets
 #
-vers-includes: $(addsuffix .vers.h,$(ALL_TOOLS))
-
-all std: makedirs vers-includes
+all std: vers-includes
 	@ $(MAKE_CMD) $(TARGDIR)/$@
 
-$(ALL_TOOLS): makedirs vers-includes
+$(ALL_TOOLS): vers-includes
 	@ $(MAKE_CMD) $(BINDIR)/$@
 
-.PHONY: vers-includes all std $(ALL_TOOLS)
+.PHONY: all std $(ALL_TOOLS)
 
 #-------------------------------------------------------------------------------
 # all
@@ -70,18 +68,18 @@ $(TARGDIR)/std: \
 .PHONY: $(TARGDIR)/std
 
 #-------------------------------------------------------------------------------
+# vers-includes
+#
+$(TARGDIR)/vers-includes: $(addsuffix .vers.h,$(EXT_TOOLS))
+
+.PHONY: $(TARGDIR)/vers-includes
+
+#-------------------------------------------------------------------------------
 # clean
 #
 clean: stdclean
 
 .PHONY: clean
-
-#-------------------------------------------------------------------------------
-# tag
-#
-tag: $(addsuffix _tag,$(ALL_TOOLS))
-
-.PHONY: tag $(addsuffix _tag,$(ALL_TOOLS))
 
 #-------------------------------------------------------------------------------
 # sra-dbcc
@@ -94,9 +92,7 @@ SRA_DBCC_OBJ = \
 
 SRA_DBCC_LIB = \
 	-dalign-reader \
-	-daxf \
-	-dsraxf \
-	-dvxf \
+	$(READONLY_SCHEMA_LIBS) \
 	-dksrch \
 	-lsradb \
 	-lvdb \
@@ -106,6 +102,7 @@ SRA_DBCC_LIB = \
 	-lkrypto \
 	-lkfg \
 	-lkfs \
+	-lkproc \
 	-lklib \
 	-lm
 
@@ -114,7 +111,3 @@ sra-dbcc.vers.h: sra-dbcc.vers
 
 $(BINDIR)/sra-dbcc: $(SRA_DBCC_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(SRA_DBCC_LIB)
-
-sra-dbcc_tag:
-	@ $(TOP)/build/tag-module.sh \
-		$(MODULE) table-vers $(SRA_DBCC_OBJ)

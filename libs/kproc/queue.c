@@ -26,6 +26,7 @@
 
 #include <kproc/q-extern.h>
 #include <kproc/queue.h>
+#include <kproc/timeout.h>
 #include <kproc/lock.h>
 #include <kproc/sem.h>
 #include <klib/out.h>

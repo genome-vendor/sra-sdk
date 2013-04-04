@@ -421,7 +421,7 @@ T [ * ] paste #1.0 ( T [ * ] in, ... )
 
 
 /* vec_sum
- *  compute the sum of all the elements of the input vector
+ *  compute the sum of all the elements of the row
  *
  *  "T" [ TYPE ] - base element type to be processed
  *
@@ -430,6 +430,17 @@ T [ * ] paste #1.0 ( T [ * ] in, ... )
 function < type T >
 T vec_sum #1.0 ( T [ * ] in )
     = vdb:vec_sum;
+
+/* vec_sum
+ *  compute the sum of all the elements of the input vector
+ *
+ *  "T" [ TYPE ] - base element type to be processed
+ *
+ *  "in" [ DATA ] - the input
+ */
+function < type T >
+T fixed_vec_sum #1.0 ( T [ * ] in )
+    = vdb:fixed_vec_sum;
 
 
 /* checksum
@@ -632,6 +643,21 @@ T delta_zip_encoding #1.0
     {
         T dlt = <T> delta ( @ );
         return zip < Z_RLE, Z_BEST_SPEED > ( dlt );
+    }
+}
+physical < type T >
+T delta_average_zip_encoding #1.0
+{
+    decode
+    {
+        delta_averaged_fmt t = unzip ( @ );
+        return undelta_average ( t );
+    }
+
+    encode
+    {
+        delta_averaged_fmt t = delta_average ( @ );
+        return zip < Z_RLE, Z_BEST_SPEED > ( t );
     }
 }
 

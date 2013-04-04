@@ -43,18 +43,16 @@ include $(TOP)/build/Makefile.env
 #-------------------------------------------------------------------------------
 # outer targets
 #
-vers-includes: $(addsuffix .vers.h,$(EXT_LIBS))
-
-all std: makedirs vers-includes
+all std: vers-includes
 	@ $(MAKE_CMD) $(TARGDIR)/std
 
-$(INT_LIBS): makedirs vers-includes
+$(INT_LIBS): vers-includes
 	@ $(MAKE_CMD) $(ILIBDIR)/$@
 
-$(EXT_LIBS): makedirs vers-includes
+$(EXT_LIBS): vers-includes
 	@ $(MAKE_CMD) $(LIBDIR)/$@
 
-.PHONY: vers-includes all std $(ALL_LIBS)
+.PHONY: all std $(ALL_LIBS)
 
 #-------------------------------------------------------------------------------
 # std
@@ -64,6 +62,13 @@ $(TARGDIR)/std: \
 	$(addprefix $(LIBDIR)/,$(EXT_LIBS))
 
 .PHONY: $(TARGDIR)/all $(TARGDIR)/std
+
+#-------------------------------------------------------------------------------
+# vers-includes
+#
+$(TARGDIR)/vers-includes: $(addsuffix .vers.h,$(EXT_LIBS))
+
+.PHONY: $(TARGDIR)/vers-includes
 
 #-------------------------------------------------------------------------------
 # clean
@@ -132,7 +137,8 @@ VDBCMN_SRC = \
 	index_project \
 	index_lookup \
 	transpose \
-	report
+	delta_average \
+	report-vdb
 
 VDB_SRC = \
 	$(VDBCMN_SRC) \
@@ -150,8 +156,10 @@ VDB_OBJ = \
 
 VDB_LIB = \
 	-dkdb \
+	-dvfs \
 	-dkfg \
 	-dkfs \
+	-dkproc \
 	-dklib \
 	-dz
 
@@ -189,6 +197,7 @@ WVDB_OBJ = \
 
 WVDB_LIB = \
 	-dwkdb \
+	-dvfs \
 	-dkfg \
 	-dkfs \
 	-dkproc \

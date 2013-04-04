@@ -43,6 +43,8 @@
 extern "C" {
 #endif
 
+#define TOOLS_USE_SRAPATH 0
+
 /*--------------------------------------------------------------------------
  * forwards
  */
@@ -76,9 +78,6 @@ SRA_EXTERN rc_t CC SRAPathMake ( SRAPath **pm, struct KDirectory const *dir );
 SRA_EXTERN rc_t CC SRAPathAddRef ( const SRAPath *self );
 SRA_EXTERN rc_t CC SRAPathRelease ( const SRAPath *self );
 
-/* clean internal static variables after releasing SRAPath */
-SRA_EXTERN rc_t CC SRAPathClean ( void );
-
 /* Version
  *  returns the library version
  */
@@ -86,13 +85,13 @@ SRA_EXTERN rc_t CC SRAPathVersion ( const SRAPath *self, uint32_t *version );
 
 
 /* Clear
- *  forget all existing server and volume paths
+ *  forget existing server and volume paths for the default repository
  */
 SRA_EXTERN rc_t CC SRAPathClear ( SRAPath *self );
 
 
 /* AddRepPath
- *  add a replication path
+ *  add a replication path to the default repository
  *
  *  "rep" [ IN ] - NUL-terminated server search path
  *  may be a compound path with ':' separator characters, e.g.
@@ -107,7 +106,7 @@ SRA_EXTERN rc_t CC SRAPathAddRepPath ( SRAPath *self, const char *rep );
 
 
 /* AddVolPath
- *  add a volume path
+ *  add a volume path to the default repository
  *
  *  "vol" [ IN ] - NUL-terminated volume search path
  *  may be a compound path with ':' separator characters, e.g.

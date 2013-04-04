@@ -45,6 +45,16 @@
 #define KFILE_IMPL struct KCounterFile
 #include <kfs/impl.h>
 
+/* clear out possible macro definitions of FS and GS,
+ * which show up on Solaris/x86 when building with GCC (per sys/ucontext.h)
+ */
+#ifdef FS
+#  undef FS
+#endif
+#ifdef GS
+#  undef GS
+#endif
+
 static rc_t CC KCounterFileDestroy (KCounterFile *self);
 static struct KSysFile *CC KCounterFileGetSysFile (const KCounterFile *self,
 					    uint64_t *offset);
@@ -138,6 +148,7 @@ rc_t KCounterFileMake (KCounterFile ** pself,
     {
 	rc = KFileInit (&self->dad,			/* initialize base class */
 			(const KFile_vt*)&vtKCounterFile,/* VTable for KCounterFile */
+            "KCounterFile", "no-name",
 			original->read_enabled,
 			original->write_enabled);
 	if (rc == 0)

@@ -976,11 +976,11 @@ rc_t CC KMain ( int argc, char *argv [] )
             if (rc)
                 break;
 
-            if (pcount == 0)
-	    {
-		OUTMSG (("missing source table\n"));
+            if (pcount == 0) {
+                OUTMSG (("missing source table\n"));
                 rc = MiniUsage (args);
-                break;
+                ArgsWhack(args);
+                exit(EXIT_FAILURE);
             }
 
             rc = ArgsParamValue (args, 0, &pb.src_path);
@@ -1016,7 +1016,8 @@ rc_t CC KMain ( int argc, char *argv [] )
                 }
 
                 if ( pcount != 1 )
-                    free ( pb.columns );
+                    /* brain damaged windows compiler warned about next line */
+                    free ( (void*)pb.columns );
             }
         } while (0);
  

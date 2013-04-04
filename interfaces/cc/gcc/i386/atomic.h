@@ -35,6 +35,7 @@
 extern "C" {
 #endif
 
+typedef int atomic_int;
 typedef struct atomic32_t atomic_t;
 
 /* ( * v ) */

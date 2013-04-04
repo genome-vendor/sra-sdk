@@ -35,6 +35,10 @@
 #include <klib/defs.h>
 #endif
 
+#ifndef _h_klib_ksort_macro_
+#include <klib/ksort-macro.h>
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -46,6 +50,62 @@ extern "C" {
  */
 KLIB_EXTERN void CC ksort ( void *pbase, size_t total_elems, size_t size,
     int ( CC * cmp ) ( const void*, const void*, void *data ), void *data );
+
+
+/* various custom ksort operations
+ *  structures will generally want their own functions
+ *  these fundamental types can be standardized
+ */
+KLIB_EXTERN void CC ksort_int32_t ( int32_t *pbase, size_t total_elems );
+KLIB_EXTERN void CC ksort_uint32_t ( uint32_t *pbase, size_t total_elems );
+KLIB_EXTERN void CC ksort_int64_t ( int64_t *pbase, size_t total_elems );
+KLIB_EXTERN void CC ksort_uint64_t ( uint64_t *pbase, size_t total_elems );
+
+
+/* KSORT
+ *  macro ( see <klib/ksort-macro.h> )
+ *  allows creation of a custom qsort with inlined compare and swap
+ *  MUCH faster than normal qsort or ksort.
+ *
+ *  basically you need to define a macro CMP() and another SWAP(),
+ *  and the KSORT macro will fill in the rest.
+ *
+ *  CMP() needs to evaluate to a signed 32-bit integer.
+ *  THIS WILL CHANGE TO BECOME LESS_THAN( a, b ).
+ *
+ *  SWAP() will generally be a custom operation, but can be
+ *  defined in terms of a default operation similar to qsort.
+ *
+ *  an example usage follows:
+ */
+#if 0
+static
+void ksort_int64_t ( int64_t *base, size_t count )
+{
+    /* swap is performed on full element, not byte-for-byte */
+#define SWAP( a, b, off, size )                             \
+    do                                                      \
+    {                                                       \
+        int64_t tmp = * ( const int64_t* ) ( a );           \
+        * ( int64_t* ) ( a ) = * ( const int64_t* ) ( b );  \
+        * ( int64_t* ) ( b ) = tmp;                         \
+    }                                                       \
+    while ( 0 )
+
+    /* 64-bit comparison producing a signed 32-bit result */
+#define CMP( a, b )                                                     \
+    ( ( * ( const int64_t* ) ( a ) < * ( const int64_t* ) ( b ) ) ? -1 : \
+      ( * ( const int64_t* ) ( a ) > * ( const int64_t* ) ( b ) ) )
+}
+
+    /* let the macro fill out the remainder */
+    KSORT ( base, count, sizeof * base, 0, sizeof * base );
+
+    /* free up macros for future use */
+#undef SWAP
+#undef CMP
+
+#endif
 
 
 /*--------------------------------------------------------------------------

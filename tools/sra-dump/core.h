@@ -54,7 +54,7 @@ struct SRADumperFmt
     const SRADumperFmt_Arg* arg_desc;
 
     /* optional - prints custom help page */
-    rc_t (*usage)(const SRADumperFmt* fmt, const SRADumperFmt_Arg* core_args);
+    rc_t (*usage)(const SRADumperFmt* fmt, const SRADumperFmt_Arg* core_args, int first );
     /* optional */
     rc_t (*release)(const SRADumperFmt* fmt);
     /* optional process current arg and advance i by number of processed args */

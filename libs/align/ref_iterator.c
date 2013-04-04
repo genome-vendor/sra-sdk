@@ -35,29 +35,211 @@
 #include <align/reference.h>
 #include <align/iterator.h>
 #include <align/manager.h>
+#include <sysalloc.h>
+
+#include "debug.h"
 
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
 
+#define COL_READ "(INSDC:4na:bin)READ"
+#define COL_HAS_MISMATCH "(bool)HAS_MISMATCH"
+#define COL_HAS_REF_OFFSET "(bool)HAS_REF_OFFSET"
+#define COL_REF_OFFSET "(I32)REF_OFFSET"
+#define COL_READ_GROUP "(ascii)SEQ_SPOT_GROUP"
+
+
+typedef struct spot_group
+{
+    DLNode n;                       /* to have it in a DLList */
+    char * name;                    /* the name of the read-group, can be NULL */
+    size_t len;                     /* the length of the name */
+    DLList records;                 /* has list of PlacementRecords... */
+} spot_group;
+
+
+static rc_t make_spot_group( spot_group ** sg, DLList * list, const char * name, size_t len )
+{
+    rc_t rc = 0;
+    *sg = calloc( 1, sizeof ** sg );
+    if ( *sg == NULL )
+        rc = RC( rcAlign, rcIterator, rcConstructing, rcMemory, rcExhausted );
+    else
+    {
+        if ( len > 0 && name != NULL )
+        {
+            (*sg)->name = string_dup( name, len );
+            if ( (*sg)->name != NULL )
+            {
+                (*sg)->len = len;
+            }
+        }
+        /* if name is NULL, the spot-group is initialized with 0 via calloc() */
+        DLListInit( &( (*sg)->records ) );
+        DLListPushTail ( list, ( DLNode * )(*sg) );
+    }
+    return rc;
+}
+
+
+static void CC whack_the_placement_record( DLNode *n, void *data )
+{    PlacementRecordWhack ( ( PlacementRecord * )n );   }
+
+static void free_spot_group( spot_group *sg )
+{
+    if ( sg->name != NULL ) free( sg->name );
+    DLListWhack ( &sg->records, whack_the_placement_record, NULL );
+    free( sg );
+}
+
+
+static void CC whack_the_spot_group( DLNode *n, void *data )
+{    free_spot_group ( ( spot_group * )n );   }
+
+static void clear_spot_group_list( DLList * list )
+{
+    DLListWhack ( list, whack_the_spot_group, NULL );
+}
+
+
+typedef struct find_spot_group_cb_ctx
+{
+    const char * name;
+    size_t len;
+    spot_group *res;
+} find_spot_group_cb_ctx;
+
+
+static bool CC find_spot_group_callback( DLNode *n, void *data )
+{
+    find_spot_group_cb_ctx *ctx = ( find_spot_group_cb_ctx * )data;
+    spot_group * sg = ( spot_group * ) n;
+    bool res = false;
+
+    if ( ctx->name == NULL || sg->name == NULL )
+    {
+        res = true;
+    }
+    else
+    {
+        res = ( string_cmp ( sg->name, sg->len, 
+                             ctx->name, ctx->len, 
+                             ( sg->len < ctx->len ) ? ctx->len : sg->len ) == 0 );
+    }
+
+    if ( res )
+    {
+        ctx->res = sg;
+    }
+    return res;
+}
+
+static spot_group * find_spot_group( DLList * list, const char * name, size_t len )
+{
+    find_spot_group_cb_ctx ctx;
+    ctx.res = NULL;
+    ctx.name = name;
+    ctx.len = len;
+    DLListDoUntil ( list, false, find_spot_group_callback, &ctx );
+    return ctx.res;
+}
+
+static rc_t add_to_spot_groups( DLList * list, const PlacementRecord *rec )
+{
+    rc_t rc = 0;
+    spot_group * sg = find_spot_group( list, rec->spot_group, rec->spot_group_len );
+    if ( sg == NULL )
+    {
+        rc = make_spot_group( &sg, list, rec->spot_group, rec->spot_group_len );
+    }
+    if ( rc == 0 )
+    {
+        DLListPushTail ( &sg->records, ( DLNode * )(rec) );
+    }
+    return rc;
+}
+
+
+static uint32_t remove_invalid_records( const struct ReferenceObj * const refobj,
+                                        DLList * list, INSDC_coord_zero pos )
+{
+    uint32_t res = 0;
+    spot_group * sg = ( spot_group * )DLListHead( list );
+    while ( sg != NULL )
+    {
+        spot_group *nxt = ( spot_group * )DLNodeNext( ( DLNode * )sg );
+        PlacementRecord *rec = ( PlacementRecord * )DLListHead( &sg->records );
+        while ( rec != NULL )
+        {
+            PlacementRecord *nxt_rec = ( PlacementRecord * )DLNodeNext( ( DLNode * )rec );
+            INSDC_coord_zero end_pos = ( rec->pos + rec->len );
+            bool remove = ( end_pos <= pos );
+            if ( !remove )
+            {
+                AlignmentIterator * al_iter = PlacementRecordCast ( rec, placementRecordExtension0 );
+                int32_t state = AlignmentIteratorState ( al_iter, NULL );
+                remove = ( ( state & align_iter_invalid ) == align_iter_invalid );
+            }
+            if ( remove )
+            {
+                DLListUnlink ( &sg->records, ( DLNode * )rec );
+                PlacementRecordWhack ( rec );
+            }
+            else
+            {
+                res++;
+            }
+            rec = nxt_rec;
+        }
+        sg = nxt;
+    }
+    return res;
+}
+
+
+static void inc_alignment_iterators( DLList * list, INSDC_coord_zero pos )
+{
+    spot_group * sg = ( spot_group * )DLListHead( list );
+    while ( sg != NULL )
+    {
+        spot_group *nxt = ( spot_group * )DLNodeNext( ( DLNode * )sg );
+        PlacementRecord *rec = ( PlacementRecord * )DLListHead( &sg->records );
+        while ( rec != NULL )
+        {
+            PlacementRecord *nxt_rec = ( PlacementRecord * )DLNodeNext( ( DLNode * )rec );
+            AlignmentIterator * al_iter = PlacementRecordCast ( rec, placementRecordExtension0 );
+            if ( rec->pos <= pos && al_iter != NULL )
+            {
+                AlignmentIteratorNext ( al_iter );
+            }
+            rec = nxt_rec;
+        }
+        sg = nxt;
+    }
+}
+
+/* ======================================================================================== */
+
 
 struct ReferenceIterator
 {
     KRefcount refcount;
-    struct AlignMgr const *amgr;            /* the alignment-manager... */
+    struct AlignMgr const *amgr;
 
-    DLList records;                         /* has list of records... */
+    DLList spot_groups;                     /* has a list of spot-groups... */
+
     int32_t min_mapq;                       /* has a minimum mapq-value... */
     PlacementRecordExtendFuncs ext_func;    /* has a struct with record-extension-functions from client*/
     PlacementRecordExtendFuncs int_func;    /* has a struct with record-extension-functions for itself*/
 
     uint32_t depth;                         /* how many records are in the list */
     INSDC_coord_zero current_pos;           /* what is the current ref-position on the current ref. */
-    INSDC_coord_zero last_pos;              /* what is the last ref-position on the current ref. */
+    INSDC_coord_zero last_pos;              /* what is the current ref-position on the current ref. */
     INSDC_coord_zero nxt_avail_pos;         /* what is the next available ref-position on the current ref. */
+    spot_group *current_spot_group;         /* what is the next spot-group to be handled */
     PlacementRecord *current_rec;           /* the current-record at the current position */
-    bool last_rec_reached;                  /* do we have reached the last record at a given position ? */
     bool need_init;                         /* do we need to init for the first next()-call */
     PlacementSetIterator * pl_set_iter;     /* holds a list of placement-iterators */
     struct ReferenceObj const * refobj;     /* cached result of ReferenceIteratorNextReference(...) */
@@ -70,21 +252,19 @@ LIB_EXPORT void CC RefIterRecordDestroy ( void *obj, void *data )
 }
 
 
+LIB_EXPORT rc_t CC RefIterRecordSize ( struct VCursor const *curs,
+    int64_t row_id, size_t * size, void *data )
+{
+    /* discover the size of the ref-iter-part to be allocated... */
+    return AlignIteratorRecordSize ( curs, row_id, size, data );
+}
+
+
 LIB_EXPORT rc_t CC RefIterRecordPopulate ( void *obj,
     const PlacementRecord *placement, struct VCursor const *curs,
     INSDC_coord_zero ref_window_start, INSDC_coord_len ref_window_len, void *data )
 {
-    /* read the data required to build a Alignment-Iterator,
-       then create the Alignment-Iterator into the already allocated memory */
     return AlignIteratorRecordPopulate ( obj, placement, curs, ref_window_start, ref_window_len, data );
-}
-
-
-LIB_EXPORT size_t CC RefIterRecordSize ( struct VCursor const *curs,
-    int64_t row_id, void *data )
-{
-    /* discover the size of the ref-iter-part to be allocated... */
-    return AlignIteratorRecordSize ( curs, row_id, data );
 }
 
 
@@ -123,12 +303,12 @@ LIB_EXPORT rc_t CC AlignMgrMakeReferenceIterator ( struct AlignMgr const *self,
                     refi->ext_func.fixed_size = ext_1->fixed_size;
                 }
 
-                refi->int_func.data = ( void * )self;     /* have it point to the AlignMgr... */
+                refi->int_func.data = ( void * )self;
                 refi->int_func.destroy = RefIterDestroyRecPart;
                 refi->int_func.populate = RefIterRecordPopulate;
                 refi->int_func.alloc_size = RefIterRecordSize; 
 
-                DLListInit( &(refi->records) );
+                DLListInit( &(refi->spot_groups) );
                 rc = AlignMgrMakePlacementSetIterator ( self, &refi->pl_set_iter );
                 refi->need_init = true;
             }
@@ -165,18 +345,6 @@ LIB_EXPORT rc_t CC ReferenceIteratorAddRef ( const ReferenceIterator *self )
 }
 
 
-static void CC whack_the_placement_record( DLNode *n, void *data )
-{
-    PlacementRecord * rec = ( PlacementRecord * )n;
-    PlacementRecordWhack ( rec );
-}
-
-
-static void clear_recordlist( DLList * list )
-{
-    DLListWhack ( list, whack_the_placement_record, NULL );
-}
-
 LIB_EXPORT rc_t CC ReferenceIteratorRelease ( const ReferenceIterator *cself )
 {
     rc_t rc = 0;
@@ -188,7 +356,7 @@ LIB_EXPORT rc_t CC ReferenceIteratorRelease ( const ReferenceIterator *cself )
         {
             ReferenceIterator * self = ( ReferenceIterator * ) cself;
             /* we 'own' the records! - we have to destroy them, if some are left in here */
-            clear_recordlist( &self->records );
+            clear_spot_group_list( &self->spot_groups );
             rc = PlacementSetIteratorRelease ( self->pl_set_iter );
             AlignMgrRelease ( self->amgr );
             free( self );
@@ -220,10 +388,7 @@ LIB_EXPORT rc_t CC ReferenceIteratorAddPlacementIterator( ReferenceIterator *sel
 #define ALIGN_COL_COUNT 4
 
 static const char * align_cols[ ALIGN_COL_COUNT ] = 
-{ "(I32)CLIPPED_REF_OFFSET",
-  "(bool)CLIPPED_HAS_REF_OFFSET",
-  "(bool)CLIPPED_HAS_MISMATCH",
-  "(INSDC:dna:text)CLIPPED_READ" };
+{ COL_REF_OFFSET, COL_HAS_REF_OFFSET, COL_HAS_MISMATCH, COL_READ };
 
 
 static rc_t prepare_align_cursor( struct VCursor const *align )
@@ -231,15 +396,21 @@ static rc_t prepare_align_cursor( struct VCursor const *align )
     rc_t rc = 0;
     uint32_t i, throw_away_idx;
 
-    for ( i = 0; i < ALIGN_COL_COUNT && rc == 0; ++i )
+    for ( i = 0; i < ALIGN_COL_COUNT && rc == 0; ++i ) {
         rc =VCursorAddColumn ( align, &throw_away_idx, "%s", align_cols[ i ] );
+        if( GetRCState(rc) == rcExists ) {
+            rc = 0;
+        }
+    }
+        
     return rc;
 }
 
 
 LIB_EXPORT rc_t CC ReferenceIteratorAddPlacements( ReferenceIterator *self,
      struct ReferenceObj const *ref_obj, INSDC_coord_zero ref_pos, INSDC_coord_len ref_len,
-     struct VCursor const *ref, struct VCursor const *align, align_id_src ids )
+     struct VCursor const *ref, struct VCursor const *align, align_id_src ids,
+     const char * spot_group )
 {
     rc_t rc = 0;
     if ( self == NULL )
@@ -258,10 +429,11 @@ LIB_EXPORT rc_t CC ReferenceIteratorAddPlacements( ReferenceIterator *self,
                 PlacementIterator *pi;
 
                 rc = ReferenceObj_MakePlacementIterator ( ref_obj, &pi, ref_pos, ref_len, self->min_mapq,
-                        ref, align, ids, &self->int_func, &self->ext_func );
+                        ref, align, ids, &self->int_func, &self->ext_func, spot_group );
                 if ( rc == 0 )
                 {
                     rc = PlacementSetIteratorAddPlacementIterator ( self->pl_set_iter, pi );
+                    if ( GetRCState( rc ) == rcDone ) { rc = 0; }
                 }
             }
             ReferenceObj_Release( ref_obj );
@@ -273,8 +445,8 @@ LIB_EXPORT rc_t CC ReferenceIteratorAddPlacements( ReferenceIterator *self,
 
 static rc_t fill_recordlist( ReferenceIterator *self, INSDC_coord_zero pos )
 {
-    rc_t rc = 0;
-    while ( rc == 0 )
+    rc_t rc;
+    do
     {
         const PlacementRecord *rec;
         /* from the placement-set-iterator into our list... */
@@ -284,76 +456,33 @@ static rc_t fill_recordlist( ReferenceIterator *self, INSDC_coord_zero pos )
             if ( rec->pos == pos )
             {
                 self->depth++;
-                DLListPushTail ( &self->records, (DLNode *)rec );
-/*                OUTMSG(( " add [%lu]%u(%u)", rec->id, rec->pos, rec->len )); */
+                rc = add_to_spot_groups( &self->spot_groups, rec );
             }
             else
-            {
                 PlacementRecordWhack ( rec );
-            }
         }
-    }
-    if ( GetRCState( rc ) == rcDone ) rc = 0;
+    } while( rc == 0 );
+
+    if ( GetRCState( rc ) == rcDone ) { rc = 0; }
     return rc;
 }
 
 
-static uint32_t remove_invalid_records( DLList * list, INSDC_coord_zero pos )
-{
-    uint32_t res = 0;
-    PlacementRecord *rec = ( PlacementRecord * )DLListHead( list );
-    while ( rec != NULL )
-    {
-        PlacementRecord *nxt = ( PlacementRecord * )DLNodeNext( ( DLNode * )rec );
-        bool remove = ( ( rec->pos + rec->len ) <= pos );
-        if ( !remove )
-        {
-            AlignmentIterator * al_iter = PlacementRecordCast ( rec, placementRecordExtension0 );
-            int32_t state = AlignmentIteratorState ( al_iter, NULL );
-            remove = ( ( state & align_iter_invalid ) == align_iter_invalid );
-        }
-        if ( remove )
-        {
-            DLListUnlink ( list, ( DLNode * )rec );
-            PlacementRecordWhack ( rec );
-        }
-        else
-        {
-            res++;
-        }
-        rec = nxt;
-    }
-    return res;
-}
-
-
-static void inc_alignment_iterators( ReferenceIterator *self, INSDC_coord_zero pos )
-{
-    PlacementRecord *rec = ( PlacementRecord * )DLListHead( &self->records );
-    while ( rec != NULL )
-    {
-        AlignmentIterator * al_iter = PlacementRecordCast ( rec, placementRecordExtension0 );
-        if ( rec->pos <= pos && al_iter != NULL )
-        {
-            AlignmentIteratorNext ( al_iter );
-        }
-        rec = ( PlacementRecord * )DLNodeNext( ( DLNode * )rec );
-    }
-}
-
-
 LIB_EXPORT rc_t CC ReferenceIteratorNextReference ( ReferenceIterator *self,
-    struct ReferenceObj const ** refobj )
+    INSDC_coord_zero *first_pos, INSDC_coord_len *len, struct ReferenceObj const ** refobj )
 {
     rc_t rc = 0;
+
+    if ( refobj != NULL )
+        *refobj = NULL;
+
     if ( self == NULL )
         rc = RC( rcAlign, rcIterator, rcAccessing, rcSelf, rcNull );
     else
     {
         struct ReferenceObj const * robj;
-        rc = PlacementSetIteratorNextReference ( self->pl_set_iter,
-            &self->current_pos, &self->last_pos, &robj );
-        clear_recordlist( &self->records );
+        rc = PlacementSetIteratorNextReference ( self->pl_set_iter, first_pos, len, &robj );
+        clear_spot_group_list( &self->spot_groups );
         if ( rc == 0 )
         {
             /* cache the returned refobj in order to get to reference-bases later... */
@@ -364,6 +493,7 @@ LIB_EXPORT rc_t CC ReferenceIteratorNextReference ( ReferenceIterator *self,
         {
             self->refobj = NULL;
         }
+
         if ( refobj != NULL )
         {
             *refobj = self->refobj;
@@ -373,33 +503,101 @@ LIB_EXPORT rc_t CC ReferenceIteratorNextReference ( ReferenceIterator *self,
 }
 
 
-static rc_t first_ref_iter_nxt_pos( ReferenceIterator *self, bool skip_empty )
+LIB_EXPORT rc_t CC ReferenceIteratorNextWindow ( ReferenceIterator *self,
+    INSDC_coord_zero *first_pos, INSDC_coord_len *len )
 {
     rc_t rc = 0;
-    uint32_t diff;
-    self->need_init = false;
+    if ( self == NULL )
+        rc = RC( rcAlign, rcIterator, rcAccessing, rcSelf, rcNull );
+    else
+    {
+        rc = PlacementSetIteratorNextWindow ( self->pl_set_iter, first_pos, len );
+        clear_spot_group_list( &self->spot_groups );
+        if ( rc == 0 )
+        {
+            self->need_init = true;
+            self->current_pos = *first_pos;
+            self->current_spot_group = NULL;
+            self->last_pos = self->current_pos + *len - 1;
+        }
+    }
+    return rc;
+}
 
+
+LIB_EXPORT rc_t CC ReferenceIteratorNextSpotGroup ( ReferenceIterator *self,
+    const char ** name, size_t * len )
+{
+    rc_t rc = 0;
+
+    if ( self->current_spot_group == NULL )
+    {
+        self->current_spot_group = ( spot_group * )DLListHead( &self->spot_groups );
+        if ( self->current_spot_group == NULL )
+        {
+            rc = SILENT_RC( rcAlign, rcIterator, rcAccessing, rcOffset, rcDone );
+        }
+    }
+    else
+    {
+        spot_group *nxt  = ( spot_group * )DLNodeNext( ( DLNode * ) self->current_spot_group );
+        if ( nxt == NULL )
+        {
+            rc = SILENT_RC( rcAlign, rcIterator, rcAccessing, rcOffset, rcDone );
+        }
+        else
+        {
+            self->current_spot_group = nxt;
+        }
+    }
+    self->current_rec = NULL;
+
+    if ( rc == 0 && self->current_spot_group != NULL )
+    {
+        if ( name != NULL )
+        {
+            *name = self->current_spot_group->name;
+        }
+        if ( len != NULL )
+        {
+            *len = self->current_spot_group->len;
+        }
+    }
+    return rc;
+}
+
+
+/* iterates the PlacementSetIterator forward to reach self->current_pos on the reference */
+static rc_t first_ref_iter_nxt_pos( ReferenceIterator *self, bool skip_empty )
+{
+    rc_t rc;
+    bool loop;
+    self->need_init = false;
     do
     {
         rc = PlacementSetIteratorNextAvailPos ( self->pl_set_iter, &self->nxt_avail_pos, NULL );
-        if ( ( rc == 0 ) && ( self->nxt_avail_pos <= self->current_pos ) )
+        loop = ( rc == 0 );
+        if ( loop )
         {
-            rc = fill_recordlist( self, self->nxt_avail_pos );
-            diff = ( self->nxt_avail_pos - diff );
+            loop = ( self->nxt_avail_pos <= self->current_pos );
+            if ( loop )
+            {
+                rc = fill_recordlist( self, self->nxt_avail_pos );
+                self->depth = remove_invalid_records( self->refobj, &self->spot_groups, self->nxt_avail_pos - 1 );
+            }
         }
-    } while ( ( self->nxt_avail_pos < self->current_pos ) && ( rc == 0 ) && diff != 0 );
+    } while ( loop );
 
-    /* jump over gaps, if requested ... */
-    if ( skip_empty && ( self->current_pos < self->nxt_avail_pos ) && self->depth == 0 )
+    if ( skip_empty && self->nxt_avail_pos > self->current_pos && self->depth == 0 )
     {
         self->current_pos = self->nxt_avail_pos;
     }
+    self->depth = remove_invalid_records( self->refobj, &self->spot_groups, self->current_pos );
 
     if ( GetRCState( rc ) == rcDone ) rc = 0;
-    self->last_rec_reached = false;
-    self->depth = remove_invalid_records( &self->records, self->current_pos );
     return rc;
 }
+
 
 LIB_EXPORT rc_t CC ReferenceIteratorNextPos ( ReferenceIterator *self, bool skip_empty )
 {
@@ -408,6 +606,7 @@ LIB_EXPORT rc_t CC ReferenceIteratorNextPos ( ReferenceIterator *self, bool skip
         rc = RC( rcAlign, rcIterator, rcAccessing, rcSelf, rcNull );
     else
     {
+        self->current_rec = NULL;
         if ( self->need_init )
         {
             rc = first_ref_iter_nxt_pos( self, skip_empty );
@@ -426,15 +625,16 @@ LIB_EXPORT rc_t CC ReferenceIteratorNextPos ( ReferenceIterator *self, bool skip
                 }
 
                 /* increment the internal alignment-iterator of every placement-record */
-                inc_alignment_iterators( self, self->current_pos );
+                inc_alignment_iterators( &self->spot_groups, self->current_pos );
 
                 /* loop through the list to look if we have to remove records,
                    that do end before this new position */
-                self->depth = remove_invalid_records( &self->records, self->current_pos );
+                self->depth = remove_invalid_records( self->refobj, &self->spot_groups, self->current_pos );
 
                 rc = fill_recordlist( self, self->current_pos );
                 if ( rc == 0 )
                 {
+                    self->current_spot_group = NULL;
                     /* set our sights to the next position... */
                     rc = PlacementSetIteratorNextAvailPos ( self->pl_set_iter, &self->nxt_avail_pos, NULL );
                     if ( GetRCState( rc ) == rcDone )
@@ -449,18 +649,13 @@ LIB_EXPORT rc_t CC ReferenceIteratorNextPos ( ReferenceIterator *self, bool skip
                         }
                     }
                 }
-                self->last_rec_reached = false;
             }
             else
             {
-                rc = RC( rcAlign, rcIterator, rcAccessing, rcOffset, rcDone );
-                self->last_rec_reached = true;
-                clear_recordlist( &self->records );
+                rc = SILENT_RC( rcAlign, rcIterator, rcAccessing, rcOffset, rcDone );
+                clear_spot_group_list( &self->spot_groups );
             }
         }
-        /* load the current record with the first record out of our list */
-        /* self->current_rec = ( PlacementRecord * )DLListHead( &self->records ); */
-        self->current_rec = NULL;
     }
     return rc;
 }
@@ -509,27 +704,82 @@ LIB_EXPORT rc_t CC ReferenceIteratorNextPlacement ( ReferenceIterator *self,
 {
     rc_t rc = 0;
     if ( self == NULL )
+    {
         rc = RC( rcAlign, rcIterator, rcAccessing, rcSelf, rcNull );
+    }
+    else if ( rec == NULL )
+    {
+        rc = RC( rcAlign, rcIterator, rcAccessing, rcParam, rcNull );
+    }
     else
     {
-        if ( self->current_rec == NULL )
+        if ( self->current_spot_group == NULL )
         {
-            if ( !self->last_rec_reached )
-            {
-                self->current_rec = ( PlacementRecord * )DLListHead( &self->records );
-            }
+            rc = SILENT_RC( rcAlign, rcIterator, rcAccessing, rcOffset, rcDone );
         }
         else
         {
-            self->current_rec = ( PlacementRecord * )DLNodeNext( ( DLNode * )self->current_rec );
+            if ( self->current_rec == NULL )
+            {
+                self->current_rec = ( PlacementRecord * )DLListHead( &self->current_spot_group->records );
+            }
+            else
+            {
+                self->current_rec = ( PlacementRecord * )DLNodeNext( ( DLNode * )self->current_rec );
+            }
+
+            if ( self->current_rec == NULL )
+            {
+                rc = SILENT_RC( rcAlign, rcIterator, rcAccessing, rcOffset, rcDone );
+            }
+            else
+            {
+                *rec = self->current_rec;
+            }
         }
+    }
+    return rc;
+}
 
-        if ( rec != NULL ) *rec = self->current_rec;
 
-        if ( self->current_rec == NULL )
+LIB_EXPORT rc_t CC ReferenceIteratorGetPlacement ( ReferenceIterator *self,
+    const PlacementRecord **rec )
+{
+    rc_t rc = 0;
+    if ( self == NULL )
+    {
+        rc = RC( rcAlign, rcIterator, rcAccessing, rcSelf, rcNull );
+    }
+    else if ( rec == NULL )
+    {
+        rc = RC( rcAlign, rcIterator, rcAccessing, rcParam, rcNull );
+    }
+    else
+    {
+        if ( self->current_spot_group == NULL )
         {
-            rc = RC( rcAlign, rcIterator, rcAccessing, rcOffset, rcDone );
-            self->last_rec_reached = true;
+            rc = SILENT_RC( rcAlign, rcIterator, rcAccessing, rcOffset, rcDone );
+        }
+        else
+        {
+            if ( self->current_rec != NULL )
+            {
+                /* remove the 'previous' current-rec! */
+                DLListPopHead ( &self->current_spot_group->records );
+                PlacementRecordWhack ( self->current_rec );
+                self->depth--;
+                self->current_rec = NULL;
+            }
+
+            self->current_rec = ( PlacementRecord * )DLListHead( &self->current_spot_group->records );
+            if ( self->current_rec == NULL )
+            {
+                rc = SILENT_RC( rcAlign, rcIterator, rcAccessing, rcOffset, rcDone );
+            }
+            else
+            {
+                *rec = self->current_rec;
+            }
         }
     }
     return rc;

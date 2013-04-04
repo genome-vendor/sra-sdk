@@ -162,7 +162,7 @@ static __inline__ void SHA_64b_Append(struct SHA64bitState *ctx, const uint8_t d
         memcpy(&ctx->W[ctx->cur], &data[i], n);
         ctx->cur += n;
         if (ctx->cur == 128) {
-#if BYTE_ORDER == LITTLE_ENDIAN
+#if __BYTE_ORDER == __LITTLE_ENDIAN
             uint64_t W[16];
             
             for (j = 0; j != 16; ++j)
@@ -185,7 +185,7 @@ static __inline__ void SHA_64b_Finish(const struct SHA64bitState *ctx, uint64_t 
     
     memset(W, 0, sizeof(W));
     for (j = 0; j != n; ++j) {
-#if BYTE_ORDER == LITTLE_ENDIAN
+#if __BYTE_ORDER == __LITTLE_ENDIAN
         W[j] = bswap_64(((const uint64_t *)ctx->W)[j]);
 #else
         W[j] = ((const uint64_t *)ctx->W)[j];
@@ -226,7 +226,7 @@ void CC SHA384StateFinish(SHA384State *ctx, uint8_t hash[48])
     uint64_t H[8];
 
     SHA_64b_Finish(ctx, H);
-#if BYTE_ORDER == LITTLE_ENDIAN
+#if __BYTE_ORDER == __LITTLE_ENDIAN
     {
         H[0] = bswap_64(H[0]);
         H[1] = bswap_64(H[1]);
@@ -254,7 +254,7 @@ void CC SHA512StateFinish(SHA512State *ctx, uint8_t hash[64])
     uint64_t H[8];
 
     SHA_64b_Finish(ctx, H);
-#if BYTE_ORDER == LITTLE_ENDIAN
+#if __BYTE_ORDER == __LITTLE_ENDIAN
     {
         H[0] = bswap_64(H[0]);
         H[1] = bswap_64(H[1]);

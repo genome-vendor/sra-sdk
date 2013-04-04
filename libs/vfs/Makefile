@@ -30,27 +30,36 @@ MODULE = libs/vfs
 INT_LIBS = \
 
 EXT_LIBS = \
+	libsrapath \
 	libvfs
 
 ALL_LIBS = \
 	$(INT_LIBS) \
 	$(EXT_LIBS)
 
+TEST_TOOLS = \
+	wb-test-srapath
+
 include $(TOP)/build/Makefile.env
+
+RWORKDIR=$(TOP)/$(MODULE)
 
 #-------------------------------------------------------------------------------
 # outer targets
 #
-all std: makedirs
+all std: vers-includes
 	@ $(MAKE_CMD) $(TARGDIR)/std
 
-$(INT_LIBS): makedirs
+$(INT_LIBS): vers-includes
 	@ $(MAKE_CMD) $(ILIBDIR)/$@
 
-$(EXT_LIBS): makedirs
+$(EXT_LIBS): vers-includes
 	@ $(MAKE_CMD) $(LIBDIR)/$@
 
-.PHONY: all std $(ALL_LIBS)
+$(TEST_TOOLS): makedirs
+	@ $(MAKE_CMD) $(TEST_BINDIR)/$@
+
+.PHONY: all std $(ALL_LIBS) $(TEST_TOOLS)
 
 #-------------------------------------------------------------------------------
 # std
@@ -62,9 +71,17 @@ $(TARGDIR)/std: \
 .PHONY: $(TARGDIR)/std
 
 #-------------------------------------------------------------------------------
+# vers-includes
+#
+$(TARGDIR)/vers-includes: $(addsuffix .vers.h,$(EXT_LIBS))
+
+.PHONY: $(TARGDIR)/vers-includes
+
+#-------------------------------------------------------------------------------
 # clean
 #
 clean: stdclean
+	@ rm -f $(addsuffix *,$(addprefix $(TEST_BINDIR)/,$(TEST_TOOLS)))
 
 .PHONY: clean
 
@@ -77,6 +94,21 @@ tag: \
 .PHONY: tag $(addsuffix _tag,$(ALL_LIBS))
 
 #-------------------------------------------------------------------------------
+# srapath library
+#
+$(LIBDIR)/libsrapath: $(LIBDIR)/libsrapath.$(LIBX)
+
+SRAPATH_SRC = \
+	srapath-stub \
+	srapath
+
+SRAPATH_OBJ = \
+	$(addsuffix .$(LOBX),$(SRAPATH_SRC))
+
+$(LIBDIR)/libsrapath.$(LIBX): $(SRAPATH_OBJ)
+	$(LD) --slib --vers $(SRCDIR) -o $@ $^
+
+#-------------------------------------------------------------------------------
 # vfs
 #
 $(LIBDIR)/libvfs: $(addprefix $(LIBDIR)/libvfs.,$(LIBEXT))
@@ -84,19 +116,21 @@ $(LIBDIR)/libvfs: $(addprefix $(LIBDIR)/libvfs.,$(LIBEXT))
 VFS_SRC = \
 	path \
 	syspath \
-	manager 
+	manager  \
+	resolver
 
 VFS_OBJ = \
 	$(addsuffix .$(LOBX),$(VFS_SRC))
 
 VFS_LIB = \
+	-skurl \
 	-dkrypto \
 	-dkfg \
 	-dkfs \
 	-dklib
 
 $(LIBDIR)/libvfs.$(SHLX): $(VFS_OBJ)
-	$(LD) --dlib --vers $(SRCDIR) -o $@ $^ $(VFS_LIB)
+	$(LD) --dlib --vers $(SRCDIR) -o $@ $^ -ssrapath $(VFS_LIB)
 
 $(LIBDIR)/libvfs.$(LIBX): $(VFS_OBJ)
 	$(LD) --slib --vers $(SRCDIR) -o $@ $^ $(VFS_LIB)
@@ -104,5 +138,30 @@ $(LIBDIR)/libvfs.$(LIBX): $(VFS_OBJ)
 libvfs_tag:
 	@ $(TOP)/build/tag-module.sh $(MODULE) libvfs $(VFS_OBJ)
 
+#-------------------------------------------------------------------------------
+# white-box test
+#
+TEST_SRC = \
+	$(VFS_SRC) \
+	srapath-stub \
+	wb-test-srapath
+
+TEST_OBJ = \
+	$(addsuffix .$(OBJX),$(TEST_SRC)) 
+
+TEST_LIB = \
+    -skapp \
+    -svdb \
+    -skdb \
+	-skfs \
+	-skurl \
+	-skrypto \
+	-skfg \
+	-skproc \
+	-sktst \
+	-sklib 
+
+$(TEST_BINDIR)/wb-test-srapath: $(TEST_OBJ)
+	$(LP) --exe -o $@ $^ $(TEST_LIB) 
 
 

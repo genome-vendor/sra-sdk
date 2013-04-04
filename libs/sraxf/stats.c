@@ -30,6 +30,7 @@
 #include <vdb/table.h>
 #include <klib/data-buffer.h>
 #include <klib/text.h>
+#include <klib/printf.h>
 #include <klib/rc.h>
 #include <kdb/meta.h>
 #include <os-native.h> /* strncasecmp */
@@ -65,31 +66,30 @@ typedef struct sra_meta_stats_data_struct
 } sra_meta_stats_data;
 
 static
-rc_t sra_meta_stats_node_read(KMDataNode* node, void* value, size_t sz)
+rc_t sra_meta_stats_node_read(KMDataNode* node, void* value)
 {
-    rc_t rc = 0;
-    size_t num_read, remaining;
-
-    if( (rc = KMDataNodeRead(node, 0, value, sz, &num_read, &remaining)) == 0 &&
-        num_read == sz && remaining == 0 ) {
-    } else if( rc == 0 && num_read == 0 && remaining == 0 ) {
-        memset(value, 0, sz);
-    } else {
-        rc = rc ? rc : RC(rcVDB, rcFunction, rcUpdating, rcMetadata, rcCorrupt);
+    rc_t rc = KMDataNodeReadAsU64(node, value);
+    if ( rc != 0 )
+    {
+        if ( GetRCState ( rc ) == rcIncomplete && GetRCObject ( rc ) == rcTransfer )
+        {
+            * ( uint64_t* ) value = 0;
+            rc = 0;
+        }
     }
     return rc;
 }
 
 static
 rc_t sra_meta_stats_node_group_update(sra_meta_stats_node_group* g,
-                                      const int64_t spot_id, const uint32_t spot_len,
-                                      const uint32_t bio_spot_len, const uint32_t cmp_spot_len)
+    const int64_t spot_id, const uint32_t spot_len,
+    const uint32_t bio_spot_len, const uint32_t cmp_spot_len)
 {
     rc_t rc = 0;
     uint64_t u64;
     int64_t i64;
 
-    if( (rc = sra_meta_stats_node_read(g->node_spot_count, &u64, sizeof(u64))) == 0 ) {
+    if( (rc = sra_meta_stats_node_read(g->node_spot_count, &u64)) == 0 ) {
         if( u64 + 1 < u64 ) {
             rc = RC(rcVDB, rcFunction, rcUpdating, rcMetadata, rcOutofrange);
         } else {
@@ -99,7 +99,7 @@ rc_t sra_meta_stats_node_group_update(sra_meta_stats_node_group* g,
             rc = KMDataNodeWriteB64(g->node_spot_count, &u64);
         }
     }
-    if( (rc = sra_meta_stats_node_read(g->node_base_count, &u64, sizeof(u64))) == 0 ) {
+    if( (rc = sra_meta_stats_node_read(g->node_base_count, &u64)) == 0 ) {
         if( u64 + 1 < u64 ) {
             rc = RC(rcVDB, rcFunction, rcUpdating, rcMetadata, rcOutofrange);
         } else {
@@ -107,7 +107,7 @@ rc_t sra_meta_stats_node_group_update(sra_meta_stats_node_group* g,
             rc = KMDataNodeWriteB64(g->node_base_count, &u64);
         }
     }
-    if( (rc = sra_meta_stats_node_read(g->node_bio_base_count, &u64, sizeof(u64))) == 0 ) {
+    if( (rc = sra_meta_stats_node_read(g->node_bio_base_count, &u64)) == 0 ) {
         if( u64 + bio_spot_len < u64 ) {
             rc = RC(rcVDB, rcFunction, rcUpdating, rcMetadata, rcOutofrange);
         } else {
@@ -116,7 +116,7 @@ rc_t sra_meta_stats_node_group_update(sra_meta_stats_node_group* g,
         }
     }
     if( g->node_cmp_base_count != NULL ) {
-        if( (rc = sra_meta_stats_node_read(g->node_cmp_base_count, &u64, sizeof(u64))) == 0 ) {
+        if( (rc = sra_meta_stats_node_read(g->node_cmp_base_count, &u64)) == 0 ) {
             if( u64 + cmp_spot_len < u64 ) {
                 rc = RC(rcVDB, rcFunction, rcUpdating, rcMetadata, rcOutofrange);
             } else {
@@ -125,14 +125,16 @@ rc_t sra_meta_stats_node_group_update(sra_meta_stats_node_group* g,
             }
         }
     }
-    if( (rc = sra_meta_stats_node_read(g->node_spot_max, &i64, sizeof(i64))) == 0 ) {
+    if( (rc = sra_meta_stats_node_read(g->node_spot_max, &i64)) == 0 ) {
         if( i64 == 0 || i64 < spot_id ) {
-            rc = KMDataNodeWriteB64(g->node_spot_max, &spot_id);
+            i64 = spot_id;
+            rc = KMDataNodeWriteB64(g->node_spot_max, &i64);
         }
     }
-    if( (rc = sra_meta_stats_node_read(g->node_spot_min, &i64, sizeof(i64))) == 0 ) {
+    if( (rc = sra_meta_stats_node_read(g->node_spot_min, &i64)) == 0 ) {
         if( i64 == 0 || i64 > spot_id ) {
-            rc = KMDataNodeWriteB64(g->node_spot_min, &spot_id);
+            i64 = spot_id;
+            rc = KMDataNodeWriteB64(g->node_spot_min, &i64);
         }
     }
     return rc;
@@ -152,9 +154,6 @@ rc_t sra_meta_stats_node_group_open(KMDataNode* parent, sra_meta_stats_node_grou
         if( compressed ) { 
             rc = KMDataNodeOpenNodeUpdate(parent, &g->node_cmp_base_count, "CMP_BASE_COUNT");
         }
-        if( rc == 0 ) {
-            rc = sra_meta_stats_node_group_update(g, 0, 0, 0, 0);
-        }
     }
     return rc;
 }
@@ -162,13 +161,15 @@ rc_t sra_meta_stats_node_group_open(KMDataNode* parent, sra_meta_stats_node_grou
 static
 void sra_meta_stats_node_group_release(sra_meta_stats_node_group* g)
 {
-    if( g ) {
+    if ( g != NULL )
+    {
         KMDataNodeRelease(g->node_spot_count);
         KMDataNodeRelease(g->node_base_count);
         KMDataNodeRelease(g->node_bio_base_count);
         KMDataNodeRelease(g->node_cmp_base_count);
         KMDataNodeRelease(g->node_spot_min);
         KMDataNodeRelease(g->node_spot_max);
+        memset ( g, 0, sizeof * g );
     }
 }
 
@@ -218,72 +219,120 @@ rc_t sra_meta_stats_make(sra_meta_stats_data** self, VTable* vtbl, bool has_spot
 
 static
 rc_t CC sra_meta_stats_update(sra_meta_stats_data* self,
-                              const int64_t spot_id, const uint32_t spot_len,
-                              const uint32_t bio_spot_len, const uint32_t cmp_spot_len,
-                              bool has_grp, const char* grp, uint64_t grp_len)
+    const int64_t spot_id, const uint32_t spot_len,
+    const uint32_t bio_spot_len, const uint32_t cmp_spot_len,
+    bool has_grp, const char* grp, uint64_t grp_len)
 {
     rc_t rc = 0;
-    const uint32_t max_grp_qty = 100000;
+    const uint32_t max_grp_qty = 10000;
 
     assert(self != NULL);
 
     rc = sra_meta_stats_node_group_update(&self->table, spot_id, spot_len, bio_spot_len, cmp_spot_len);
-    if( has_grp && self->grp_qty <= max_grp_qty && rc == 0 ) {
+    if( has_grp && self->grp_qty <= max_grp_qty && rc == 0 )
+    {
         /* an empty group is considered default */
         if( grp_len == 0 || grp == NULL || grp[0] == '\0' ||
-            (grp_len == 7 && strncasecmp("default", grp, grp_len) == 0 ) ) {
+            (grp_len == 7 && strncasecmp("default", grp, grp_len) == 0 ) )
+        {
             rc = sra_meta_stats_node_group_update(&self->dflt_grp, spot_id, spot_len, bio_spot_len, cmp_spot_len);
-        } else {
-            if( self->last_grp_name == NULL ||
-                self->last_grp_name_len != grp_len || strncmp(self->last_grp_name, grp, grp_len) != 0 ) {
-                if( ++self->grp_qty > max_grp_qty ) {
-                    KMDataNode* n;
-                    if( (rc = KMetadataOpenNodeUpdate(self->meta, &n, "STATS")) == 0 ) {
-                        sra_meta_stats_node_group_release(&self->dflt_grp);
-                        sra_meta_stats_node_group_release(&self->last_grp);
-                        KMDataNodeDropChild(n, "SPOT_GROUP");
-                        KMDataNodeRelease(n);
-                        memset(&self->dflt_grp, 0, sizeof(self->dflt_grp));
-                        memset(&self->last_grp, 0, sizeof(self->last_grp));
-                        free(self->last_grp_name);
-                        self->last_grp_name = NULL;
-                    }
-                } else {
-                    if( self->last_grp_name_sz < (grp_len + 1) ) {
-                        char* p = realloc(self->last_grp_name, grp_len + 2);
-                        if( p == NULL ) {
-                            rc = RC(rcVDB, rcFunction, rcConstructing, rcMemory, rcExhausted);
-                        } else {
-                            self->last_grp_name = p;
-                            self->last_grp_name_sz = grp_len + 2;
-                        }
-                    }
-                    if( rc == 0 ) {
-                        KMDataNode *ngrps;
-                        const char* safe = grp;
+        }
+        else
+        {
+            size_t i;
+            KMDataNode* n;
+            const KMDataNode *cn;
+            bool new_group, unsafe;
 
-                        char* p = self->last_grp_name;
-                        self->last_grp_name_len = grp_len;
-                        string_copy(self->last_grp_name, self->last_grp_name_sz, grp, grp_len);
-                        /* replace all '/' for '\' in spot_group */
-                        while( *p != '\0' && (p = strchr(p, '/')) != NULL ) {
-                            safe = self->last_grp_name;
-                            *p++ = '\\';
-                        }
-                        sra_meta_stats_node_group_release(&self->last_grp);
-                        if( (rc = KMetadataOpenNodeUpdate(self->meta, &ngrps, "STATS/SPOT_GROUP/%.*s", grp_len, safe)) == 0 ) {
-                            rc = sra_meta_stats_node_group_open(ngrps, &self->last_grp, self->compressed);
-                            if( rc == 0 && grp != safe ) {
-                                string_copy(self->last_grp_name, self->last_grp_name_sz, grp, grp_len);
-                                rc = KMDataNodeWriteAttr(ngrps, "name", self->last_grp_name);
-                            }
-                            KMDataNodeRelease(ngrps);
-                        }
-                    }
+            /* look for cached node */
+            if ( self->last_grp_name != NULL &&
+                 self->last_grp_name_len == grp_len &&
+                 strncmp(self->last_grp_name, grp, grp_len) == 0 )
+            {
+                return sra_meta_stats_node_group_update(&self->last_grp, spot_id, spot_len, bio_spot_len, cmp_spot_len);
+            }
+
+            /* release cached group */
+            sra_meta_stats_node_group_release(&self->last_grp);
+
+            /* realloc cached name */
+            if ( self->last_grp_name == NULL || grp_len >= self->last_grp_name_sz )
+            {
+                char *p = realloc ( self -> last_grp_name, grp_len + 1 );
+                if ( p == NULL )
+                    return RC ( rcXF, rcFunction, rcExecuting, rcMemory, rcExhausted );
+    
+                self -> last_grp_name = p;
+                self -> last_grp_name_sz = grp_len + 1;
+            }
+
+            /* sanitize name */
+            for ( unsafe = false, i = 0; i < grp_len; ++ i )
+            {
+                if ( ( self -> last_grp_name [ i ] = grp [ i ] ) == '/' )
+                {
+                    unsafe = true;
+                    self -> last_grp_name [ i ] = '\\';
                 }
             }
-            if( rc == 0 && self->last_grp_name != NULL ) {
-                rc = sra_meta_stats_node_group_update(&self->last_grp, spot_id, spot_len, bio_spot_len, cmp_spot_len);
+            self -> last_grp_name_len = i;
+            self -> last_grp_name [ i ] = 0;
+
+            /* look for new group */
+            new_group = true;
+            rc = KMetadataOpenNodeRead(self->meta, &cn, "STATS/SPOT_GROUP/%s", self->last_grp_name );
+            if ( rc == 0 )
+            {
+                new_group = false;
+                KMDataNodeRelease ( cn );
+            }
+
+            /* detect abusive quantity of nodes */
+            if ( new_group && ++self->grp_qty > max_grp_qty )
+            {
+                rc = KMetadataOpenNodeUpdate(self->meta, &n, "STATS");
+                if( rc == 0 )
+                {
+                    sra_meta_stats_node_group_release(&self->dflt_grp);
+                    KMDataNodeDropChild(n, "SPOT_GROUP");
+                    KMDataNodeRelease(n);
+                    free(self->last_grp_name);
+                    self->last_grp_name = NULL;
+                }
+                return rc;
+            }
+
+            /* create new or cache existing group */
+            rc = KMetadataOpenNodeUpdate(self->meta, &n, "STATS/SPOT_GROUP/%s", self->last_grp_name );
+            if ( rc == 0 )
+            {
+                rc = sra_meta_stats_node_group_open(n, &self->last_grp, self->compressed);
+                if (rc == 0 && new_group) {
+                    if (unsafe)
+                    {
+                        char value [ 512 ], *v = value;
+                        if ( grp_len >= sizeof value )
+                            v = malloc ( grp_len + 1 );
+                        if ( v == NULL )
+                            rc = RC ( rcXF, rcFunction, rcExecuting, rcMemory, rcExhausted );
+                        else
+                        {
+                            rc = string_printf ( v, grp_len + 1, NULL, "%.*s", ( uint32_t ) grp_len, grp );
+                            assert ( rc == 0 );
+                            rc = KMDataNodeWriteAttr(n, "name", v);
+                            if ( rc == 0 )
+                                memcpy ( self->last_grp_name, grp, grp_len );
+                            if ( v != value )
+                                free ( v );
+                        }
+                    }
+                    if ( rc == 0 )
+                        rc = sra_meta_stats_node_group_update(&self->last_grp, 0, 0, 0, 0);
+                }
+                KMDataNodeRelease(n);
+
+                if( rc == 0 )
+                    rc = sra_meta_stats_node_group_update(&self->last_grp, spot_id, spot_len, bio_spot_len, cmp_spot_len);
             }
         }
     }

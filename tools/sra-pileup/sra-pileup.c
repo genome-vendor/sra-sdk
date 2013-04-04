@@ -26,53 +26,35 @@
 
 #include "sra-pileup.vers.h"
 
-#include <kapp/main.h>
-#include <kapp/args.h>
+#include "cmdline_cmn.h"
+#include "reref.h"
 
-#include <klib/text.h>
+#include <kapp/main.h>
+
 #include <klib/out.h>
-#include <klib/rc.h>
-#include <klib/log.h>
-#include <klib/vector.h>
 #include <klib/printf.h>
+#include <klib/report.h>
 
 #include <kfs/file.h>
-#include <kfs/directory.h>
 #include <kfs/buffile.h>
 #include <kfs/bzip.h>
 #include <kfs/gzip.h>
 
-#include <sra/srapath.h>
+#include <insdc/sra.h>
 #include <vdb/manager.h>
-#include <align/iterator.h>
-#include <align/reference.h>
+#include <vdb/schema.h>
+#include <sra/sraschema.h>
 #include <align/manager.h>
 
 #include <os-native.h>
-#include <strtol.h>
 #include <sysalloc.h>
 
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-#include <ctype.h>
-#include <assert.h>
-
-typedef uint8_t align_tab_select;
-enum { primary_ats = 1, secondary_ats = 2, evidence_ats = 4 };
-
-
-#define OPTION_REF     "aligned-region"
-#define ALIAS_REF      "r"
+#define COL_QUALITY "QUALITY"
+#define COL_REF_ORIENTATION "REF_ORIENTATION"
+#define COL_READ_FILTER "READ_FILTER"
 
 #define OPTION_MINMAPQ "minmapq"
 #define ALIAS_MINMAPQ  "q"
-
-#define OPTION_OUTF    "outfile"
-#define ALIAS_OUTF     "o"
-
-#define OPTION_TABLE   "table"
-#define ALIAS_TABLE    "t"
 
 #define OPTION_DUPS    "duplicates"
 #define ALIAS_DUPS     "d"
@@ -83,11 +65,20 @@ enum { primary_ats = 1, secondary_ats = 2, evidence_ats = 4 };
 #define OPTION_NOQUAL  "noqual"
 #define ALIAS_NOQUAL   "n"
 
-#define OPTION_GZIP    "gzip"
-#define ALIAS_GZIP     "g"
+#define OPTION_NOSKIP  "noskip"
+#define ALIAS_NOSKIP   "s"
 
-#define OPTION_BZIP    "bzip2"
-#define ALIAS_BZIP     "b"
+#define OPTION_SHOWID  "showid"
+#define ALIAS_SHOWID   "i"
+
+#define OPTION_SPOTGRP "spotgroups"
+#define ALIAS_SPOTGRP  "p"
+
+#define OPTION_SEQNAME "seqname"
+#define ALIAS_SEQNAME  "e"
+
+#define OPTION_REREF   "report-ref"
+#define ALIAS_REREF    NULL
 
 enum
 {
@@ -96,50 +87,64 @@ enum
     sra_pileup_detect = 2
 };
 
-
-static const char * ref_usage[] = { "Filter by position on genome.",
-                                    "Name can either be file specific name",
-                                    "(ex: \"chr1\" or \"1\").",
-                                    "\"from\" and \"to\" are 1-based coordinates",
-                                    NULL };
-
 static const char * minmapq_usage[] = { "Minimum mapq-value, ", 
                                         "alignments with lower mapq",
                                         "will be ignored (default=0)", NULL };
 
-static const char * outf_usage[] = { "Output will be written to this file",
-                                     "instead of std-out", NULL };
-
-static const char * table_usage[] = { "What table to use (p/s/e)", 
-                                      "p..primary alignments, ",
-                                      "s..secondary alignments", 
-                                      "e..evidence alignments", 
-                                      "(default=p)", NULL };
-
-static const char * dups_usage[] = { "Don't ignore dups (0/1)", NULL };
+static const char * dups_usage[] = { "process duplicates ( 0...off/1..on )", NULL };
 
 static const char * mode_usage[] = { "Output-format: 0...samtools, 1...just counters",
                                      "(default=0)", NULL };
 
 static const char * noqual_usage[] = { "Omit qualities in output", NULL };
 
-static const char * gzip_usage[] = { "Compress output using gzip", NULL };
+static const char * noskip_usage[] = { "Does not skip reference-regions without alignments", NULL };
 
-static const char * bzip_usage[] = { "Compress output using bzip2", NULL };
+static const char * showid_usage[] = { "Shows alignment-id for every base", NULL };
+
+static const char * spotgrp_usage[] = { "divide by spotgroups", NULL };
+
+static const char * seqname_usage[] = { "use original seq-name", NULL };
+
+static const char * reref_usage[] = { "report used references", NULL };
 
 OptDef MyOptions[] =
 {
     /*name,           alias,         hfkt, usage-help,    maxcount, needs value, required */
-    { OPTION_REF,     ALIAS_REF,     NULL, ref_usage,     0,        true,        false },
     { OPTION_MINMAPQ, ALIAS_MINMAPQ, NULL, minmapq_usage, 1,        true,        false },
-    { OPTION_OUTF,    ALIAS_OUTF,    NULL, outf_usage,    1,        true,        false },
-    { OPTION_TABLE,   ALIAS_TABLE,   NULL, table_usage,   1,        true,        false },
     { OPTION_DUPS,    ALIAS_DUPS,    NULL, dups_usage,    1,        true,        false },
     { OPTION_MODE,    ALIAS_MODE,    NULL, mode_usage,    1,        true,        false },
     { OPTION_NOQUAL,  ALIAS_NOQUAL,  NULL, noqual_usage,  1,        false,       false },
-    { OPTION_GZIP,    ALIAS_GZIP,    NULL, gzip_usage,    1,        false,       false },
-    { OPTION_BZIP,    ALIAS_BZIP,    NULL, bzip_usage,    1,        false,       false }
+    { OPTION_NOSKIP,  ALIAS_NOSKIP,  NULL, noskip_usage,  1,        false,       false },
+    { OPTION_SHOWID,  ALIAS_SHOWID,  NULL, showid_usage,  1,        false,       false },
+    { OPTION_SPOTGRP, ALIAS_SPOTGRP, NULL, spotgrp_usage, 1,        false,       false },
+    { OPTION_SEQNAME, ALIAS_SEQNAME, NULL, seqname_usage, 1,        false,       false },
+    { OPTION_REREF,   ALIAS_REREF,   NULL, reref_usage,   1,        false,       false }
 };
+
+/* =========================================================================================== */
+
+typedef struct pileup_options
+{
+    common_options cmn;
+    bool process_dups;
+    bool omit_qualities;
+    bool no_skip;
+    bool show_id;
+    bool div_by_spotgrp;
+    bool use_seq_name;
+    bool reref;
+    uint32_t minmapq;
+    uint32_t output_mode;
+    uint32_t source_table;
+} pileup_options;
+
+
+typedef struct pileup_callback_data
+{
+    const AlignMgr *almgr;
+    pileup_options *options;
+} pileup_callback_data;
 
 
 /* =========================================================================================== */
@@ -169,7 +174,7 @@ static rc_t get_str_option( const Args *args, const char *name, const char ** re
 
 
 static rc_t get_uint32_option( const Args *args, const char *name,
-                               uint32_t *res, const uint32_t def )
+                        uint32_t *res, const uint32_t def )
 {
     const char * s;
     rc_t rc = get_str_option( args, name, &s );
@@ -196,74 +201,40 @@ static rc_t get_bool_option( const Args *args, const char *name, bool *res, cons
     return rc;
 }
 
-/* =========================================================================================== */
 
-typedef struct pileup_options
-{
-    bool ignore_dups;
-    bool omit_qualities;
-    bool gzip_output;
-    bool bzip_output;
-    uint32_t minmapq;
-    uint32_t output_mode;
-    align_tab_select tab_select;
-    const char * output_file;
-} pileup_options;
+/* =========================================================================================== */
 
 
 static rc_t get_pileup_options( Args * args, pileup_options *opts )
 {
-    rc_t rc = get_uint32_option( args, OPTION_MINMAPQ, &opts->minmapq, 0 );
+    rc_t rc = get_common_options( args, &opts->cmn );
 
     if ( rc == 0 )
-    {
-        rc = get_str_option( args, OPTION_OUTF, &opts->output_file );
-    }
+        rc = get_uint32_option( args, OPTION_MINMAPQ, &opts->minmapq, 0 );
 
     if ( rc == 0 )
-    {
          rc = get_uint32_option( args, OPTION_MODE, &opts->output_mode, sra_pileup_samtools );
-    }
 
     if ( rc == 0 )
-    {
-        rc = get_bool_option( args, OPTION_DUPS, &opts->ignore_dups, true );
-    }
+        rc = get_bool_option( args, OPTION_DUPS, &opts->process_dups, false );
 
     if ( rc == 0 )
-    {
         rc = get_bool_option( args, OPTION_NOQUAL, &opts->omit_qualities, false );
-    }
 
     if ( rc == 0 )
-    {
-        rc = get_bool_option( args, OPTION_GZIP, &opts->gzip_output, false );
-    }
+        rc = get_bool_option( args, OPTION_NOSKIP, &opts->no_skip, false );
 
     if ( rc == 0 )
-    {
-        rc = get_bool_option( args, OPTION_BZIP, &opts->bzip_output, false );
-    }
+        rc = get_bool_option( args, OPTION_SHOWID, &opts->show_id, false );
 
     if ( rc == 0 )
-    {
-        const char * table2use = NULL;
-        rc = get_str_option( args, OPTION_TABLE, &table2use );
-        opts->tab_select = primary_ats;
-        if ( rc == 0 && table2use != NULL )
-        {
-            size_t l = string_size ( table2use );
-            opts->tab_select = 0;
-            if ( ( string_chr ( table2use, l, 'p' ) != NULL )||
-                 ( string_chr ( table2use, l, 'P' ) != NULL ) )
-            { opts->tab_select |= primary_ats; };
+        rc = get_bool_option( args, OPTION_SPOTGRP, &opts->div_by_spotgrp, false );
 
-            if ( ( string_chr ( table2use, l, 's' ) != NULL )||
-                 ( string_chr ( table2use, l, 'S' ) != NULL ) )
-            { opts->tab_select |= secondary_ats; };
-        }
-    }
+    if ( rc == 0 )
+        rc = get_bool_option( args, OPTION_SEQNAME, &opts->use_seq_name, false );
 
+    if ( rc == 0 )
+        rc = get_bool_option( args, OPTION_REREF, &opts->reref, false );
 
     return rc;
 }
@@ -275,8 +246,6 @@ struct {
     KFile* kfile;
     uint64_t pos;
 } g_out_writer = { NULL };
-
-pileup_options g_options;
 
 const char UsageDefaultName[] = "sra-pileup";
 
@@ -305,12 +274,13 @@ rc_t CC Usage ( const Args * args )
 
     UsageSummary ( progname );
     KOutMsg ( "Options:\n" );
-    HelpOptionLine ( ALIAS_REF, OPTION_REF, "name[:from-to]", ref_usage );
+    print_common_helplines();
     HelpOptionLine ( ALIAS_MINMAPQ, OPTION_MINMAPQ, "min. mapq", minmapq_usage );
-    HelpOptionLine ( ALIAS_OUTF, OPTION_OUTF, "output-file", outf_usage );
-    HelpOptionLine ( ALIAS_TABLE, OPTION_TABLE, "table", table_usage );
     HelpOptionLine ( ALIAS_DUPS, OPTION_DUPS, "duplicates", dups_usage );
     HelpOptionLine ( ALIAS_MODE, OPTION_MODE, "output-modes", mode_usage );
+    HelpOptionLine ( ALIAS_SPOTGRP, OPTION_SPOTGRP, "spotgroups-modes", spotgrp_usage );
+    HelpOptionLine ( ALIAS_SEQNAME, OPTION_SEQNAME, "org. seq-name", seqname_usage );
+    HelpOptionLine ( ALIAS_REREF, OPTION_REREF, "report reference", reref_usage );
     HelpOptionsStandard ();
     HelpVersion ( fullpath, KAppVersion() );
     return rc;
@@ -347,27 +317,6 @@ ver_t CC KAppVersion ( void )
     N (0x4E)  n (0x6E)  <--> 0xF
 ***************************************/
 
-INSDC_4na_bin ascii_2_4na_tab[] = 
-{
-/*         0x0  0x01 0x02 0x03 0x04 0x05 0x06 0x07 0x08 0x09 0x0A 0x0B 0x0C 0x0D 0x0E 0x0F */
-/* 0x00 */ 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-/* 0x10 */ 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-/* 0x20 */ 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-/* 0x30 */ 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-/* 0x40 */ 0,   0x1, 0xE, 0x2, 0xD, 0,   0,   0x4, 0xB, 0,   0,   0xC, 0,   0x3, 0,   0,
-/* 0x50 */ 0,   0,   0x5, 0x6, 0x8, 0,   0x7, 0x9, 0,   0xA, 0,   0,   0,   0,   0,   0,
-/* 0x60 */ 0,   0x1, 0xE, 0x2, 0xD, 0,   0,   0x4, 0xB, 0,   0,   0xC, 0,   0x3, 0,   0,
-/* 0x70 */ 0,   0,   0x5, 0x6, 0x8, 0,   0x7, 0x9, 0,   0xA, 0,   0,   0,   0,   0,   0,
-/* 0x80 */ 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-/* 0x90 */ 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-/* 0xA0 */ 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-/* 0xB0 */ 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-/* 0xC0 */ 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-/* 0xD0 */ 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-/* 0xE0 */ 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-/* 0xF0 */ 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0
-};
-
 
 char _4na_2_ascii_tab[] =
 {
@@ -379,26 +328,12 @@ char _4na_2_ascii_tab[] =
 
 static char _4na_to_ascii( INSDC_4na_bin c, bool reverse )
 {
-    uint8_t mask = ( reverse ? 0x10 : 0 );
-    return _4na_2_ascii_tab[ ( ( c | mask ) & 0x1F ) ];
+    return _4na_2_ascii_tab[ ( c & 0x0F ) | ( reverse ? 0x10 : 0 ) ];
 }
 
-/*
-static char * dup_2_ascii( const INSDC_4na_bin * b, size_t len, bool reverse )
-{
-    char * res = malloc( len + 1 );
-    if ( res != NULL )
-    {
-        uint32_t i;
-        for ( i = 0; i < len; ++i )
-            res[ i ] = _4na_to_ascii( b[ i ], reverse );
-        res[ i ] = 0;
-    }
-    return res;
-}
-*/
 
 /* =========================================================================================== */
+
 
 typedef struct dyn_string
 {
@@ -555,7 +490,9 @@ static rc_t set_stdout_to( bool gzip, bool bzip2, const char * filename, size_t 
         KDirectory *dir;
         rc = KDirectoryNativeDir( &dir );
         if ( rc != 0 )
+        {
             LOGERR( klogInt, rc, "KDirectoryNativeDir() failed" );
+        }
         else
         {
             KFile *of;
@@ -592,7 +529,9 @@ static rc_t set_stdout_to( bool gzip, bool bzip2, const char * filename, size_t 
                     g_out_writer.org_data = KOutDataGet();
                     rc = KOutHandlerSet( BufferedWriter, &g_out_writer );
                     if ( rc != 0 )
+                    {
                         LOGERR( klogInt, rc, "KOutHandlerSet() failed" );
+                    }
                 }
                 KFileRelease( of );
             }
@@ -626,396 +565,6 @@ static rc_t CC write_to_FILE( void *f, const char *buffer, size_t bytes, size_t 
 /* =========================================================================================== */
 
 
-static int cmp_pchar( const char * a, const char * b )
-{
-    int res = 0;
-    if ( ( a != NULL )&&( b != NULL ) )
-    {
-        size_t len_a = string_size( a );
-        size_t len_b = string_size( b );
-        res = string_cmp ( a, len_a, b, len_b, ( len_a < len_b ) ? len_b : len_a );
-    }
-    return res;
-}
-
-
-/* =========================================================================================== */
-
-
-typedef struct range
-{
-    uint32_t start;
-    uint32_t end;
-} range;
-
-
-static range * make_range( const uint64_t start, const uint64_t end )
-{
-    range *res = calloc( sizeof *res, 1 );
-    if ( res != NULL )
-    {
-        res->start = start;
-        res->end = end;
-    }
-    return res;
-}
-
-
-static int cmp_range( const range * a, const range * b )
-{
-
-    int res = ( a->start - b->start );
-    if ( res == 0 )
-        res = ( a->end - b->end );
-    return res;
-}
-
-
-static bool range_overlapp( const range * a, const range * b )
-{
-    return ( !( ( b->end < a->start ) || ( b->start > a->end ) ) );
-}
-
-
-/* =========================================================================================== */
-
-typedef struct reference_ranges
-{
-    BSTNode node;
-    const char * name;
-    Vector ranges;
-} reference_ranges;
-
-
-static reference_ranges * make_reference_ranges( const char *name )
-{
-    reference_ranges *res = calloc( sizeof *res, 1 );
-    if ( res != NULL )
-    {
-        res->name = string_dup_measure ( name, NULL );
-        VectorInit ( &res->ranges, 0, 5 );
-    }
-    return res;
-}
-
-
-static int CC cmp_range_wrapper( const void *item, const void *n )
-{   return cmp_range( item, n ); }
-
-static rc_t add_reference_range( reference_ranges * self, const uint64_t start, const uint64_t end )
-{
-    rc_t rc = 0;
-    range *r = make_range( start, end );
-    if ( r == NULL )
-        rc = RC( rcApp, rcNoTarg, rcConstructing, rcMemory, rcExhausted );
-    else
-    {
-        rc = VectorInsert ( &self->ranges, r, NULL, cmp_range_wrapper );
-        if ( rc != 0 )
-            free( r );
-    }
-    return rc;
-}
-
-
-#define RR_NAME  1
-#define RR_START 2
-#define RR_END   3
-
-
-static void put_c( char *s, size_t size, size_t *dst, char c )
-{
-    if ( *dst < ( size - 1 ) )
-        s[ *dst ] = c;
-    (*dst)++;
-}
-
-static void finish_txt( char *s, size_t size, size_t *dst )
-{
-    if ( *dst > size )
-        s[ size - 1 ] = 0;
-    else
-        s[ *dst ] = 0;
-    *dst = 0;
-}
-
-static uint64_t finish_num( char *s, size_t size, size_t *dst )
-{
-    uint64_t res = 0;
-    char *endp;
-    finish_txt( s, size, dst );
-    res = strtou64( s, &endp, 10 );
-    return res;
-}
-
-
-/* s = refname:1000-2000 */
-static void parse_definition( const char *s, char * name, size_t len,
-                              uint64_t *start, uint64_t *end )
-{
-    size_t n = string_size( s );
-
-    *start = 0;
-    *end   = 0;
-    name[ 0 ] = 0;
-    if ( n > 0 )
-    {
-        size_t i, st, dst = 0;
-        char tmp[ 32 ];
-        st = RR_NAME;
-        for ( i = 0; i < n; ++i )
-        {
-            char c = s[ i ];
-            switch( st )
-            {
-                case RR_NAME  : if ( c == ':' )
-                                {
-                                    finish_txt( name, len, &dst );
-                                    st = RR_START;
-                                }
-                                else
-                                {
-                                    put_c( name, len, &dst, c );
-                                }
-                                break;
-
-                case RR_START : if ( c == '-' )
-                                {
-                                    *start = finish_num( tmp, sizeof tmp, &dst );
-                                    st = RR_END;
-                                }
-                                else if ( ( c >= '0' )&&( c <= '9' ) )
-                                {
-                                    put_c( tmp, sizeof tmp, &dst, c );
-                                }
-                                break;
-
-                case RR_END   : if ( ( c >= '0' )&&( c <= '9' ) )
-                                {
-                                    put_c( tmp, sizeof tmp, &dst, c );
-                                }
-                                break;
-            }
-        }
-        switch( st )
-        {
-            case RR_NAME  : finish_txt( name, len, &dst );
-                            break;
-
-            case RR_START : *start = finish_num( tmp, sizeof tmp, &dst );
-                            break;
-
-            case RR_END   : *end = finish_num( tmp, sizeof tmp, &dst );
-                            break;
-        }
-    }
-}
-
-
-static void CC release_range_wrapper( void * item, void * data )
-{    free( item ); }
-
-
-static void free_reference_ranges( reference_ranges * self )
-{
-    free( (void*)self->name );
-    VectorWhack ( &self->ranges, release_range_wrapper, NULL );
-    free( self );
-}
-
-
-static void check_reference_ranges( reference_ranges * self )
-{
-    uint32_t n = VectorLength( &self->ranges );
-    uint32_t i = 0;
-    range *a = NULL;
-    while ( i < n )
-    {
-        range *b = VectorGet ( &self->ranges, i );
-        bool remove = false;
-        if ( a != NULL )
-        {
-            remove = range_overlapp( a, b );
-            if ( remove )
-            {
-                range *r;
-                a->end = b->end;
-                VectorRemove ( &self->ranges, i, (void**)&r );
-                free( r );
-                n--;
-            }
-        }
-        if ( !remove )
-        {
-            a = b;
-            ++i;
-        }
-    }
-}
-
-
-
-/* =========================================================================================== */
-
-
-static int CC reference_vs_pchar_wrapper( const void *item, const BSTNode *n )
-{
-    const reference_ranges * r = ( const reference_ranges * )n;
-    return cmp_pchar( (const char *)item, r->name );
-}
-
-static reference_ranges * find_reference_ranges( BSTree * tree, const char * name )
-{
-    return ( reference_ranges * ) BSTreeFind ( tree, name, reference_vs_pchar_wrapper );
-}
-
-static int CC ref_vs_ref_wrapper( const BSTNode *item, const BSTNode *n )
-{
-   const reference_ranges * a = ( const reference_ranges * )item;
-   const reference_ranges * b = ( const reference_ranges * )n;
-   return cmp_pchar( a->name, b->name );
-}
-
-static rc_t add_refrange( BSTree * tree, const char * name, const uint64_t start, const uint64_t end )
-{
-    rc_t rc;
-
-    reference_ranges * ref = find_reference_ranges( tree, name );
-    if ( ref == NULL )
-    {
-        ref = make_reference_ranges( name );
-        if ( ref == NULL )
-            rc = RC( rcApp, rcNoTarg, rcConstructing, rcMemory, rcExhausted );
-        else
-            rc = add_reference_range( ref, start, end );
-        if ( rc == 0 )
-            rc = BSTreeInsert ( tree, (BSTNode *)ref, ref_vs_ref_wrapper );
-        if ( rc != 0 )
-            free_reference_ranges( ref );
-    }
-    else
-    {
-        rc = add_reference_range( ref, start, end );
-    }
-    return rc;
-}
-
-
-static rc_t parse_and_add( BSTree * tree, const char * s )
-{
-    uint64_t start, end;
-    char name[ 64 ];
-    parse_definition( s, name, sizeof name, &start, &end );
-    if ( name[ 0 ] == 0 )
-        return RC( rcApp, rcNoTarg, rcConstructing, rcMemory, rcExhausted );
-    else
-        return add_refrange( tree, name, start, end );
-}
-
-
-static void CC check_refrange_wrapper( BSTNode *n, void *data )
-{   check_reference_ranges( ( reference_ranges * ) n ); }
-
-static void check_refranges( BSTree * tree )
-{   BSTreeForEach ( tree, false, check_refrange_wrapper, NULL ); }
-
-static void CC release_ref_wrapper( BSTNode *n, void * data )
-{    free_reference_ranges( ( reference_ranges * ) n ); }
-
-static void free_refranges( BSTree * tree )
-{    BSTreeWhack ( tree, release_ref_wrapper, NULL ); }
-
-static rc_t init_refranges( BSTree * tree, Args * args )
-{
-    uint32_t count;
-    rc_t rc;
-
-    BSTreeInit( tree );
-    rc = ArgsOptionCount( args, OPTION_REF, &count );
-    if ( rc != 0 )
-        LOGERR( klogInt, rc, "ArgsOptionCount() failed" );
-    else
-    {
-        uint32_t i;
-        for ( i = 0; i < count && rc == 0; ++i )
-        {
-            const char * s;
-            rc = ArgsOptionValue( args, OPTION_REF, i, &s );
-            if ( rc != 0 )
-                LOGERR( klogInt, rc, "ArgsOptionValue() failed" );
-            else
-                rc = parse_and_add( tree, s );
-        }
-    }
-    return rc;
-}
-
-
-static void CC count_refrange_wrapper( BSTNode *n, void *data )
-{   
-    reference_ranges * rr = ( reference_ranges * ) n;
-    uint32_t * count = ( uint32_t * ) data;
-    *count += VectorLength( &(rr->ranges) );
-}
-
-static uint32_t count_refranges( BSTree * tree )
-{
-    uint32_t res = 0;
-    BSTreeForEach ( tree, false, count_refrange_wrapper, &res );
-    return res;
-}
-
-
-typedef struct foreach_refrange_func
-{
-    rc_t ( CC * on_range ) ( const char * name, uint32_t start, uint32_t end, void *data );
-    const char * name;
-    void * data;
-    rc_t rc;
-} foreach_refrange_func;
-
-
-static void CC foreach_range_vector_wrapper( void *item, void *data )
-{
-    range * r = ( range * ) item;
-    foreach_refrange_func * func = ( foreach_refrange_func * )data;
-
-    if ( func->rc == 0 )
-    {
-        func->rc = func->on_range( func->name, r->start, r->end, func->data );
-    }
-}
-
-
-static void CC foreach_refrange_tree_wrapper( BSTNode *n, void *data )
-{   
-    reference_ranges * rr = ( reference_ranges * ) n;
-    foreach_refrange_func * func = ( foreach_refrange_func * )data;
-
-    if ( func->rc == 0 )
-    {
-        func->name = rr->name;
-        VectorForEach ( &(rr->ranges), false, foreach_range_vector_wrapper, data );
-    }
-}
-
-
-static rc_t foreach_refrange( BSTree * tree,
-    rc_t ( CC * on_range ) ( const char * name, uint32_t start, uint32_t end, void *data ), 
-    void *data )
-{
-    foreach_refrange_func func;
-
-    func.on_range = on_range;
-    func.data = data;
-    func.rc = 0;
-    BSTreeForEach ( tree, false, foreach_refrange_tree_wrapper, &func );
-    return func.rc;
-}
-
-
-/* =========================================================================================== */
-
 typedef struct tool_rec tool_rec;
 struct tool_rec
 {
@@ -1035,7 +584,9 @@ static rc_t read_base_and_len( struct VCursor const *curs,
     uint32_t column_idx;
     rc_t rc = VCursorGetColumnIdx ( curs, &column_idx, name );
     if ( rc != 0 )
+    {
         LOGERR( klogInt, rc, "VCursorGetColumnIdx() failed" );
+    }
     else
     {
         uint32_t elem_bits, boff, len_intern;
@@ -1043,7 +594,9 @@ static rc_t read_base_and_len( struct VCursor const *curs,
         rc = VCursorCellDataDirect ( curs, row_id, column_idx, 
                                      &elem_bits, &ptr, &boff, &len_intern );
         if ( rc != 0 )
+        {
             LOGERR( klogInt, rc, "VCursorCellDataDirect() failed" );
+        }
         else
         {
             if ( len != NULL ) *len = len_intern;
@@ -1060,17 +613,20 @@ static rc_t CC populate_tooldata( void *obj, const PlacementRecord *placement,
         void *data )
 {
     tool_rec * rec = ( tool_rec * ) obj;
+    pileup_callback_data *cb_data = ( pileup_callback_data * )data;
     rc_t rc = 0;
 
     rec->quality = NULL;
-    if ( g_options.ignore_dups > 0 )
+    if ( !cb_data->options->process_dups )
     {
-        const uint32_t * samflags;
-        uint32_t samflags_len;
-        rc = read_base_and_len( curs, "SAM_FLAGS", placement->id, (const void **)&samflags, &samflags_len );
+        const uint8_t * read_filter;
+        uint32_t read_filter_len;
+        rc = read_base_and_len( curs, COL_READ_FILTER, placement->id,
+                                (const void **)&read_filter, &read_filter_len );
         if ( rc == 0 )
         {
-            if ( ( *samflags & 1024 ) == 1024 )
+            if ( ( *read_filter == SRA_READ_FILTER_REJECT )||
+                 ( *read_filter == SRA_READ_FILTER_CRITERIA ) )
             {
                 rc = RC( rcAlign, rcType, rcAccessing, rcId, rcIgnored );
             }
@@ -1080,19 +636,21 @@ static rc_t CC populate_tooldata( void *obj, const PlacementRecord *placement,
     if ( rc == 0 )
     {
         const bool * orientation;
-        rc = read_base_and_len( curs, "REF_ORIENTATION", placement->id, (const void **)&orientation, NULL );
+        rc = read_base_and_len( curs, COL_REF_ORIENTATION, placement->id,
+                                (const void **)&orientation, NULL );
         if ( rc == 0 )
         {
             rec->reverse = *orientation;
         }
     }
 
-    if ( rc == 0 && g_options.omit_qualities == 0 )
+    if ( rc == 0 && !cb_data->options->omit_qualities )
     {
         const uint8_t * quality;
         uint32_t quality_len;
 
-        rc = read_base_and_len( curs, "CLIPPED_QUALITY", placement->id, (const void **)&quality, &quality_len );
+        rc = read_base_and_len( curs, COL_QUALITY, placement->id,
+                                (const void **)&quality, &quality_len );
         if ( rc == 0 )
         {
             rec->quality = ( uint8_t * )rec;
@@ -1104,28 +662,31 @@ static rc_t CC populate_tooldata( void *obj, const PlacementRecord *placement,
 }
 
 
-static size_t CC alloc_size( struct VCursor const *curs, int64_t row_id, void *data )
+static rc_t CC alloc_size( struct VCursor const *curs, int64_t row_id, size_t * size, void *data )
 {
+    rc_t rc = 0;
     tool_rec * rec;
-    size_t res = ( sizeof *rec );
+    pileup_callback_data *cb_data = ( pileup_callback_data * )data;
+    *size = ( sizeof *rec );
 
-    if ( g_options.omit_qualities == 0 )
+    if ( !cb_data->options->omit_qualities )
     {
         uint32_t q_len;
-        rc_t rc = read_base_and_len( curs, "CLIPPED_QUALITY", row_id, NULL, &q_len );
+        rc = read_base_and_len( curs, COL_QUALITY, row_id, NULL, &q_len );
         if ( rc == 0 )
         {
-            res += q_len;
+            *size += q_len;
         }
     }
-    return res;
+    return rc;
 }
 
 
 static rc_t walk_ref_position( ReferenceIterator *ref_iter,
                                const PlacementRecord *rec,
                                dyn_string *line,
-                               char * qual )
+                               char * qual,
+                               pileup_options *options )
 {
     rc_t rc = 0;
     INSDC_coord_zero seq_pos;
@@ -1133,7 +694,7 @@ static rc_t walk_ref_position( ReferenceIterator *ref_iter,
     tool_rec *xrec = ( tool_rec * ) PlacementRecordCast ( rec, placementRecordExtension1 );
     bool reverse = xrec->reverse;
 
-    if ( g_options.omit_qualities == 0 )
+    if ( !options->omit_qualities )
     {
         *qual = xrec->quality[ seq_pos ];
     }
@@ -1155,30 +716,20 @@ static rc_t walk_ref_position( ReferenceIterator *ref_iter,
         rc = add_string_2_dyn_string( line, s );
     }
 
-    if ( ( state & align_iter_skip ) == align_iter_skip )
+    if ( rc == 0 )
     {
-        if ( rc == 0 )
+        if ( ( state & align_iter_skip ) == align_iter_skip )
         {
             rc = add_char_2_dyn_string( line, '*' );
+            if ( !options->omit_qualities )
+                *qual = xrec->quality[ seq_pos + 1 ];
         }
-        if ( g_options.omit_qualities == 0 )
-        {
-            *qual = xrec->quality[ seq_pos + 1 ];
-        }
-    }
-    else
-    {
-        if ( rc == 0 )
+        else
         {
             if ( ( state & align_iter_match ) == align_iter_match )
-            {
                 rc = add_char_2_dyn_string( line, ( reverse ? ',' : '.' ) );
-            }
             else
-            {
-    /*                **ptr = _4na_to_ascii( state & 0x0F, reverse ); */
-                rc = add_char_2_dyn_string( line, ( reverse ? tolower( state & 0xFF ) : ( state & 0xFF ) ) );
-            }
+                rc = add_char_2_dyn_string( line, _4na_to_ascii( state, reverse ) );
         }
     }
 
@@ -1191,8 +742,7 @@ static rc_t walk_ref_position( ReferenceIterator *ref_iter,
         rc = print_2_dyn_string( line, "+%u", n );
         for ( i = 0; i < n && rc == 0; ++i )
         {
-/*                    (*ptr)[ i ] = _4na_to_ascii( bases[ i ], reverse ); */
-            rc = add_char_2_dyn_string( line, ( reverse ? tolower( bases[ i ] ) : bases[ i ] ) );
+            rc = add_char_2_dyn_string( line, _4na_to_ascii( bases[ i ], reverse ) );
         }
     }
 
@@ -1214,9 +764,62 @@ static rc_t walk_ref_position( ReferenceIterator *ref_iter,
     }
 
     if ( ( ( state & align_iter_last ) == align_iter_last )&& ( rc == 0 ) )
-    {
         rc = add_char_2_dyn_string( line, '$' );
+
+    if ( options->show_id )
+        rc = print_2_dyn_string( line, "(%lu:%u-%u/%u)",
+                                 rec->id, rec->pos + 1, rec->pos + rec->len, seq_pos );
+
+    return rc;
+}
+
+
+static rc_t walk_alignments( ReferenceIterator *ref_iter,
+                             dyn_string *line,
+                             dyn_string *qualities,
+                             pileup_options *options )
+{
+    uint32_t depth = 0;
+    rc_t rc;
+    do
+    {
+        const PlacementRecord *rec;
+        rc = ReferenceIteratorNextPlacement ( ref_iter, &rec );
+        if ( rc == 0 )
+            rc = walk_ref_position( ref_iter, rec, line, &( qualities->data[ depth++ ] ), options );
+    } while ( rc == 0 );
+
+    if ( !options->omit_qualities )
+    {
+        uint32_t i;
+        add_char_2_dyn_string( line, '\t' );
+        for ( i = 0; i < depth; ++i )
+        {
+            add_char_2_dyn_string( line, qualities->data[ i ] + 33 );
+        }
     }
+
+    if ( GetRCState( rc ) == rcDone ) { rc = 0; }
+    return rc;
+}
+
+
+static rc_t walk_spot_groups( ReferenceIterator *ref_iter,
+                             dyn_string *line,
+                             dyn_string *qualities,
+                             pileup_options *options )
+{
+    rc_t rc;
+    do
+    {
+        rc = ReferenceIteratorNextSpotGroup ( ref_iter, NULL, NULL );
+        if ( rc == 0 )
+            add_char_2_dyn_string( line, '\t' );
+        if ( rc == 0 )
+            rc = walk_alignments( ref_iter, line, qualities, options );
+    } while ( rc == 0 );
+
+    if ( GetRCState( rc ) == rcDone ) { rc = 0; }
     return rc;
 }
 
@@ -1225,7 +828,7 @@ static rc_t walk_position( ReferenceIterator *ref_iter,
                            const char * refname,
                            dyn_string *line,
                            dyn_string *qualities,
-                           bool skip_empty )
+                           pileup_options *options )
 {
     INSDC_coord_zero pos;
     uint32_t depth;
@@ -1239,7 +842,7 @@ static rc_t walk_position( ReferenceIterator *ref_iter,
             LOGERR( klogInt, rc, "ReferenceIteratorNextPos() failed" );
         }
     }
-    else if ( ( depth > 0 )||( !skip_empty ) )
+    else if ( ( depth > 0 )||( options->no_skip ) )
     {
         rc = expand_dyn_string( line, ( 5 * depth ) + 100 );
         if ( rc == 0 )
@@ -1247,47 +850,26 @@ static rc_t walk_position( ReferenceIterator *ref_iter,
             rc = expand_dyn_string( qualities, depth + 100 );
             if ( rc == 0 )
             {
-                rc_t rc1 = 0;
                 char c = _4na_to_ascii( base, false );
 
                 reset_dyn_string( line );
-                rc = print_2_dyn_string( line, "%s\t%u\t%c\t%u\t", refname, pos + 1, c, depth );
+                rc = print_2_dyn_string( line, "%s\t%u\t%c\t%u", refname, pos + 1, c, depth );
                 if ( rc == 0 )
                 {
                     if ( depth > 0 )
                     {
-                        const PlacementRecord *rec;
-                        rc1 = ReferenceIteratorNextPlacement ( ref_iter, &rec );
-                        if ( rc1 == 0 )
-                        {
-                            uint32_t i = 0;
-
-                            /* this is the 3rd level of walking the reference-iterator: 
-                               visiting each aligned base on this reference-position */
-                            while ( rc1 == 0 )
-                            {
-                                rc1 = walk_ref_position( ref_iter, rec, line, &( qualities->data[ i++ ] ) );
-                                if ( rc1 == 0 )
-                                {
-                                    rc1 = ReferenceIteratorNextPlacement ( ref_iter, &rec );
-                                }
-                            }
-
-                            if ( g_options.omit_qualities == 0 )
-                            {
-                                rc1 = add_char_2_dyn_string( line, '\t' );
-                                for ( i = 0; i < depth && rc1 == 0; ++i )
-                                {
-                                    rc1 = add_char_2_dyn_string( line, qualities->data[ i ] + 33 );
-                                }
-                            }
-                        }
+                        rc = walk_spot_groups( ref_iter, line, qualities, options );
                     }
-                    if ( GetRCState( rc1 ) == rcDone ) { rc = 0; } else { rc = rc1; }
+
                     if ( rc == 0 )
                     {
-                        /* only one OUTMSG(()) per line... */
-                        OUTMSG(( "%s\n", line->data ));
+                        /* only one KOutMsg() per line... */
+                        KOutMsg( "%s\n", line->data );
+                    }
+
+                    if ( GetRCState( rc ) == rcDone )
+                    {
+                        rc = 0;
                     }
                 }
             }
@@ -1297,9 +879,40 @@ static rc_t walk_position( ReferenceIterator *ref_iter,
 }
 
 
+static rc_t walk_reference_window( ReferenceIterator *ref_iter,
+                                   const char * refname,
+                                   dyn_string *line,
+                                   dyn_string *qualities,
+                                   pileup_options *options )
+{
+    rc_t rc = 0;
+    while ( rc == 0 )
+    {
+        rc = ReferenceIteratorNextPos ( ref_iter, !options->no_skip );
+        if ( rc != 0 )
+        {
+            if ( GetRCState( rc ) != rcDone )
+            {
+                LOGERR( klogInt, rc, "ReferenceIteratorNextPos() failed" );
+            }
+        }
+        else
+        {
+            rc = walk_position( ref_iter, refname, line, qualities, options );
+        }
+        if ( rc == 0 )
+        {
+            rc = Quitting();
+        }
+    }
+    if ( GetRCState( rc ) == rcDone ) rc = 0;
+    return rc;
+}
+
+
 static rc_t walk_reference( ReferenceIterator *ref_iter,
                             const char * refname,
-                            bool skip_empty )
+                            pileup_options *options )
 {
     dyn_string line;
     rc_t rc = allocated_dyn_string ( &line, 4096 );
@@ -1314,18 +927,19 @@ static rc_t walk_reference( ReferenceIterator *ref_iter,
                 rc = Quitting ();
                 if ( rc == 0 )
                 {
-                    /* this is the 2nd level of walking the reference-iterator: 
-                       visiting each position (that has alignments) on this reference */
-                    rc = ReferenceIteratorNextPos ( ref_iter, skip_empty );
+                    INSDC_coord_zero first_pos;
+                    INSDC_coord_len len;
+                    rc = ReferenceIteratorNextWindow ( ref_iter, &first_pos, &len );
                     if ( rc != 0 )
                     {
                         if ( GetRCState( rc ) != rcDone )
-                            LOGERR( klogInt, rc, "ReferenceIteratorNextPos() failed" );
+                        {
+                            LOGERR( klogInt, rc, "ReferenceIteratorNextWindow() failed" );
+                        }
                     }
                     else
                     {
-                        rc = walk_position( ref_iter, refname, &line, &qualities, skip_empty );
-                        if ( GetRCState( rc ) == rcDone ) { rc = 0; }
+                        rc = walk_reference_window( ref_iter, refname, &line, &qualities, options );
                     }
                 }
             }
@@ -1333,13 +947,148 @@ static rc_t walk_reference( ReferenceIterator *ref_iter,
         }
         free_dyn_string ( &line );
     }
+    if ( GetRCState( rc ) == rcDone ) rc = 0;
     return rc;
 }
 
 
+/* =========================================================================================== */
+
+
+typedef struct pileup_counters
+{
+    uint32_t matches;
+    uint32_t mismatches[ 4 ];
+    uint32_t inserts;
+    uint32_t deletes;
+    dyn_string ins;
+    dyn_string del;
+} pileup_counters;
+
+
+static void clear_counters( pileup_counters * counters )
+{
+    uint32_t i;
+
+    counters->matches = 0;
+    for ( i = 0; i < 4; ++i )
+        counters->mismatches[ i ] = 0;
+    counters->inserts = 0;
+    counters->deletes = 0;
+    reset_dyn_string( &(counters->ins) );
+    reset_dyn_string( &(counters->del) );
+}
+
+static rc_t prepare_counters( pileup_counters * counters )
+{
+    rc_t rc = allocated_dyn_string ( &(counters->ins), 1024 );
+    if ( rc == 0 )
+    {
+        rc = allocated_dyn_string ( &(counters->del), 1024 );
+    }
+    return rc;
+}
+
+
+static void finish_counters( pileup_counters * counters )
+{
+    free_dyn_string ( &(counters->ins) );
+    free_dyn_string ( &(counters->del) );
+}
+
+
+static void walk_counter_state( ReferenceIterator *ref_iter,
+                                pileup_counters * counters )
+{
+    INSDC_coord_zero seq_pos;
+    int32_t state = ReferenceIteratorState ( ref_iter, &seq_pos );
+
+    if ( ( state & align_iter_invalid ) == align_iter_invalid )
+    {
+        return;
+    }
+
+    if ( ( state & align_iter_skip ) != align_iter_skip )
+    {
+        if ( ( state & align_iter_match ) == align_iter_match )
+        {
+            (counters->matches)++;
+        }
+        else
+        {
+            char c = _4na_to_ascii( state, false );
+            switch( c )
+            {
+                case 'A' : ( counters->mismatches[ 0 ] )++; break;
+                case 'C' : ( counters->mismatches[ 1 ] )++; break;
+                case 'G' : ( counters->mismatches[ 2 ] )++; break;
+                case 'T' : ( counters->mismatches[ 3 ] )++; break;
+            }
+        }
+    }
+
+    if ( ( state & align_iter_insert ) == align_iter_insert )
+    {
+        const INSDC_4na_bin *bases;
+        uint32_t i, n = ReferenceIteratorBasesInserted ( ref_iter, &bases );
+        (counters->inserts) += n;
+        for ( i = 0; i < n; ++i )
+        {
+            add_char_2_dyn_string( &(counters->ins), _4na_to_ascii( bases[ i ], false ) );
+        }
+    }
+
+    if ( ( state & align_iter_delete ) == align_iter_delete )
+    {
+        const INSDC_4na_bin *bases;
+        INSDC_coord_zero ref_pos;
+        uint32_t n = ReferenceIteratorBasesDeleted ( ref_iter, &ref_pos, &bases );
+        if ( bases != NULL )
+        {
+            uint32_t i;
+            (counters->deletes) += n;
+            for ( i = 0; i < n; ++i )
+            {
+                add_char_2_dyn_string( &(counters->del), _4na_to_ascii( bases[ i ], false ) );
+            }
+            free( (void *) bases );
+        }
+    }
+}
+
+
+static void print_counter_line( const char * refname,
+                                INSDC_coord_zero pos,
+                                INSDC_4na_bin base,
+                                uint32_t depth,
+                                pileup_counters * counters )
+{
+    char c = _4na_to_ascii( base, false );
+    KOutMsg( "%s\t%u\t%c\t%u\t", refname, pos + 1, c, depth );
+    if ( counters->matches > 0 )
+        KOutMsg( "%u=", counters->matches );
+    if ( counters->mismatches[ 0 ] > 0 )
+        KOutMsg( "%uA", counters->mismatches[ 0 ] );
+    if ( counters->mismatches[ 1 ] > 0 )
+        KOutMsg( "%uC", counters->mismatches[ 1 ] );
+    if ( counters->mismatches[ 2 ] > 0 )
+        KOutMsg( "%uG", counters->mismatches[ 2 ] );
+    if ( counters->mismatches[ 3 ] > 0 )
+        KOutMsg( "%uT", counters->mismatches[ 3 ] );
+    if ( counters->inserts > 0 )
+    {
+        KOutMsg( "%uI%s", counters->inserts, counters->ins.data );
+    }
+    if ( counters->deletes > 0 )
+    {
+        KOutMsg( "%uD%s", counters->deletes, counters->del.data );
+    }
+    KOutMsg( "\n" );
+}
+
 static rc_t walk_counter_position( ReferenceIterator *ref_iter,
-                           const char * refname,
-                           bool skip_empty )
+                                   const char * refname,
+                                   pileup_counters * counters )
 {
     INSDC_coord_zero pos;
     uint32_t depth;
@@ -1353,30 +1102,21 @@ static rc_t walk_counter_position( ReferenceIterator *ref_iter,
             LOGERR( klogInt, rc, "ReferenceIteratorNextPos() failed" );
         }
     }
-    else if ( ( depth > 0 )||( !skip_empty ) )
+    else if ( depth > 0 )
     {
-        rc_t rc1 = 0;
         const PlacementRecord *rec;
-        char c = _4na_to_ascii( base, false );
-        uint32_t matches = 0;
-        OUTMSG(( "%s\t%u\t%c\t%u", refname, pos + 1, c, depth ));
-
-        rc1 = ReferenceIteratorNextPlacement ( ref_iter, &rec );
+        rc_t rc1 = ReferenceIteratorNextPlacement ( ref_iter, &rec );
+        clear_counters( counters );
         while ( rc1 == 0 )
         {
-            INSDC_coord_zero seq_pos;
-            int32_t state = ReferenceIteratorState ( ref_iter, &seq_pos );
-            if ( ( state & align_iter_match ) == align_iter_match )
-            {
-                matches++;
-            }
+            walk_counter_state( ref_iter, counters );
             rc1 = ReferenceIteratorNextPlacement ( ref_iter, &rec );
         }
 
         if ( GetRCState( rc1 ) == rcDone ) { rc = 0; } else { rc = rc1; }
         if ( rc == 0 )
         {
-            OUTMSG(( "\t%u\n", matches ));
+            print_counter_line( refname, pos, base, depth, counters );
         }
     } 
     return rc;
@@ -1387,29 +1127,39 @@ static rc_t walk_just_counters( ReferenceIterator *ref_iter,
                                 const char * refname,
                                 bool skip_empty )
 {
-    rc_t rc = 0;
-    while ( rc == 0 )
+    pileup_counters counters;
+    rc_t rc = prepare_counters( &counters );
+    if ( rc == 0 )
     {
-        rc = Quitting ();
-        if ( rc == 0 )
+        while ( rc == 0 )
         {
-            /* this is the 2nd level of walking the reference-iterator: 
-               visiting each position (that has alignments) on this reference */
-            rc = ReferenceIteratorNextPos ( ref_iter, skip_empty );
-            if ( rc != 0 )
+            rc = Quitting ();
+            if ( rc == 0 )
             {
-                if ( GetRCState( rc ) != rcDone )
-                    LOGERR( klogInt, rc, "ReferenceIteratorNextPos() failed" );
-            }
-            else
-            {
-                rc = walk_counter_position( ref_iter, refname, skip_empty );
-                if ( GetRCState( rc ) == rcDone ) { rc = 0; }
+                /* this is the 2nd level of walking the reference-iterator: 
+                   visiting each position (that has alignments) on this reference */
+                rc = ReferenceIteratorNextPos ( ref_iter, skip_empty );
+                if ( rc != 0 )
+                {
+                    if ( GetRCState( rc ) != rcDone )
+                    {
+                        LOGERR( klogInt, rc, "ReferenceIteratorNextPos() failed" );
+                    }
+                }
+                else
+                {
+                    rc = walk_counter_position( ref_iter, refname, &counters );
+                    if ( GetRCState( rc ) == rcDone ) { rc = 0; }
+                }
             }
         }
+        finish_counters( &counters );
     }
-    return 0;
+    return rc;
 }
+
+
+/* =========================================================================================== */
 
 
 enum { fsm_INIT = 0, fsm_DATA, fsm_GAP1, fsm_GAP2 };
@@ -1437,7 +1187,7 @@ static void fsm_finalize( fsm_context * ctx, INSDC_coord_zero pos )
     switch( ctx->state )
     {
         case fsm_DATA : ;
-        case fsm_GAP1 : OUTMSG(( "%s:%u-%u\n", ctx->refname, ctx->start, pos )); break;
+        case fsm_GAP1 : KOutMsg( "%s:%u-%u\n", ctx->refname, ctx->start, pos ); break;
     }
 }
 
@@ -1467,7 +1217,7 @@ static void fsm_gap2( fsm_context * ctx )
 {
     if ( ctx->state == fsm_GAP1 )
     {
-        OUTMSG(( "%s:%u-%u\n", ctx->refname, ctx->start, ctx->end ));
+        KOutMsg( "%s:%u-%u\n", ctx->refname, ctx->start, ctx->end );
     }
     ctx->state = fsm_GAP2;
 }
@@ -1505,10 +1255,10 @@ static void fsm_show( fsm_context * ctx, INSDC_coord_zero pos )
 {
     switch( ctx->state )
     {
-        case fsm_INIT : OUTMSG(( "[%u].INIT\n", pos )); break;
-        case fsm_DATA : OUTMSG(( "[%u].DATA\n", pos )); break;
-        case fsm_GAP1 : OUTMSG(( "[%u].GAP1\n", pos )); break;
-        case fsm_GAP2 : OUTMSG(( "[%u].GAP2\n", pos )); break;
+        case fsm_INIT : KOutMsg( "[%u].INIT\n", pos ); break;
+        case fsm_DATA : KOutMsg( "[%u].DATA\n", pos ); break;
+        case fsm_GAP1 : KOutMsg( "[%u].GAP1\n", pos ); break;
+        case fsm_GAP2 : KOutMsg( "[%u].GAP2\n", pos ); break;
     }
 }
 #endif
@@ -1533,7 +1283,9 @@ static rc_t walk_and_detect( ReferenceIterator *ref_iter,
             if ( rc != 0 )
             {
                 if ( GetRCState( rc ) != rcDone )
+                {
                     LOGERR( klogInt, rc, "ReferenceIteratorNextPos() failed" );
+                }
             }
             else
             {
@@ -1553,7 +1305,10 @@ static rc_t walk_and_detect( ReferenceIterator *ref_iter,
 }
 
 
-static rc_t walk_ref_iter( ReferenceIterator *ref_iter, bool skip_empty )
+/* =========================================================================================== */
+
+
+static rc_t walk_ref_iter( ReferenceIterator *ref_iter, pileup_options *options )
 {
     rc_t rc = 0;
     while( rc == 0 )
@@ -1561,497 +1316,494 @@ static rc_t walk_ref_iter( ReferenceIterator *ref_iter, bool skip_empty )
         /* this is the 1st level of walking the reference-iterator: 
            visiting each (requested) reference */
         struct ReferenceObj const * refobj;
-        rc = ReferenceIteratorNextReference( ref_iter, &refobj );
+
+        rc = ReferenceIteratorNextReference( ref_iter, NULL, NULL, &refobj );
         if ( rc == 0 )
         {
-            const char * refname = NULL;
-            rc = ReferenceObj_Name( refobj, &refname );
-            if ( rc == 0 )
+            if ( refobj != NULL )
             {
-                switch( g_options.output_mode )
+                const char * refname = NULL;
+                if ( options->use_seq_name )
+                    rc = ReferenceObj_Name( refobj, &refname );
+                else
+                    rc = ReferenceObj_SeqId( refobj, &refname );
+                if ( rc == 0 )
                 {
-                    case sra_pileup_samtools : rc = walk_reference( ref_iter, refname, skip_empty );
-                                               break;
+                    switch( options->output_mode )
+                    {
+                        case sra_pileup_samtools : rc = walk_reference( ref_iter, refname, options );
+                                                   break;
 
-                    case sra_pileup_counters : rc = walk_just_counters( ref_iter, refname, skip_empty );
-                                               break;
+                        case sra_pileup_counters : rc = walk_just_counters( ref_iter, refname, true );
+                                                   break;
 
-                    case sra_pileup_detect : rc = walk_and_detect( ref_iter, refname, 200 );
-                                             break;
+                        case sra_pileup_detect : rc = walk_and_detect( ref_iter, refname, 200 );
+                                                 break;
 
-                    default : OUTMSG(( "unknown output-mode '%u'\n", g_options.output_mode ));
-                              break;
+                        default : KOutMsg( "unknown output-mode '%u'\n", options->output_mode );
+                                  break;
 
+                    }
+                    if ( GetRCState( rc ) == rcDone ) { rc = 0; }
                 }
-                if ( GetRCState( rc ) == rcDone ) { rc = 0; }
+                else
+                {
+                    if ( options->use_seq_name )
+                    {
+                        LOGERR( klogInt, rc, "ReferenceObj_Name() failed" );
+                    }
+                    else
+                    {
+                        LOGERR( klogInt, rc, "ReferenceObj_SeqId() failed" );
+                    }
+                }
             }
-            else
-                LOGERR( klogInt, rc, "ReferenceObj_Name() failed" );
         }
         else
         {
             if ( GetRCState( rc ) != rcDone )
+            {
                 LOGERR( klogInt, rc, "ReferenceIteratorNextReference() failed" );
+            }
         }
     }
     if ( GetRCState( rc ) == rcDone ) { rc = 0; }
+    if ( GetRCState( rc ) == rcCanceled ) { rc = 0; }
+    /* RC ( rcExe, rcProcess, rcExecuting, rcProcess, rcCanceled ); */
     return rc;
 }
+
 
 /* =========================================================================================== */
 
 
-typedef struct prepare_ctx
-{
-    ReferenceIterator *ref_iter;
-    const VDatabase *db;
-    const ReferenceList *reflist;
-    uint32_t minmapq;
-    align_tab_select select;
-} prepare_ctx;
-
-
-static rc_t add_quality_and_orientation( const VTable *tbl, const VCursor ** cursor )
+static rc_t add_quality_and_orientation( const VTable *tbl, const VCursor ** cursor, bool omit_qualities )
 {
     rc_t rc = VTableCreateCursorRead ( tbl, cursor );
     if ( rc != 0 )
+    {
         LOGERR( klogInt, rc, "VTableCreateCursorRead() failed" );
+    }
 
-    if ( rc == 0 && g_options.omit_qualities == 0 )
+    if ( rc == 0 && !omit_qualities )
     {
         uint32_t quality_idx;
-        rc = VCursorAddColumn ( *cursor, &quality_idx, "CLIPPED_QUALITY" );
+        rc = VCursorAddColumn ( *cursor, &quality_idx, COL_QUALITY );
         if ( rc != 0 )
+        {
             LOGERR( klogInt, rc, "VCursorAddColumn(QUALITY) failed" );
+        }
     }
 
     if ( rc == 0 )
     {
         uint32_t ref_orientation_idx;
-        rc = VCursorAddColumn ( *cursor, &ref_orientation_idx, "REF_ORIENTATION" );
+        rc = VCursorAddColumn ( *cursor, &ref_orientation_idx, COL_REF_ORIENTATION );
         if ( rc != 0 )
+        {
             LOGERR( klogInt, rc, "VCursorAddColumn(REF_ORIENTATION) failed" );
+        }
     }
 
     if ( rc == 0 )
     {
-        uint32_t sam_flags_idx;
-        rc = VCursorAddColumn ( *cursor, &sam_flags_idx, "SAM_FLAGS" );
+        uint32_t read_filter_idx;
+        rc = VCursorAddColumn ( *cursor, &read_filter_idx, COL_READ_FILTER );
         if ( rc != 0 )
-            LOGERR( klogInt, rc, "VCursorAddColumn(SAM_FLAGS) failed" );
+        {
+            LOGERR( klogInt, rc, "VCursorAddColumn(READ_FILTER) failed" );
+        }
     }
     return rc;
 }
 
 
-static rc_t prepare_prim_cursor( const VDatabase *db, const VCursor ** cursor )
+static rc_t prepare_prim_cursor( const VDatabase *db, const VCursor ** cursor, bool omit_qualities )
 {
     const VTable *tbl;
     rc_t rc = VDatabaseOpenTableRead ( db, &tbl, "PRIMARY_ALIGNMENT" );
     if ( rc != 0 )
+    {
         LOGERR( klogInt, rc, "VDatabaseOpenTableRead(PRIMARY_ALIGNMENT) failed" );
+    }
     else
     {
-        rc = add_quality_and_orientation( tbl, cursor );
+        rc = add_quality_and_orientation( tbl, cursor, omit_qualities );
         VTableRelease ( tbl );
     }
     return rc;
 }
 
 
-static rc_t prepare_sec_cursor( const VDatabase *db, const VCursor ** cursor )
+static rc_t prepare_sec_cursor( const VDatabase *db, const VCursor ** cursor, bool omit_qualities )
 {
     const VTable *tbl;
     rc_t rc = VDatabaseOpenTableRead ( db, &tbl, "SECONDARY_ALIGNMENT" );
     if ( rc != 0 )
+    {
         LOGERR( klogInt, rc, "VDatabaseOpenTableRead(SECONDARY_ALIGNMENT) failed" );
+    }
     else
     {
-        rc = add_quality_and_orientation( tbl, cursor );
+        rc = add_quality_and_orientation( tbl, cursor, omit_qualities );
         VTableRelease ( tbl );
     }
     return rc;
 }
 
 
-static rc_t prepare_section( prepare_ctx * ctx, const ReferenceObj *refobj,
-                             const char * name, uint32_t start, uint32_t end )
+static rc_t prepare_evidence_cursor( const VDatabase *db, const VCursor ** cursor, bool omit_qualities )
 {
-    INSDC_coord_len len;
-    rc_t rc = ReferenceObj_SeqLength( refobj, &len );
+    const VTable *tbl;
+    rc_t rc = VDatabaseOpenTableRead ( db, &tbl, "EVIDENCE_ALIGNMENT" );
     if ( rc != 0 )
-        LOGERR( klogInt, rc, "ReferenceObj_SeqLength() failed" );
+    {
+        LOGERR( klogInt, rc, "VDatabaseOpenTableRead(EVIDENCE) failed" );
+    }
     else
     {
-        if ( start == 0 ) start = 1;
-        if ( ( end == 0 )||( end > len + 1 ) )
-        {
-            end = ( len - start ) + 1;
-        }
-        /* depending on ctx->select prepare primary, secondary or both... */
-        if ( ( ctx->select & primary_ats ) == primary_ats )
-        {
-            const VCursor * align_cursor = NULL;
-            rc = prepare_prim_cursor( ctx->db, &align_cursor );
-            if ( rc == 0 )
-            {
-/*                OUTMSG(( "prepare primary: <%s> %u..%u\n", name, start, end )); */
-                rc = ReferenceIteratorAddPlacements ( ctx->ref_iter,        /* the outer ref-iter */
-                                                      refobj,               /* the ref-obj for this chromosome */
-                                                      start - 1,            /* start ( zero-based ) */
-                                                      end - start + 1,      /* length */
-                                                      NULL,                 /* ref-cursor */
-                                                      align_cursor,         /* align-cursor */
-                                                      primary_align_ids );  /* which id's */
-                if ( rc != 0 )
-                    LOGERR( klogInt, rc, "ReferenceIteratorAddPlacements() failed" );
-                VCursorRelease( align_cursor );
-            }
-        }
-        if ( ( rc == 0 ) && ( ( ctx->select & secondary_ats ) == secondary_ats ) )
-        {
-            const VCursor * align_cursor = NULL;
-            rc = prepare_sec_cursor( ctx->db, &align_cursor );
-            if ( rc == 0 )
-            {
-/*                OUTMSG(( "prepare secondary: <%s> %u..%u\n", name, start, end )); */
-                rc = ReferenceIteratorAddPlacements ( ctx->ref_iter,        /* the outer ref-iter */
-                                                      refobj,               /* the ref-obj for this chromosome */
-                                                      start - 1,            /* start ( zero-based ) */
-                                                      end - start + 1,      /* length */
-                                                      NULL,                 /* ref-cursor */
-                                                      align_cursor,         /* align-cursor */
-                                                      secondary_align_ids );  /* which id's */
-                if ( rc != 0 )
-                    LOGERR( klogInt, rc, "ReferenceIteratorAddPlacements() failed" );
-            }
-            VCursorRelease( align_cursor );
-        }
+        rc = add_quality_and_orientation( tbl, cursor, omit_qualities );
+        VTableRelease ( tbl );
     }
     return rc;
 }
 
 
-static rc_t prepare_whole_file( prepare_ctx * ctx )
+static void show_placement_params( const char * prefix, const ReferenceObj *refobj,
+                                   uint32_t start, uint32_t end )
 {
-    uint32_t count;
-    rc_t rc = ReferenceList_Count( ctx->reflist, &count );
+    const char * name;
+    rc_t rc = ReferenceObj_SeqId( refobj, &name );
     if ( rc != 0 )
-        LOGERR( klogInt, rc, "ReferenceList_Count() failed" );
+    {
+        LOGERR( klogInt, rc, "ReferenceObj_SeqId() failed" );
+    }
     else
     {
-        uint32_t idx;
-        for ( idx = 0; idx < count && rc == 0; ++idx )
+        KOutMsg( "prepare %s: <%s> %u..%u\n", prefix, name, start, end ) ;
+    }
+}
+
+
+static rc_t CC prepare_section_cb( prepare_ctx * ctx, uint32_t start, uint32_t end )
+{
+    rc_t rc = 0;
+    INSDC_coord_len len;
+    if ( ctx->db == NULL || ctx->refobj == NULL )
+    {
+        rc = SILENT_RC ( rcApp, rcNoTarg, rcOpening, rcSelf, rcInvalid );
+    }
+    else
+    {
+        rc = ReferenceObj_SeqLength( ctx->refobj, &len );
+        if ( rc != 0 )
         {
-            const ReferenceObj *refobj;
-            rc = ReferenceList_Get( ctx->reflist, &refobj, idx );
-            if ( rc != 0 )
-                LOGERR( klogInt, rc, "ReferenceList_Get() failed" );
-            else
+            LOGERR( klogInt, rc, "ReferenceObj_SeqLength() failed" );
+        }
+        else
+        {
+            rc_t rc1 = 0, rc2 = 0, rc3 = 0;
+
+            if ( start == 0 ) start = 1;
+            if ( ( end == 0 )||( end > len + 1 ) )
             {
-                const char *name;
-                rc = ReferenceObj_Name( refobj, &name );
-                if ( rc != 0 )
-                    LOGERR( klogInt, rc, "ReferenceObj_Name() failed" );
-                else
+                end = ( len - start ) + 1;
+            }
+            /* depending on ctx->select prepare primary, secondary or both... */
+            if ( ctx->use_primary_alignments )
+            {
+                const VCursor * prim_align_cursor = NULL;
+                rc1 = prepare_prim_cursor( ctx->db, &prim_align_cursor, ctx->omit_qualities );
+                if ( rc1 == 0 )
                 {
-                    rc = prepare_section( ctx, refobj, name, 0, 0 );
+    /*                show_placement_params( "primary", ctx->refobj, start, end ); */
+                    rc1 = ReferenceIteratorAddPlacements ( ctx->ref_iter,       /* the outer ref-iter */
+                                                          ctx->refobj,          /* the ref-obj for this chromosome */
+                                                          start - 1,            /* start ( zero-based ) */
+                                                          end - start + 1,      /* length */
+                                                          NULL,                 /* ref-cursor */
+                                                          prim_align_cursor,    /* align-cursor */
+                                                          primary_align_ids,    /* which id's */
+                                                          ctx->spot_group );    /* what read-group */
+                    if ( rc1 != 0 )
+                    {
+                        LOGERR( klogInt, rc1, "ReferenceIteratorAddPlacements(prim) failed" );
+                    }
+                    VCursorRelease( prim_align_cursor );
                 }
             }
-        }
-    }
-
-    return rc;
-}
-
-
-static rc_t CC prepare_range( const char * name, uint32_t start, uint32_t end, void *data )
-{
-    prepare_ctx * ctx = ( prepare_ctx * )data;
-    const ReferenceObj* refobj;
-    rc_t rc = ReferenceList_Find( ctx->reflist, &refobj, name, string_size( name ) );
-    if ( rc != 0 )
-        LOGERR( klogInt, rc, "ReferenceList_Find() failed" );
-    else
-    {
-        rc = prepare_section( ctx, refobj, name, start, end );
-    }
-    return rc;
-}
-
-
-static rc_t prepare_pileup_file( Args * args,
-                                 ReferenceIterator *ref_iter,
-                                 const VDBManager *vdb_mgr,
-                                 const char * filename,
-                                 BSTree * tree )
-{
-    const VDatabase *db;
-    rc_t rc = VDBManagerOpenDBRead ( vdb_mgr, &db, NULL, "%s", filename );
-    if ( rc != 0 )
-        LOGERR( klogInt, rc, "VDBManagerOpenDBRead() failed" );
-    else
-    {
-        const ReferenceList *reflist;
-        rc = ReferenceList_MakeDatabase( &reflist, db, ereferencelist_4na | ereferencelist_usePrimaryIds,
-                                         1024, NULL, 0 );
-        if ( rc != 0 )
-            LOGERR( klogInt, rc, "ReferenceList_MakeDatabase() failed" );
-        else
-        {
-            prepare_ctx ctx;
-
-            ctx.ref_iter = ref_iter;
-            ctx.db = db;
-            ctx.reflist = reflist;
-            ctx.minmapq = g_options.minmapq;
-            ctx.select = g_options.tab_select;
-            if ( count_refranges( tree ) == 0 )
+            if ( ctx->use_secondary_alignments )
             {
-                /* the user has not specified a reference-range : use the whole file... */
-                rc = prepare_whole_file( &ctx );
+                const VCursor * sec_align_cursor = NULL;
+                rc2 = prepare_sec_cursor( ctx->db, &sec_align_cursor, ctx->omit_qualities );
+                if ( rc2 == 0 )
+                {
+    /*                show_placement_params( "secondary", ctx->refobj, start, end ); */
+                    rc2 = ReferenceIteratorAddPlacements ( ctx->ref_iter,       /* the outer ref-iter */
+                                                          ctx->refobj,          /* the ref-obj for this chromosome */
+                                                          start - 1,            /* start ( zero-based ) */
+                                                          end - start + 1,      /* length */
+                                                          NULL,                 /* ref-cursor */
+                                                          sec_align_cursor,     /* align-cursor */
+                                                          secondary_align_ids,  /* which id's */
+                                                          ctx->spot_group );    /* what read-group */
+                    if ( rc2 != 0 )
+                    {
+                        LOGERR( klogInt, rc2, "ReferenceIteratorAddPlacements(sec) failed" );
+                    }
+                    VCursorRelease( sec_align_cursor );
+                }
             }
+
+            if ( ctx->use_evidence_alignments )
+            {
+                const VCursor * ev_align_cursor = NULL;
+                rc3 = prepare_evidence_cursor( ctx->db, &ev_align_cursor, ctx->omit_qualities );
+                if ( rc3 == 0 )
+                {
+    /*                show_placement_params( "evidende", ctx->refobj, start, end ); */
+                    rc3 = ReferenceIteratorAddPlacements ( ctx->ref_iter,       /* the outer ref-iter */
+                                                          ctx->refobj,          /* the ref-obj for this chromosome */
+                                                          start - 1,            /* start ( zero-based ) */
+                                                          end - start + 1,      /* length */
+                                                          NULL,                 /* ref-cursor */
+                                                          ev_align_cursor,      /* align-cursor */
+                                                          evidence_align_ids,   /* which id's */
+                                                          ctx->spot_group );    /* what read-group */
+                    if ( rc3 != 0 )
+                    {
+                        LOGERR( klogInt, rc3, "ReferenceIteratorAddPlacements(evidence) failed" );
+                    }
+                    VCursorRelease( ev_align_cursor );
+                }
+            }
+
+            if ( rc1 == SILENT_RC( rcAlign, rcType, rcAccessing, rcRow, rcNotFound ) )
+            { /* from allocate_populate_rec */
+                rc = rc1;
+            }
+            else if ( rc1 == 0 )
+                rc = 0;
+            else if ( rc2 == 0 )
+                rc = 0;
+            else if ( rc3 == 0 )
+                rc = 0;
             else
-            {
-                /* pick only the requested ranges... */
-                rc = foreach_refrange( tree, prepare_range, &ctx );
-            }
-            ReferenceList_Release( reflist );
+                rc = rc1;
         }
-        VDatabaseRelease ( db );
     }
     return rc;
 }
 
 
-static bool is_this_a_filesystem_path( const char * path )
+typedef struct foreach_arg_ctx
 {
-    bool res = false;
-    size_t i, n = string_size ( path );
-    for ( i = 0; i < n && !res; ++i )
-    {
-        char c = path[ i ];
-        res = ( c == '.' || c == '/' || c == '\\' );
-    }
-    return res;
-}
+    pileup_options *options;
+    const VDBManager *vdb_mgr;
+    VSchema *vdb_schema;
+    ReferenceIterator *ref_iter;
+    BSTree *ranges;
+} foreach_arg_ctx;
 
 
-static char *translate_accession( SRAPath *my_sra_path,
-                           const char *accession,
-                           const size_t bufsize )
+/* called for each source-file/accession */
+static rc_t CC on_argument( const char * path, const char * spot_group, void * data )
 {
-    rc_t rc;
-    char * res = calloc( 1, bufsize );
-    if ( res == NULL ) return NULL;
-
-    rc = SRAPathFind( my_sra_path, accession, res, bufsize );
-    if ( GetRCState( rc ) == rcNotFound )
-    {
-        free( res );
-        return NULL;
-    }
-    else if ( GetRCState( rc ) == rcInsufficient )
-    {
-        /* bufsize was insufficient ---> repeat */
-        free( res );
-        return translate_accession( my_sra_path, accession, bufsize * 2 );
-    }
-    else if ( rc != 0 )
-    {
-        free( res );
-        return NULL;
-    }
-    return res;
-}
-
-
-static rc_t resolve_accession( const KDirectory *my_dir, char ** path )
-{
-    SRAPath *my_sra_path;
     rc_t rc = 0;
+    foreach_arg_ctx * ctx = ( foreach_arg_ctx * )data;
+    prepare_ctx prep;
 
-    if ( strchr ( *path, '/' ) != NULL )
-        return 0;
+    prep.omit_qualities = ctx->options->omit_qualities;
+    prep.use_primary_alignments = ( ( ctx->options->cmn.tab_select & primary_ats ) == primary_ats );
+    prep.use_secondary_alignments = ( ( ctx->options->cmn.tab_select & secondary_ats ) == secondary_ats );
+    prep.use_evidence_alignments = ( ( ctx->options->cmn.tab_select & evidence_ats ) == evidence_ats );
+    prep.ref_iter = ctx->ref_iter;
+    prep.spot_group = spot_group;
+    prep.on_section = prepare_section_cb;
+    prep.data = NULL;
 
-    rc = SRAPathMake( &my_sra_path, my_dir );
-    if ( rc != 0 )
+    rc = prepare_ref_iter( &prep, ctx->vdb_mgr, ctx->vdb_schema, path, ctx->ranges );
+    if ( rc == 0 && prep.db == NULL )
     {
-        if ( GetRCState ( rc ) != rcNotFound || GetRCTarget ( rc ) != rcDylib )
-        {
-            if ( rc != 0 )
-                LOGERR( klogInt, rc, "SRAPathMake() failed" );
-        }
-        else
-            rc = 0;
-    }
-    else
-    {
-        if ( !SRAPathTest( my_sra_path, *path ) )
-        {
-            char *buf = translate_accession( my_sra_path, *path, 64 );
-            if ( buf != NULL )
-            {
-                free( (char*)(*path) );
-                *path = buf;
-            }
-        }
-        SRAPathRelease( my_sra_path );
+        rc = RC ( rcApp, rcNoTarg, rcOpening, rcSelf, rcInvalid );
+        LOGERR( klogInt, rc, "unsupported source" );
     }
     return rc;
 }
 
 
-static rc_t pileup_main( Args * args )
+static rc_t pileup_main( Args * args, pileup_options *options )
 {
-    const AlignMgr *almgr = NULL;
-    ReferenceIterator *ref_iter = NULL;
-    KDirectory *dir = NULL;
-    const VDBManager *vdb_mgr = NULL;
-    uint32_t count;
+    foreach_arg_ctx arg_ctx;
+    pileup_callback_data cb_data;
+    KDirectory *dir;
 
     /* (1) make the align-manager ( necessary to make a ReferenceIterator... ) */
-    rc_t rc = AlignMgrMakeRead ( &almgr );
+    rc_t rc = AlignMgrMakeRead ( &cb_data.almgr );
     if ( rc != 0 )
+    {
         LOGERR( klogInt, rc, "AlignMgrMake() failed" );
+    }
+
+    cb_data.options = options;
+    arg_ctx.options = options;
+    arg_ctx.vdb_schema = NULL;
 
     /* (2) make the reference-iterator */
     if ( rc == 0 )
     {
         PlacementRecordExtendFuncs cb_block;
 
-        cb_block.data = ( void * )almgr;
+        cb_block.data = &cb_data;
         cb_block.destroy = NULL;
         cb_block.populate = populate_tooldata;
         cb_block.alloc_size = alloc_size;
         cb_block.fixed_size = 0;
 
-        rc = AlignMgrMakeReferenceIterator ( almgr, &ref_iter, &cb_block, g_options.minmapq );
+        rc = AlignMgrMakeReferenceIterator ( cb_data.almgr, &arg_ctx.ref_iter, &cb_block, options->minmapq );
         if ( rc != 0 )
+        {
             LOGERR( klogInt, rc, "AlignMgrMakeReferenceIterator() failed" );
+        }
     }
 
-    /* (3) make a k-directory ( necessary to make a vdb-manager ) */
+    /* (3) make a KDirectory ( necessary to make a vdb-manager ) */
     if ( rc == 0 )
     {
         rc = KDirectoryNativeDir( &dir );
         if ( rc != 0 )
+        {
             LOGERR( klogInt, rc, "KDirectoryNativeDir() failed" );
+        }
     }
 
     /* (4) make a vdb-manager */
     if ( rc == 0 )
     {
-        rc = VDBManagerMakeRead ( &vdb_mgr, dir );
+        rc = VDBManagerMakeRead ( &arg_ctx.vdb_mgr, dir );
         if ( rc != 0 )
-            LOGERR( klogInt, rc, "VDBManagerMakeRead() failed" );
-    }
-
-    /* (5) get the number of cmd-line-parameters loop through the given input-filenames */
-    if ( rc == 0 )
-    {
-        rc = ArgsParamCount( args, &count );
-        if ( rc != 0 )
-            LOGERR( klogInt, rc, "ArgsParamCount() failed" );
-    }
-
-    /* (6) loop through the given input-filenames and load the ref-iter with it's input */
-    if ( rc == 0 )
-    {
-        if ( count > 0 )
         {
-            BSTree tree;
-            rc = init_refranges( &tree, args );
-            if ( rc == 0 )
+            LOGERR( klogInt, rc, "VDBManagerMakeRead() failed" );
+        }
+    }
+
+
+    /* (5) make a vdb-schema */
+    if ( rc == 0 )
+    {
+        rc = VDBManagerMakeSRASchema( arg_ctx.vdb_mgr, &arg_ctx.vdb_schema );
+        if ( rc != 0 )
+        {
+            LOGERR( klogInt, rc, "VDBManagerMakeSRASchema() failed" );
+        }
+        else if ( options->cmn.schema_file != NULL )
+        {
+            rc = VSchemaParseFile( arg_ctx.vdb_schema, options->cmn.schema_file );
+            if ( rc != 0 )
             {
-                uint32_t idx;
-                check_refranges( &tree ); /* sanitize input... */
-                for ( idx = 0; idx < count && rc == 0; ++idx )
-                {
-                    const char *filename = NULL;
-                    rc = ArgsParamValue( args, idx, &filename );
-                    if ( rc != 0 )
-                        LOGERR( klogInt, rc, "ArgsParamvalue() failed" );
-                    else
-                    {
-                        char * resolved = string_dup_measure ( filename, NULL );
-                        if ( resolved != NULL )
-                        {
-                            if ( !is_this_a_filesystem_path( resolved ) )
-                            {
-                                rc = resolve_accession( dir, &resolved );
-                            }
-                            if ( rc == 0 )
-                            {
-                                rc = prepare_pileup_file( args, ref_iter, vdb_mgr, resolved, &tree );
-                            }
-                            free( resolved );
-                        }
-                        else
-                            LOGERR( klogInt, rc, "string_dup_measure() failed" );
-                    }
-                }
-                free_refranges( &tree );
+                LOGERR( klogInt, rc, "VSchemaParseFile() failed" );
             }
         }
-        else
-            rc = UsageSummary ( UsageDefaultName );
     }
 
-    /* (7) walk the "loaded" ref-iterator ===> perform the pileup */
+    /* (5) loop through the given input-filenames and load the ref-iter with it's input */
+    if ( rc == 0 )
+    {
+        BSTree regions;
+        rc = init_ref_regions( &regions, args ); /* cmdline_cmn.c */
+        if ( rc == 0 )
+        {
+            bool empty = false;
+            check_ref_regions( &regions ); /* sanitize input... */
+            arg_ctx.ranges = &regions;
+            rc = foreach_argument( args, dir, options->div_by_spotgrp, &empty, on_argument, &arg_ctx ); /* cmdline_cmn.c */
+            if ( empty )
+            {
+                Usage ( args );
+            }
+            free_ref_regions( &regions );
+        }
+    }
+
+    /* (6) walk the "loaded" ref-iterator ===> perform the pileup */
     if ( rc == 0 )
     {
         /* ============================================== */
-        rc = walk_ref_iter( ref_iter, true );
+        rc = walk_ref_iter( arg_ctx.ref_iter, options );
         /* ============================================== */
     }
 
-    if ( vdb_mgr != NULL ) VDBManagerRelease( vdb_mgr );
+    if ( arg_ctx.vdb_mgr != NULL ) VDBManagerRelease( arg_ctx.vdb_mgr );
+    if ( arg_ctx.vdb_schema != NULL ) VSchemaRelease( arg_ctx.vdb_schema );
     if ( dir != NULL ) KDirectoryRelease( dir );
-    if ( ref_iter != NULL ) ReferenceIteratorRelease( ref_iter );
-    if ( almgr != NULL ) AlignMgrRelease ( almgr );
+    if ( arg_ctx.ref_iter != NULL ) ReferenceIteratorRelease( arg_ctx.ref_iter );
+    if ( cb_data.almgr != NULL ) AlignMgrRelease ( cb_data.almgr );
     return rc;
 }
+
 
 /* =========================================================================================== */
 
 rc_t CC KMain( int argc, char *argv [] )
 {
     rc_t rc = KOutHandlerSet( write_to_FILE, stdout );
+    ReportBuildDate( __DATE__ );
     if ( rc != 0 )
+    {
         LOGERR( klogInt, rc, "KOutHandlerSet() failed" );
+    }
     else
     {
         Args * args;
 
         KLogHandlerSetStdErr();
-        rc = ArgsMakeAndHandle( &args, argc, argv, 1,
-            MyOptions, sizeof MyOptions / sizeof MyOptions [ 0 ] );
+        rc = ArgsMakeAndHandle( &args, argc, argv, 2,
+            MyOptions, sizeof MyOptions / sizeof MyOptions [ 0 ],
+            CommonOptions_ptr(), CommonOptions_count() );
         if ( rc == 0 )
         {
-            rc = get_pileup_options( args, &g_options );
+            rc = parse_inf_file( args ); /* cmdline_cmn.h */
             if ( rc == 0 )
             {
-                if ( g_options.output_file != NULL )
-                {
-                    rc = set_stdout_to( g_options.gzip_output,
-                                        g_options.bzip_output,
-                                        g_options.output_file,
-                                        32 * 1024 );
-                }
-
+                pileup_options options;
+                rc = get_pileup_options( args, &options );
                 if ( rc == 0 )
                 {
-                    /* ======================= */
-                    rc = pileup_main( args );
-                    /* ======================= */
-                }
+                    if ( options.cmn.output_file != NULL )
+                    {
+                        rc = set_stdout_to( options.cmn.gzip_output,
+                                            options.cmn.bzip_output,
+                                            options.cmn.output_file,
+                                            32 * 1024 );
+                    }
 
-                if ( g_options.output_file != NULL )
-                    release_stdout_redirection();
+                    if ( rc == 0 )
+                    {
+                        if ( options.reref )
+                        {
+                            rc = report_on_reference( args, true ); /* reref.c */
+                        }
+                        else
+                        {
+                            /* ============================== */
+                            rc = pileup_main( args, &options );
+                            /* ============================== */
+                        }
+                    }
+
+                    if ( options.cmn.output_file != NULL )
+                        release_stdout_redirection();
+                }
             }
             ArgsWhack( args );
         }
+    }
+
+    {
+        /* Report execution environment if necessary */
+        rc_t rc2 = ReportFinalize( rc );
+        if ( rc == 0 )
+            rc = rc2;
     }
     return rc;
 }

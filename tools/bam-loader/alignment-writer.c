@@ -95,6 +95,12 @@ static rc_t WriteSecondaryRecord(Alignment *const self, AlignmentRecord *const d
         if (rc)
             return rc;
     }
+#if 1
+    /* try to make consistent with cg-load */
+    if (data->mate_ref_pos == 0) {
+        data->data.mate_ref_orientation.elements = 0;
+    }
+#endif
     return TableWriterAlgn_Write(self->tbl[tblSecondary], &data->data, &data->alignId);
 }
 
@@ -108,7 +114,7 @@ rc_t AlignmentStartUpdatingSpotIds(Alignment *const self)
     return 0;
 }
 
-rc_t AlignmentGetSpotKey(Alignment *const self, uint32_t * keyId)
+rc_t AlignmentGetSpotKey(Alignment *const self, uint64_t * keyId)
 {
     rc_t rc;
     

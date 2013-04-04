@@ -320,6 +320,8 @@ rc_t CC generate_preserve_qual_impl(void *Self, VXformInfo const *info,
     rslt->data->elem_bits = rslt->elem_bits;
     rslt->elem_count = seq_len;
     rc = KDataBufferResize(rslt->data, rslt->elem_count);                       if (rc) return rc;
+    memset(rslt->data->base, 0, (seq_len * rslt->elem_bits + 7) >> 3);
+    return 0;
     
     StringInit(&refName, &((char const *)argv[0].u.data.base)[argv[0].u.data.first_elem],
                argv[0].u.data.elem_count, argv[0].u.data.elem_count);

@@ -476,13 +476,16 @@ rc_t read_next_spot(FastqLoaderFmt* self, FastqFileInfo* file)
             if( rd->ready && rd->read.qual_type != ILLUMINAWRITER_COLMASK_NOTSET ) {
                 if( file->qualOffset == 0 ) {
                     /* detect and remember */
-                    file->qualOffset = 64;
+                    file->qualOffset = 33;
+		    file->qualMax = 94;
                     rc = pstring_quality_convert(&rd->read.qual, file->qualEnc, file->qualOffset, file->qualMin, file->qualMax);
                     if( GetRCState(rc) == rcOutofrange ) {
-                        file->qualOffset = 33;
+                        file->qualOffset = 64;
+			file->qualMax = 61;
                         rc = pstring_quality_convert(&rd->read.qual, file->qualEnc, file->qualOffset, file->qualMin, file->qualMax);
                     }
                 } else {
+		    if(file->qualOffset == 33) file->qualMax = 94;
                     rc = pstring_quality_convert(&rd->read.qual, file->qualEnc, file->qualOffset, file->qualMin, file->qualMax);
                 }
                 if( rc != 0 ) {
@@ -676,22 +679,10 @@ rc_t SRALoaderFmtMake(SRALoaderFmt **self, const SRALoaderConfig *config)
         return rc;
     }
     if( platform->id == SRA_PLATFORM_454 ) {
-        if( platform->param.ls454.flow_sequence == NULL ) {
-            LOGMSG(klogWarn, "missing FLOW_SEQUENCE in PLATFORM");
-        }
-        if( platform->param.ls454.key_sequence == NULL ) {
-            LOGMSG(klogWarn, "missing KEY_SEQUENCE in PLATFORM");
-        }
         if( rc == 0 && (rc = SRAWriter454_Make(&fmt->w454, config)) != 0 ) {
             LOGERR(klogInt, rc, "failed to initialize 454 writer");
         }
     } else if( platform->id == SRA_PLATFORM_ION_TORRENT ) {
-        if( platform->param.ion_torrent.flow_sequence == NULL ) {
-            LOGMSG(klogWarn, "missing FLOW_SEQUENCE in PLATFORM");
-        }
-        if( platform->param.ion_torrent.key_sequence == NULL ) {
-            LOGMSG(klogWarn, "missing KEY_SEQUENCE in PLATFORM");
-        }
         if( rc == 0 && (rc = SRAWriterIonTorrent_Make(&fmt->wIonTorrent, config)) != 0 ) {
             LOGERR(klogInt, rc, "failed to initialize Ion Torrent writer");
         }

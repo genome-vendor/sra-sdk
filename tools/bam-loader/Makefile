@@ -28,34 +28,40 @@ default: std
 TOP ?= $(shell ../../build/abspath.sh ../..)
 MODULE = tools/bam-loader
 
-include $(TOP)/build/Makefile.env
-
 INT_TOOLS = \
 
 EXT_TOOLS = \
 	bam-load
 
+TEST_TOOLS = \
+	wb-test-bam-loader    
+
 ALL_TOOLS = \
 	$(INT_TOOLS) \
 	$(EXT_TOOLS)
 
+RUNTESTS_OVERRIDE=1
+
+include $(TOP)/build/Makefile.env
+
 #-------------------------------------------------------------------------------
 # outer targets
 #
-vers-includes: $(addsuffix .vers.h,$(ALL_TOOLS))
-
 ifeq (win,$(OS))
 all std:
 	@ echo "not building bam-load under Windows"
 else
-all std: makedirs vers-includes
+all std: vers-includes
 	@ $(MAKE_CMD) $(TARGDIR)/std
 endif
 
-$(ALL_TOOLS): makedirs vers-includes
+$(ALL_TOOLS): vers-includes
 	@ $(MAKE_CMD) $(BINDIR)/$@
 
-.PHONY: vers-includes all std $(ALL_TOOLS)
+$(TEST_TOOLS): makedirs
+	@ $(MAKE_CMD) $(TEST_BINDIR)/$@
+
+.PHONY: all std $(ALL_TOOLS) $(TEST_TOOLS)
 
 #-------------------------------------------------------------------------------
 # std
@@ -64,6 +70,13 @@ $(TARGDIR)/std: \
 	$(addprefix $(BINDIR)/,$(ALL_TOOLS))
 
 .PHONY: $(TARGDIR)/std
+
+#-------------------------------------------------------------------------------
+# vers-includes
+#
+$(TARGDIR)/vers-includes: $(addsuffix .vers.h,$(EXT_TOOLS))
+
+.PHONY: $(TARGDIR)/vers-includes
 
 #-------------------------------------------------------------------------------
 # clean
@@ -82,7 +95,7 @@ tag: \
 
 
 #-------------------------------------------------------------------------------
-# bam-load
+# bam-load.2.*
 #
 BAMLOAD_SRC = \
 	bam-loader \
@@ -112,7 +125,8 @@ BAMLOAD_LIB = \
 	-lklib \
 	-lkq \
 	-lkproc \
-	-lm
+	-lm \
+	-lz
 
 $(BINDIR)/bam-load: $(BAMLOAD_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(BAMLOAD_LIB)

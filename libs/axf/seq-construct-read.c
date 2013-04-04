@@ -74,18 +74,6 @@ rc_t CC seq_construct_read ( void *data, const VXformInfo *info, int64_t row_id,
     unaligned += argv [ 2 ] . u . data . first_elem;
     unaligned_len += argv [ 3 ] . u . data . first_elem;
 
-#if _DEBUGGING
-    {
-        for ( i = aligned_seqlen = unaligned_seqlen = 0; i < nreads; ++ i )
-        {
-            aligned_seqlen += aligned_len [ i ];
-            unaligned_seqlen += unaligned_len [ i ];
-        }
-        assert ( aligned_seqlen == argv [ 0 ] . u . data . elem_count &&
-                 unaligned_seqlen == argv [ 2 ] . u . data . elem_count );
-    }
-#endif
-
     /* calculate new sequence length */
     for ( i = seqlen = 0; i < nreads; ++ i )
         seqlen += unaligned_len [ i ] != 0 ? unaligned_len [ i ] : aligned_len [ i ];
@@ -132,6 +120,6 @@ VTRANSFACT_IMPL ( NCBI_align_seq_construct_read, 1, 0, 0 )
     if (info->fdesc.desc.intrinsic_bits * info->fdesc.desc.intrinsic_dim != 8)
         return RC(rcAlign, rcFunction, rcConstructing, rcType, rcIncorrect);
     rslt->u.ndf = seq_construct_read;
-    rslt->variant = vftNonDetRow;
+    rslt->variant = vftRow;
     return 0;
 }

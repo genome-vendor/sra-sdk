@@ -56,10 +56,14 @@ STATICSYSLIBS=0
 CHECKSUM=0
 KPROC=0
 THREADS=0
+HAVE_KSPROC=0
+NEED_KPROC=0
 HAVE_GZIP=0
 NEED_GZIP=0
 HAVE_BZIP=0
 NEED_BZIP=0
+HAVE_SRAPATH=0
+NEED_SRAPATH=0
 HAVE_DL=0
 NEED_DL=0
 unset BUILD
@@ -74,6 +78,12 @@ unset EXT
 unset OBJS
 unset LIBS
 unset DEPFILE
+
+# paths for translating local to remote
+unset RHOME
+unset LHOME
+unset RHOST
+unset PROXY_TOOL
 
 while [ $# -ne 0 ]
 do
@@ -124,6 +134,31 @@ do
 
     --bindir)
         BINDIR="$2"
+        shift
+        ;;
+        
+    --rhome)
+        RHOME="$2"
+        shift
+        ;;
+
+    --lhome)
+        LHOME="$2"
+        shift
+        ;;
+
+    --rhost)
+        RHOST="$2"
+        shift
+        ;;
+
+    --rport)
+        RPORT="$2"
+        shift
+        ;;
+
+    --proxy_tool)
+        PROXY_TOOL="$2"
         shift
         ;;
 
@@ -208,6 +243,48 @@ do
         HAVE_DL=1
         ;;
 
+    -lsrapath|-ssrapath|-dsrapath)
+        LIBS="$LIBS $1"
+        HAVE_SRAPATH=1
+        ;;
+    -lsradb|-ssradb|-dsradb|-lwsradb|-swsradb)
+        LIBS="$LIBS $1"
+        NEED_DL=1
+        DYLD=2
+        if [ $STATIC -ne 0 ]
+        then
+            NEED_SRAPATH=1
+        fi
+        ;;
+
+    -lkrypto|-dkrypto)
+        LIBS="$LIBS $1"
+        if [ $STATIC -ne 0 ]
+        then
+            NEED_KPROC=1
+        fi
+        ;;
+    -skrypto)
+        LIBS="$LIBS $1"
+        NEED_KPROC=1
+        ;;
+
+    -lkproc|-dkproc)
+        KPROC=4
+        LIBS="$LIBS $1"
+        ;;
+    -skproc)
+        KPROC=4
+        THREADS=8
+        LIBS="$LIBS $1"
+        ;;
+
+    -[lds]ksproc)
+        HAVE_KSPROC=1
+        LIBS="$LIBS $1"
+        THREADS=0
+        ;;
+
     -lpthread|-spthread|-dpthread)
         THREADS=8
         ;;
@@ -237,24 +314,31 @@ do
         DYLD=2
         ;;
 
-    -lkproc)
+    -svfs)
         LIBS="$LIBS $1"
-        KPROC=4
+        NEED_SRAPATH=1
         ;;
-    -skproc)
+
+    -lvfs)
         LIBS="$LIBS $1"
-        KPROC=4
-        THREADS=8
+        if [ $STATIC -ne 0 ]
+        then
+            NEED_SRAPATH=1
+        fi
         ;;
-    -dkproc)
+
+    -dvfs)
         LIBS="$LIBS $1"
-        KPROC=4
+        if [ $STATIC -ne 0 ]
+        then
+            NEED_SRAPATH=1
+        fi
         DYLD=2
         ;;
 
     -lncbi-bam|-sncbi-bam|-dncbi-bam)
         LIBS="$LIBS $1"
-        NEED_GZIP=1
+        #NEED_GZIP=1
         ;;
 
     -l*|-s*)
@@ -294,27 +378,34 @@ then
     EXT="$DYLX"
     NAME="${NAME%.$DYLX}"
 fi
+
 unset VERS
-if [ "$NAME" != "${NAME%.[0-9][0-9]*}" ]
+
+V="${NAME#${NAME%\.[^.]*}\.}"
+if [[ $V == ${V//[^0-9]/} ]]
 then
-    ARG="${NAME%.[0-9][0-9]*}"
-    VERS="${NAME#$ARG}"
+    ARG="${NAME%\.$V}"
+    VERS="$V"
     NAME="${ARG#.}"
 
-    if [ "$NAME" != "${NAME%.[0-9][0-9]*}" ]
+	V="${NAME#${NAME%\.[^.]*}\.}"
+	if [[ $V == ${V//[^0-9]/} ]]
     then
-        ARG="${NAME%.[0-9][0-9]*}"
-        VERS="${NAME#$ARG}.$VERS"
-        NAME="${ARG#.}"
+	    ARG="${NAME%\.$V}"
+    	VERS="$V.$VERS"
+	    NAME="${ARG#.}"
 
-        if [ "$NAME" != "${NAME%.[0-9][0-9]*}" ]
+		V="${NAME#${NAME%\.[^.]*}\.}"
+		if [[ $V == ${V//[^0-9]/} ]]
         then
-            ARG="${NAME%.[0-9][0-9]*}"
-            VERS="${NAME#$ARG}.$VERS"
-            NAME="${ARG#.}"
+		    ARG="${NAME%\.$V}"
+	    	VERS="$V.$VERS"
+		    NAME="${ARG#.}"
         fi
     fi
+	#echo "ARG=$ARG,VERS=$VERS,NAME=$NAME"
 fi
+
 case "$TYPE" in
 dlib)
     if [ "$SHLX" != "" ]
@@ -352,12 +443,19 @@ then
     fi
 
     ARG=$(cat $VERSFILE)
-    if [ "$VERS" != "" ] && [ "$VERS" != "$ARG" ]
+    if [ "$VERS" != "" ] && [ "$VERS" != "$ARG" ] && [ "$ARG" = "${ARG#$VERS.}" ]
     then
-        echo "$SELF_NAME: version from file '$VERSFILE' does not match '$VERS'"
+        echo "$SELF_NAME: version from file '$VERSFILE' ($ARG) does not match '$VERS'"
         exit 5
     fi
     VERS="$ARG"
+fi
+
+# detect need for kproc
+if [ $KPROC -eq 0 ] && [ $NEED_KPROC -ne 0 ] && [ $HAVE_KSPROC -eq 0 ]
+then
+    KPROC=4
+    LIBS="$LIBS -lkproc"
 fi
 
 # turn on threads for kproc
@@ -368,35 +466,7 @@ fi
 [ $HAVE_GZIP -eq 0 ] && [ $NEED_GZIP -ne 0 ] && LIBS="$LIBS -lz"
 [ $HAVE_BZIP -eq 0 ] && [ $NEED_BZIP -ne 0 ] && LIBS="$LIBS -lbz2"
 [ $HAVE_DL -eq 0 ] && [ $NEED_DL -ne 0 ] && LIBS="$LIBS -ldl"
-
-#echo "# $SELF_NAME"
-#echo "#   BUILD          : $BUILD"
-#echo "#   OS             : $OS"
-#echo "#   ARCH           : $ARCH"
-#echo "#   tool           : $LD"
-#echo "#   dep file       : $DEPFILE"
-#echo "#   LDFLAGS        : $LDFLAGS"
-#echo "#   static sys libs: $STATICSYSLIBS"
-#echo "#   checksum       : $CHECKSUM"
-#echo "#   static         : $STATIC"
-#echo "#   kproc          : $KPROC"
-#echo "#   thread libs    : $THREADS"
-#echo "#   type           : $TYPE"
-#echo "#   srcdir         : $SRCDIR"
-#echo "#   bindir         : $BINDIR"
-#echo "#   LDIRS          : $LDIRS"
-#echo "#   XDIRS          : $XDIRS"
-#echo "#   vers file      : $VERSFILE"
-#echo "#   vers dir       : $VERSDIR"
-#echo "#   target         : $TARG"
-#echo "#   outdir         : $OUTDIR"
-#echo "#   name           : $NAME"
-#echo "#   dbgap          : $DBGAP"
-#echo "#   extension      : $EXT"
-#echo "#   version        : $VERS"
-#echo "#   objects        : $OBJS"
-#echo "#   libraries      : $LIBS"
-#echo "#   script-base    : $SCRIPT_BASE"
+[ $HAVE_SRAPATH -eq 0 ] && [ $NEED_SRAPATH -ne 0 ] && [ "$TYPE" = "exe" ] && LIBS="$LIBS -ssrapath"
 
 # overwrite dependencies
 [ -f "$DEPFILE" ] && rm -f "$DEPFILE"
@@ -406,14 +476,54 @@ MODE=$(expr $THREADS + $KPROC + $DYLD + $STATIC)
 
 # generate SCM flags
 SCMFLAGS=$(expr $STATICSYSLIBS + $STATICSYSLIBS + $CHECKSUM)
+if [ 0 -ne 0 ]
+then
+    echo "# $SELF_NAME"
+    echo "#   script-base    : $SCRIPT_BASE"
+    echo "#   OS             : $OS"
+    echo "#   type           : $TYPE"
+    echo "#   tool           : $LD"
+    echo "#   ARCH           : $ARCH"
+    echo "#   BUILD          : $BUILD"
+    echo "#   srcdir         : $SRCDIR"
+    echo "#   bindir         : $BINDIR"
+    echo "#   outdir         : $OUTDIR"
+    echo "#   target         : $TARG"
+    echo "#   name           : $NAME"
+    echo "#   dbgap          : $DBGAP"
+    echo "#   version        : $VERS"
+    echo "#   vers file      : $VERSFILE"
+    echo "#   dep file       : $DEPFILE"
+    echo "#   mode           : $MODE"
+    echo "#   DYLD           : $DYLD"
+    echo "#   SCMFLAGS       : $SCMFLAGS"
+    echo "#   LDFLAGS        : $LDFLAGS"
+    echo "#   LDIRS          : $LDIRS"
+    echo "#   XDIRS          : $XDIRS"
+    echo "#   objects        : $OBJS"
+    echo "#   libraries      : $LIBS"
+    echo "#   rhost          : $RHOST"
+    echo "#   rport          : $RPORT"
+    echo "#   rhome          : $RHOME"
+    echo "#   lhome          : $LHOME"
+    echo "#   proxy_tool     : $PROXY_TOOL"
+
+    echo "#   static sys libs: $STATICSYSLIBS"
+    echo "#   checksum       : $CHECKSUM"
+    echo "#   static         : $STATIC"
+    echo "#   kproc          : $KPROC"
+    echo "#   thread libs    : $THREADS"
+    echo "#   vers dir       : $VERSDIR"
+    echo "#   extension      : $EXT"
+fi
 
 # perform link
 "$SCRIPT_BASE.$OS.$TYPE.sh" "$LD" "$ARCH" "$BUILD" "$SRCDIR" "$BINDIR" "$OUTDIR" \
     "$TARG" "$NAME" "$DBGAP" "$VERS" "$VERSFILE" "$DEPFILE" "$MODE" "$SCMFLAGS" \
-    "$LDFLAGS" "$LDIRS" "$XDIRS" "$OBJS" "$LIBS" || exit $?
+    "$LDFLAGS" "$LDIRS" "$XDIRS" "$OBJS" "$LIBS" "$RHOST" "$RPORT" "$RHOME" "$LHOME" "$PROXY_TOOL" || exit $?
 
 # establish links
-if [ "$VERS" != "" ] && [ "$OS" != "win" ]
+if [ "$VERS" != "" ] && [ "$OS" != "win" ] && [ "$OS" != "rwin" ]
 then
     $SCRIPT_BASE.$OS.ln.sh "$TYPE" "$OUTDIR" "$TARG" "$NAME" "$DBGAP" "$EXT" "$VERS"
 fi

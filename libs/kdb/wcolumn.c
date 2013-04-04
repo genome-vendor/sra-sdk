@@ -37,6 +37,7 @@
 #include <kfs/md5.h>
 #include <kfs/impl.h>
 #include <klib/checksum.h>
+#include <klib/printf.h>
 #include <klib/log.h>
 #include <sysalloc.h>
 
@@ -554,7 +555,7 @@ rc_t KDBManagerVCreateColumnInt ( KDBManager *self,
     {
         KDirectory *dir;
 
-        switch ( KDBPathType ( wd, NULL, colpath ) )
+        switch ( KDBPathType ( /*NULL,*/ wd, NULL, colpath ) )
         {
         case kptNotFound:
             /* first good path */
@@ -614,7 +615,7 @@ rc_t KDBManagerVCreateColumnInt ( KDBManager *self,
 	case kptFile | kptAlias:
 	    /* if we find a file, vary the failure if it is an archive that is a column
 	     * or a non related file */
-	    if ( KDBOpenPathTypeRead ( wd, colpath, NULL, kptColumn, NULL ) == 0 )
+	    if ( KDBOpenPathTypeRead ( self, wd, colpath, NULL, kptColumn, NULL, false ) == 0 )
 		return RC ( rcDB, rcMgr, rcCreating, rcDirectory, rcUnauthorized );
 	    /* fall through */
         default:
@@ -774,16 +775,14 @@ LIB_EXPORT rc_t CC KTableVCreateColumn ( KTable *self, KColumn **colp,
 static
 rc_t KDBManagerVOpenColumnReadInt ( const KDBManager *cself,
     const KColumn **colp, const KDirectory *wd,
-    const char *path, va_list args, bool *cached )
+    const char *path, va_list args, bool *cached, bool try_srapath )
 {
     char colpath [ 4096 ];
     rc_t rc = KDirectoryVResolvePath ( wd, true,
         colpath, sizeof colpath, path, args );
-    if(cached != NULL ) *cached = false;
     if ( rc == 0 )
     {
         KSymbol *sym;
-        const KDirectory *dir;
 
         /* if already open */
         sym = KDBManagerOpenObjectFind (cself, colpath);
@@ -792,7 +791,8 @@ rc_t KDBManagerVOpenColumnReadInt ( const KDBManager *cself,
             const KColumn *ccol;
             rc_t obj;
 
-	    if(cached != NULL ) *cached = true;
+            if(cached != NULL ) *cached = true;
+
             switch (sym->type)
             {
             case kptColumn:
@@ -824,32 +824,39 @@ rc_t KDBManagerVOpenColumnReadInt ( const KDBManager *cself,
                 obj = rcMetadata;
                 break;
             }
-            return  RC (rcDB, rcMgr, rcOpening, obj, rcBusy);
+            rc = RC (rcDB, rcMgr, rcOpening, obj, rcBusy);
         }
+        else
+        {
+            const KDirectory *dir;
 
-	rc = KDBOpenPathTypeRead ( wd, colpath, &dir, kptColumn, NULL );
-        if ( rc == 0 )
-        { 
-            KColumn *col;
+            if ( cached != NULL )
+                *cached = false;
 
-            rc = KColumnMakeRead ( & col, dir, colpath, NULL );
+            rc = KDBOpenPathTypeRead ( cself, wd, path, &dir, kptColumn, NULL, try_srapath );
 
             if ( rc == 0 )
-            {
-                rc = KDBManagerInsertColumn ( (KDBManager*)cself, col );
+            { 
+                KColumn *col;
+
+                rc = KColumnMakeRead ( & col, dir, colpath, NULL );
+
                 if ( rc == 0 )
                 {
-                    * colp = col;
-                    return 0;
+                    rc = KDBManagerInsertColumn ( (KDBManager*)cself, col );
+                    if ( rc == 0 )
+                    {
+                        * colp = col;
+                        return 0;
+                    }
+
+                    KColumnRelease ( col );
                 }
 
-                KColumnRelease ( col );
+                KDirectoryRelease ( dir );
             }
-
-            KDirectoryRelease ( dir );
         }
     }
-    
     return rc;
 }
 
@@ -877,7 +884,7 @@ LIB_EXPORT rc_t CC KDBManagerVOpenColumnRead ( const KDBManager *self,
     if ( self == NULL )
         return RC ( rcDB, rcMgr, rcOpening, rcSelf, rcNull );
 
-    return KDBManagerVOpenColumnReadInt ( self, col, self -> wd, path, args , NULL);
+    return KDBManagerVOpenColumnReadInt ( self, col, self -> wd, path, args , NULL, true);
 }
 
 LIB_EXPORT rc_t CC KTableOpenColumnRead ( const KTable *self,
@@ -913,7 +920,7 @@ LIB_EXPORT rc_t CC KTableVOpenColumnRead ( const KTable *self,
     {
 	bool col_is_cached;
         rc = KDBManagerVOpenColumnReadInt ( self -> mgr,
-            colp, self -> dir, path, NULL, &col_is_cached );
+            colp, self -> dir, path, NULL, &col_is_cached, false );
         if ( rc == 0 )
         {
             KColumn *col = ( KColumn* ) * colp;
@@ -935,11 +942,16 @@ LIB_EXPORT rc_t CC KTableVOpenColumnRead ( const KTable *self,
  */
 static
 rc_t KDBManagerVOpenColumnUpdateInt ( KDBManager *self,
-    KColumn **colp, KDirectory *wd, const char *path, va_list args )
+    KColumn **colp, KDirectory *wd, bool try_srapath,
+    const char *path, va_list args )
 {
     char colpath [ 4096 ];
-    rc_t rc = KDirectoryVResolvePath ( wd, true,
-        colpath, sizeof colpath, path, args );
+    rc_t rc;
+    size_t z;
+
+/*    rc = KDirectoryVResolvePath ( wd, 1,
+        colpath, sizeof colpath, path, args ); */
+    rc = string_vprintf( colpath, sizeof colpath, &z, path, args );
     if ( rc == 0 )
     {
         KSymbol * sym;
@@ -976,7 +988,7 @@ rc_t KDBManagerVOpenColumnUpdateInt ( KDBManager *self,
             return RC ( rcDB, rcMgr, rcOpening, obj, rcBusy );
         }
         /* only open existing dbs */
-        switch (KDBPathType ( wd, NULL, colpath ) )
+        switch (KDBPathType ( /*NULL,*/ wd, NULL, colpath ) )
         {
         case kptNotFound:
             return RC ( rcDB, rcMgr, rcOpening, rcColumn, rcNotFound );
@@ -989,7 +1001,7 @@ rc_t KDBManagerVOpenColumnUpdateInt ( KDBManager *self,
 	     * this should be changed to a readonly as it is not possible not 
 	     * disallowed.  rcReadonly not rcUnauthorized
 	     */
-	    if ( KDBOpenPathTypeRead ( wd, colpath, NULL, kptColumn, NULL ) == 0 )
+	    if ( KDBOpenPathTypeRead ( self, wd, colpath, NULL, kptColumn, NULL, try_srapath ) == 0 )
 		return RC ( rcDB, rcMgr, rcOpening, rcDirectory, rcUnauthorized );
 	    /* fall through */
         default:
@@ -1081,7 +1093,7 @@ LIB_EXPORT rc_t CC KDBManagerVOpenColumnUpdate ( KDBManager *self,
         return RC ( rcDB, rcMgr, rcOpening, rcSelf, rcNull );
 
     return KDBManagerVOpenColumnUpdateInt
-        ( self, col, self -> wd, path, args );
+        ( self, col, self -> wd, true, path, args );
 }
 
 LIB_EXPORT rc_t CC KTableOpenColumnUpdate ( KTable *self,
@@ -1119,7 +1131,7 @@ LIB_EXPORT rc_t CC KTableVOpenColumnUpdate ( KTable *self,
     if ( rc == 0 )
     {
         rc = KDBManagerVOpenColumnUpdateInt ( self -> mgr,
-            colp, self -> dir, path, NULL );
+            colp, self -> dir, false, path, NULL );
         if ( rc == 0 )
         {
             KColumn *col = * colp;
@@ -1134,8 +1146,8 @@ bool KTableColumnNeedsReindex ( KTable *self, const char *colname )
     if ( self != NULL )
     {
         char path [ 256 ];
-        rc_t rc = KDBVMakeSubPath ( self -> dir,
-            path, sizeof path, "col", 3, colname, NULL );
+        rc_t rc = KDBMakeSubPath ( self -> dir,
+            path, sizeof path, "col", 3, colname );
         if ( rc == 0 )
         {
             uint64_t idx0_size;

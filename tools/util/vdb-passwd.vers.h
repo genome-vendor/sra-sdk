@@ -1,1 +1,0 @@
-#define VDB_PASSWD_VERS 0x01000001

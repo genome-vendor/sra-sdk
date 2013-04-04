@@ -25,7 +25,7 @@
 
 default: std
 
-TOP ?= $(abspath ../..)
+TOP ?= $(shell ../../build/abspath.sh ../..)
 MODULE = libs/align
 
 INT_LIBS = \
@@ -93,6 +93,7 @@ BAM_OBJ = \
 	$(addsuffix .$(LOBX),$(BAM_SRC))
 
 BAM_LIB = \
+	-lvfs \
 	-lkfs \
 	-lklib \
 	-lz
@@ -122,6 +123,7 @@ ALIGN_ACCESS_LIB = \
 	-sncbi-bam \
 	-lvfs \
 	-lkfs \
+	-dkproc \
 	-lklib \
 	-lz
 
@@ -149,7 +151,8 @@ ALIGN_READER_SRC = \
 	reader-cmn \
 	reader-refseq \
 	reference \
-	refseq-mgr
+	refseq-mgr \
+	quality-quantizer
 
 ALIGN_READER_OBJ = \
 	$(addsuffix .$(LOBX),$(ALIGN_READER_SRC))

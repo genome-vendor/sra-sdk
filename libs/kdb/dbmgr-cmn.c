@@ -34,6 +34,8 @@
 #include "kdb-priv.h"
 #undef KONST
 
+#include <vfs/manager.h>
+#include <kfs/directory.h>
 #include <klib/symbol.h>
 #include <klib/checksum.h>
 #include <klib/rc.h>
@@ -62,6 +64,8 @@ rc_t KDBManagerWhack ( KDBManager *self )
 
     /* everything should be closed */
     assert ( self -> open_objs . root == NULL );
+
+    rc = VFSManagerRelease ( self -> vfsmgr );
 
     rc = KDirectoryRelease ( self -> wd );
     if ( rc == 0 )
@@ -167,14 +171,19 @@ rc_t KDBManagerMake ( KDBManager **mgrp, const KDirectory *wd, const char *op )
 
             if ( rc == 0 )
             {
-                CRC32Init ();
+                rc = VFSManagerMake ( & mgr -> vfsmgr );
 
-                BSTreeInit ( & mgr -> open_objs );
+                if ( rc == 0 )
+                {
+                    CRC32Init ();
 
-                KRefcountInit ( & mgr -> refcount, 1, "KDBManager", op, "kmgr" );
+                    BSTreeInit ( & mgr -> open_objs );
 
-                * mgrp = mgr;
-                return 0;
+                    KRefcountInit ( & mgr -> refcount, 1, "KDBManager", op, "kmgr" );
+
+                    * mgrp = mgr;
+                    return 0;
+                }
             }
 
             free ( mgr );
@@ -211,35 +220,24 @@ LIB_EXPORT rc_t CC KDBManagerVersion ( const KDBManager *self, uint32_t *version
  */
 LIB_EXPORT bool CC KDBManagerVExists ( const KDBManager *self, uint32_t requested, const char *name, va_list args )
 {
-    char full [ 4096 ];
-    rc_t rc = KDirectoryVResolvePath ( self -> wd, false, full, sizeof full, name, args );
-    if ( rc == 0 )
+    int type;
+
+    type = KDBManagerVPathType (self, name, args);
+    switch ( type )
     {
-        int type = KDBPathType ( self -> wd, NULL, full ) & ~ kptAlias;
-        switch ( type )
-        {
-        case kptDatabase:
-        case kptTable:
-        case kptIndex:
-        case kptColumn:
-        case kptMetadata:
-            break;
-        case kptPrereleaseTbl:
-            type = kptTable;
-            break;
-#if 0
-            /*TBD - eventually we need to check for an archive here */
-        case kptFile: 
-            /* check if this is an archive .tar or .sra and return rcReadonly if it is */
-#endif
-        default:
-            return false;
-        }
-
-        return requested == ( uint32_t ) type;
+    case kptDatabase:
+    case kptTable:
+    case kptIndex:
+    case kptColumn:
+    case kptMetadata:
+        break;
+    case kptPrereleaseTbl:
+        type = kptTable;
+        break;
+    default:
+        return false;
     }
-
-    return false;
+    return requested == ( uint32_t ) type;
 }
 
 bool KDBManagerExists ( const KDBManager *self, uint32_t type, const char *name, ... )

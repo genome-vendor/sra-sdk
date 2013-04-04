@@ -42,16 +42,16 @@ ALL_LIBS = \
 #-------------------------------------------------------------------------------
 # outer targets
 #
-std: makedirs download-$(OS)
+std: makedirs download
 	@ $(MAKE_CMD) $(TARGDIR)/$@
 
 all: makedirs download
 	@ $(MAKE_CMD) $(TARGDIR)/$@
 
-$(INT_LIBS): makedirs download-$(OS)
+$(INT_LIBS): makedirs download
 	@ $(MAKE_CMD) $(ILIBDIR)/$@
 
-$(EXT_LIBS): makedirs download-$(OS)
+$(EXT_LIBS): makedirs download
 	@ $(MAKE_CMD) $(LIBDIR)/$@
 
 .PHONY: all std $(ALL_LIBS)
@@ -66,7 +66,7 @@ $(TARGDIR)/all: $(LIBDIR)/libz
 #-------------------------------------------------------------------------------
 # std
 #
-$(TARGDIR)/std: $(LIBDIR)/libz-$(OS)
+$(TARGDIR)/std: $(LIBDIR)/libz
 
 .PHONY: $(TARGDIR)/std
 
@@ -74,43 +74,18 @@ $(TARGDIR)/std: $(LIBDIR)/libz-$(OS)
 # clean
 #
 clean: stdclean
-
-deep-clean: clean
-	rm -f *.[ch] *.def *.vers *.gz
+	@ rm -f libz.vers
 
 .PHONY: clean
 
 #-------------------------------------------------------------------------------
-# libz-$(OS)
-#
-$(LIBDIR)/libz-linux: $(LIBDIR)/libz-linux-$(BITS)
-
-NORMALLY_HAVE = \
-	unix \
-	linux-64 \
-	mac \
-	sun
-
-DONT_HAVE = \
-	linux-32 \
-	win
-
-LIBZ_SYS_HAS_LIB = \
-	$(addprefix $(LIBDIR)/libz-,$(NORMALLY_HAVE))
-
-$(LIBZ_SYS_HAS_LIB):
-	@ true
-
-LIBZ_SYS_NEEDS_LIB = \
-	$(addprefix $(LIBDIR)/libz-,$(DONT_HAVE))
-
-$(LIBZ_SYS_NEEDS_LIB): $(LIBDIR)/libz
-
-
-#-------------------------------------------------------------------------------
 # libz
 #
+ifeq (win,$(OS))
 $(LIBDIR)/libz: $(addprefix $(LIBDIR)/libz.,$(LIBEXT))
+else
+$(LIBDIR)/libz: $(addprefix $(LIBDIR)/libz.,$(LIBX))
+endif
 
 LIBZ_SRC = \
 	adler32 \
@@ -143,40 +118,52 @@ $(LIBDIR)/libz.$(LIBX): $(LIBZ_OBJ)
 
 
 #-------------------------------------------------------------------------------
-# download-$(OS)
-#
-download-linux: download-linux-$(BITS)
-
-LIBZ_SYS_HAS_SRC = \
-	$(addprefix download-,$(NORMALLY_HAVE))
-
-$(LIBZ_SYS_HAS_SRC):
-	@ true
-
-LIBZ_SYS_NEEDS_SRC = \
-	$(addprefix download-,$(DONT_HAVE))
-
-$(LIBZ_SYS_NEEDS_SRC): download
-
-
-#-------------------------------------------------------------------------------
 # libz download
 #
 ZLIB_VERS := \
-	1.2.6
+	1.2.7
 
-zlib-$(ZLIB_VERS).tar.gz:
+ZLIB_TAR = \
+	zlib-$(ZLIB_VERS).tar
+
+ZLIB_TAR_GZ = \
+	$(ZLIB_TAR).gz
+
+ifeq (win,$(OS))
+ECHO_VERS = echo -ne $(ZLIB_VERS) "\n"
+else
+ECHO_VERS = echo $(ZLIB_VERS)
+endif
+
+ifeq (sun,$(OS))
+	ZLIB_TAR_GET = $(ZLIB_TAR)
+	TAR_CMD = tar -xf
+else
+	ZLIB_TAR_GET = $(ZLIB_TAR_GZ)
+	TAR_CMD = tar --no-same-owner -x -z -f
+endif
+
+ifeq (mac,$(OS))
+RETRIEVE = curl -O
+else
+RETRIEVE = wget
+endif
+
+$(ZLIB_TAR_GZ):
 	@ echo downloading the sources
-	wget http://zlib.net/$@
+	$(RETRIEVE) http://zlib.net/$@
 	@ touch $@
 
-libz.vers: zlib-$(ZLIB_VERS).tar.gz
+$(ZLIB_TAR): $(ZLIB_TAR_GZ)
+	gzcat $^ > $@
+
+libz.vers: $(ZLIB_TAR_GET)
 	@ echo unpacking the sources
-	tar --no-same-owner -x -z -f $^
+	$(TAR_CMD) $^
 	mv zlib-$(ZLIB_VERS)/*.[ch] .
 	mv zlib-$(ZLIB_VERS)/win32/zlib.def libz.def
-	rm -rf zlib-$(ZLIB_VERS)
-	@ echo -ne $(ZLIB_VERS) "\n" > $@
+	-rm -rf zlib-$(ZLIB_VERS) >/dev/null
+	@ $(ECHO_VERS) > $@
 
 download: libz.vers
 

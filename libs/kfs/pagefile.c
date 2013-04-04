@@ -96,7 +96,7 @@ struct KPageBacking
 static
 void KPageBackingWhack ( KPageBacking *self )
 {
-    KFileRelease ( self -> backing );
+    if(self -> backing) KFileRelease ( self -> backing );
     free ( self );
 }
 
@@ -367,10 +367,12 @@ struct KPage
 static
 rc_t KPageWhack ( KPage *self )
 {
-    if ( self -> dirty )
-        KPageBackingWrite ( self -> backing, self -> page, self -> page_id );
+    if ( self -> backing ) {
+	if ( self -> dirty )
+	    KPageBackingWrite ( self -> backing, self -> page, self -> page_id );
+	KPageBackingSever ( self -> backing );
+    }
     KPageMemWhack ( self -> page );
-    KPageBackingSever ( self -> backing );
     free ( self );
     return 0;
 }
@@ -391,7 +393,8 @@ rc_t KPageNew ( KPage **ppage, KPageBacking *backing, uint32_t page_id )
         rc = KPageMemNew ( & page -> page );
         if ( rc == 0 )
         {
-            page -> backing = KPageBackingAttach ( backing );
+            if(backing)page -> backing = KPageBackingAttach ( backing );
+	    else page -> backing=NULL;
             KRefcountInit ( & page -> refcount, 1, "KPage", "new", "page" );
             page -> page_id = page_id;
             page -> read_only = false;
@@ -464,7 +467,7 @@ LIB_EXPORT rc_t CC KPageRelease ( const KPage *self )
     if ( self != NULL ) switch ( KRefcountDrop ( & self -> refcount, "KPage" ) )
     {
     case krefOkay:
-        if ( self -> dirty && self -> backing -> write_through )
+        if ( self -> dirty && self -> backing && self -> backing -> write_through )
         {
             rc_t rc = KPageBackingWrite ( self -> backing, self -> page, self -> page_id );
             if ( rc != 0 )
@@ -700,7 +703,11 @@ rc_t KPageFileSetPageCount(KPageFile *self,uint32_t count)
 	}
 	self->count=count;
 	if( self -> read_only) return 0;
-        return KPageBackingSetSize ( self -> backing, count );
+	if( self -> backing ) return KPageBackingSetSize ( self -> backing, count );
+	else if ( self->count > self->climit ){
+                return RC ( rcFS, rcFile, rcProcessing, rcBuffer, rcExhausted );
+	}
+	return 0;
 }
 /* Whack
  */
@@ -711,7 +718,7 @@ rc_t KPageFileWhack ( KPageFile *self )
     /* first, visit each cached page in flush order */
     self->page_idx=KPageFile_whack_recursive(self->page_idx,self->page_idx_depth,0,&self->by_access,&self->ccount);
     /* release the backing file */
-    KPageBackingRelease ( self -> backing );
+    if(self -> backing) KPageBackingRelease ( self -> backing );
     /* delete the object */
     free ( self );
     return 0;
@@ -804,53 +811,54 @@ LIB_EXPORT rc_t CC KPageFileMakeRead ( const KPageFile **pf,
 LIB_EXPORT rc_t CC KPageFileMakeUpdate ( KPageFile **pf,
     KFile *backing, size_t climit, bool write_through )
 {
-    rc_t rc;
+    rc_t rc=0;
 
     if ( pf == NULL )
         rc = RC ( rcFS, rcFile, rcConstructing, rcParam, rcNull );
     else
     {
-        if ( backing == NULL )
-            rc = RC ( rcFS, rcFile, rcConstructing, rcFile, rcNull );
-        else if ( ! backing -> read_enabled )
+        if ( backing != NULL ){
+        	if ( ! backing -> read_enabled )
+		{
+		    if ( backing -> write_enabled )
+			rc = RC ( rcFS, rcFile, rcConstructing, rcFile, rcWriteonly );
+		    else
+			rc = RC ( rcFS, rcFile, rcConstructing, rcFile, rcNoPerm );
+		}
+		else if ( ! backing -> write_enabled )
+		    rc = RC ( rcFS, rcFile, rcConstructing, rcFile, rcReadonly );
+	}
+        if(rc == 0)
         {
-            if ( backing -> write_enabled )
-                rc = RC ( rcFS, rcFile, rcConstructing, rcFile, rcWriteonly );
-            else
-                rc = RC ( rcFS, rcFile, rcConstructing, rcFile, rcNoPerm );
-        }
-        else if ( ! backing -> write_enabled )
-            rc = RC ( rcFS, rcFile, rcConstructing, rcFile, rcReadonly );
-        else
-        {
-            KPageBacking *bf = calloc ( 1, sizeof * bf );
-            if ( bf == NULL )
-                rc = RC ( rcFS, rcFile, rcConstructing, rcMemory, rcExhausted );
-            else
-            {
-                KPageFile *f = malloc ( sizeof * f );
-                if ( f == NULL )
+	    KPageFile *f = malloc ( sizeof * f );
+	    if ( f == NULL )
                     rc = RC ( rcFS, rcFile, rcConstructing, rcMemory, rcExhausted );
+            else 
+	    {
+		f->page_idx=NULL;
+		f->page_idx_depth=0;
+		DLListInit ( & f -> by_access );
+		KRefcountInit ( & f -> refcount, 1, "KPageFile", "make", "pgfile" );
+		f -> count = 0;
+		f -> ccount = 0;
+		f -> climit = ( uint32_t ) ( climit >>  PGBITS );
+		if(f -> climit < MIN_CACHE_PAGE) f -> climit = MIN_CACHE_PAGE;
+		f -> read_only = false;
+		f -> backing = NULL; /** for now **/
+	    }
+	    if(rc == 0 && backing)
+            {
+		KPageBacking *bf = calloc ( 1, sizeof * bf );
+		if ( bf == NULL )
+			rc = RC ( rcFS, rcFile, rcConstructing, rcMemory, rcExhausted );
                 else
                 {
                     rc = KFileAddRef ( backing );
-                    if ( rc == 0 )
-                    {
-			f->page_idx=NULL;
-			f->page_idx_depth=0;
-                        DLListInit ( & f -> by_access );
-                        KRefcountInit ( & f -> refcount, 1, "KPageFile", "make", "pgfile" );
-                        f -> count = 0;
-                        f -> ccount = 0;
-                        f -> climit = ( uint32_t ) ( climit >>  PGBITS );
-			if(f -> climit < MIN_CACHE_PAGE) f -> climit = MIN_CACHE_PAGE;
-                        f -> read_only = false;
-
+		    if(rc == 0)
+		     {
                         /* finish the backing file */
                         KRefcountInit ( & bf -> refcount, 1, "KPageBacking", "make", "backing" );
-                        f -> backing = bf;
                         bf -> write_through = write_through;
-                            
                         /* attached reference */
                         bf -> backing = backing;
 
@@ -859,23 +867,24 @@ LIB_EXPORT rc_t CC KPageFileMakeUpdate ( KPageFile **pf,
                         if ( rc == 0 )
                         {
                             bf -> have_eof = true;
-			    rc=KPageFileSetPageCount(f,( uint32_t ) ( ( bf -> eof + PGSIZE - 1 ) >> PGBITS ));
-			    if(rc!=0) return rc;
                         }
-                        * pf = f;
-                        return 0;
                     }
-
-                    free ( f );
                 }
-
-                free ( bf );
+		if (rc == 0){
+			f -> backing = bf;
+			rc=KPageFileSetPageCount(f,( uint32_t ) ( ( bf -> eof + PGSIZE - 1 ) >> PGBITS ));
+		} else if ( bf ){
+			free ( bf );
+		}
             }
+	    if(rc == 0){
+		* pf = f;
+	    } else if (f) {
+		free(f);
+	    }
         }
-
-        * pf = NULL;
+	if(rc != 0) *pf = NULL;
     }
-
     return rc;
 }
 
@@ -1270,5 +1279,5 @@ LIB_EXPORT rc_t CC KPageFileDropBacking ( KPageFile *self )
     if ( self == NULL )
         return RC ( rcFS, rcFile, rcDetaching, rcSelf, rcNull );
 
-    return KPageBackingDrop ( self -> backing );
+    return self -> backing?KPageBackingDrop ( self -> backing ):0;
 }

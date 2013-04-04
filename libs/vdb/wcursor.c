@@ -68,14 +68,17 @@
 #include <string.h>
 #include <assert.h>
 
-#define MTCURSOR_DBG( msg ) \
-    DBGMSG ( DBG_VDB, DBG_FLAG ( DBG_VDB_MTCURSOR ), msg )
 
 /*--------------------------------------------------------------------------
  * VCursor
  *  a row cursor onto a VTable
  */
 
+/* forward
+ *  to avoid reordering whole page
+ */
+static
+rc_t VCursorFlushPageInt ( VCursor *self );
 
 
 /* Whack
@@ -107,6 +110,7 @@ rc_t VCursorWhack ( VCursor *self )
     KConditionRelease ( self -> flush_cond );
     KLockRelease ( self -> flush_lock );
 #endif
+    VCursorTerminatePagemapThread(self);
     return VCursorDestroy ( self );
 }
 
@@ -127,7 +131,7 @@ rc_t VCursorWhack ( VCursor *self )
 static rc_t CC run_flush_thread ( const KThread *t, void *data );
 #endif
 
-LIB_EXPORT rc_t CC VTableCreateCursorWrite ( VTable *self, VCursor **cursp, KCreateMode mode )
+rc_t VTableCreateCursorWriteInt ( VTable *self, VCursor **cursp, KCreateMode mode, bool create_thread )
 {
     rc_t rc;
 
@@ -158,13 +162,17 @@ LIB_EXPORT rc_t CC VTableCreateCursorWrite ( VTable *self, VCursor **cursp, KCre
             {
                 rc = VCursorSupplementSchema ( curs );
 #if VCURSOR_FLUSH_THREAD
-                if ( rc == 0 )
+                if ( rc == 0 && create_thread )
+                {
                     rc = KLockMake ( & curs -> flush_lock );
-                if ( rc == 0 )
-                    rc = KConditionMake ( & curs -> flush_cond );
-                if ( rc == 0 )
-                    rc = KThreadMake ( & curs -> flush_thread, run_flush_thread, curs );
+                    if ( rc == 0 )
+                        rc = KConditionMake ( & curs -> flush_cond );
+                    if ( rc == 0 )
+                        rc = KThreadMake ( & curs -> flush_thread, run_flush_thread, curs );
+                }
 #endif
+		if(rc == 0)
+			rc = VCursorLaunchPagemapThread(curs);
                 if ( rc == 0 )
                 {
                     * cursp = curs;
@@ -179,6 +187,11 @@ LIB_EXPORT rc_t CC VTableCreateCursorWrite ( VTable *self, VCursor **cursp, KCre
     }
 
     return rc;
+}
+
+LIB_EXPORT rc_t CC VTableCreateCursorWrite ( VTable *self, VCursor **cursp, KCreateMode mode )
+{
+    return VTableCreateCursorWriteInt ( self, cursp, mode, true );
 }
 
 
@@ -293,7 +306,8 @@ LIB_EXPORT rc_t CC VCursorOpen ( const VCursor *cself )
                     pr . ignore_column_errors = false;
                     pr . discover_writable_columns = false;
 
-                    rc = VProdResolveAddTriggers ( & pr, self -> stbl );
+		    if ( !self -> suspend_triggers )
+			    rc = VProdResolveAddTriggers ( & pr, self -> stbl );
                 }
                 if ( rc == 0 )
                 {
@@ -351,18 +365,56 @@ LIB_EXPORT rc_t CC VCursorOpen ( const VCursor *cself )
  *  records any SColumn that can be reached
  *  populates BTree with VColumnRef objects
  */
+struct resolve_phys_data
+{
+    VProdResolve pr;
+    const KNamelist *seed;
+    uint32_t count;
+};
+
 static
 void CC resolve_writable_sphys ( void *item, void *data )
 {
-    VProdResolve *self = data;
+    struct resolve_phys_data *pb = data;
+    const SPhysMember *smbr = ( const void* ) item;
     VProduction *out = NULL;
-    VProdResolveSPhysMember ( self, & out, item );
+
+    if ( pb -> seed == NULL )
+        VProdResolveSPhysMember ( & pb -> pr, & out, smbr );
+    else
+    {
+        uint32_t i;
+        const KSymbol *sym = smbr -> name;
+        const char *sname = sym -> name . addr;
+        size_t ssize = sym -> name . size;
+        if ( sname [ 0 ] == '.' )
+        {
+            ++ sname;
+            -- ssize;
+        }
+
+        /* TBD - this is not too speedy, but it is
+           very low frequency in all known cases */
+        for ( i = 0; i < pb -> count; ++ i )
+        {
+            const char *name;
+            rc_t rc = KNamelistGet ( pb -> seed, i, & name );
+            if ( rc == 0 )
+            {
+                if ( strlen ( name ) == ssize && memcmp ( sname, name, ssize ) == 0 )
+                {
+                    VProdResolveSPhysMember ( & pb -> pr, & out, smbr );
+                    break;
+                }
+            }
+        }
+    }
 }
 
 static
-void VProdResolveWritableColumns ( VProdResolve *self )
+void VProdResolveWritableColumns ( struct resolve_phys_data *pb, bool suspend_triggers )
 {
-    const STable *dad, *stbl = self -> stbl;
+    const STable *dad, *stbl = pb -> pr . stbl;
 
     /* walk table schema looking for parents */
     uint32_t i = VectorStart ( & stbl -> overrides );
@@ -370,40 +422,51 @@ void VProdResolveWritableColumns ( VProdResolve *self )
     for ( end += i; i < end; ++ i )
     {
         dad = STableFindOrdAncestor ( stbl, i );
-        VectorForEach ( & dad -> phys, false, resolve_writable_sphys, self );
+        VectorForEach ( & dad -> phys, false, resolve_writable_sphys, pb );
     }
 
     /* walk current table */
-    VectorForEach ( & stbl -> phys, false, resolve_writable_sphys, self );
+    VectorForEach ( & stbl -> phys, false, resolve_writable_sphys, pb );
 
     /* add triggers */
-    self -> chain = chainUncommitted;
-    VProdResolveAddTriggers ( self, stbl );
+    if ( !suspend_triggers && pb -> seed == NULL )
+    {
+        pb -> pr . chain = chainUncommitted;
+        VProdResolveAddTriggers ( & pb -> pr, stbl );
+    }
 }
 
-rc_t VCursorListWritableColumns ( VCursor *self, BSTree *columns )
+rc_t VCursorListSeededWritableColumns ( VCursor *self, BSTree *columns, const KNamelist *seed )
 {
     rc_t rc;
     KDlset *libs;
 
-    VProdResolve pb;
-    pb . schema = self -> schema;
-    pb . ld = self -> tbl -> linker;
-    pb . stbl = self -> stbl;
-    pb . curs = self;
-    pb . cache = & self -> prod;
-    pb . owned = & self -> owned;
-    pb . chain = chainEncoding;
-    pb . blobbing = false;
-    pb . ignore_column_errors = true;
-    pb . discover_writable_columns = true;
+    struct resolve_phys_data pb;
+    pb . pr . schema = self -> schema;
+    pb . pr . ld = self -> tbl -> linker;
+    pb . pr . stbl = self -> stbl;
+    pb . pr . curs = self;
+    pb . pr . cache = & self -> prod;
+    pb . pr . owned = & self -> owned;
+    pb . pr . chain = chainEncoding;
+    pb . pr . blobbing = false;
+    pb . pr . ignore_column_errors = true;
+    pb . pr . discover_writable_columns = true;
+    pb . seed = seed;
+
+    if ( seed != NULL )
+    {
+        rc = KNamelistCount ( seed, & pb . count );
+        if ( rc != 0 )
+            return rc;
+    }
 
     /* open the dynamic linker libraries */
-    rc = VLinkerOpen ( pb . ld, & libs );
+    rc = VLinkerOpen ( pb . pr . ld, & libs );
     if ( rc == 0 )
     {
-        pb . libs = libs;
-        VProdResolveWritableColumns ( & pb );
+        pb . pr . libs = libs;
+        VProdResolveWritableColumns ( & pb , self->suspend_triggers );
         KDlsetRelease ( libs );
 
         if ( rc == 0 )
@@ -430,6 +493,11 @@ rc_t VCursorListWritableColumns ( VCursor *self, BSTree *columns )
     }
 
     return rc;
+}
+
+rc_t VCursorListWritableColumns ( VCursor *self, BSTree *columns )
+{
+    return VCursorListSeededWritableColumns ( self, columns, NULL );
 }
 
 /* SetRowId
@@ -553,6 +621,52 @@ LIB_EXPORT rc_t CC VCursorCommitRow ( VCursor *self )
     return rc;
 }
 
+/* RepeatRow
+ *  repeats the current row by the count provided
+ *  row must have been committed
+ *
+ *  AVAILABILITY: version 2.6
+ *
+ *  "count" [ IN ] - the number of times to repeat
+ *  the current row.
+ */
+LIB_EXPORT rc_t CC VCursorRepeatRow ( VCursor *self, uint64_t count )
+{
+    rc_t rc = 0;
+
+    if ( self == NULL )
+        rc = RC ( rcVDB, rcCursor, rcUpdating, rcSelf, rcNull );
+    else if ( self -> read_only )
+        rc = RC ( rcVDB, rcCursor, rcUpdating, rcCursor, rcReadonly );
+    else if ( self -> state == vcFailed )
+        rc = RC ( rcVDB, rcCursor, rcUpdating, rcCursor, rcInvalid );
+    else if ( self -> state < vcRowOpen )
+        rc = RC ( rcVDB, rcCursor, rcUpdating, rcRow, rcNotOpen );
+    else if ( self -> state < vcRowCommitted )
+        rc = RC ( rcVDB, rcCursor, rcUpdating, rcRow, rcInvalid );
+    else if ( count != 0 )
+    {
+        WColumnRepeatRowData pb;
+        pb . end_id = self -> row_id;
+        pb . count = count;
+
+        /* tell columns to commit the row, and allow
+           each to return an earlier cutoff id ( half-closed ) */
+        VectorForEach ( & self -> row, false, WColumnRepeatRow, & pb );
+
+        /* extend the current row-id */
+        if ( self -> end_id < self -> row_id )
+            self -> row_id += count;
+        else
+        {
+            self -> row_id += count;
+            self -> end_id += count;
+        }
+    }
+
+    return rc;
+}
+
 /* CloseRow
  *  balances OpenRow message
  *  if there are uncommitted modifications,
@@ -584,7 +698,7 @@ LIB_EXPORT rc_t CC VCursorCloseRow ( const VCursor *cself )
             /* close off the page if so requested */
             if ( self -> state == vcPageCommit )
             {
-                rc = VCursorFlushPage ( self );
+                rc = VCursorFlushPageInt ( self );
                 if ( rc )
                 {
                     self -> state = vcFailed;
@@ -719,7 +833,7 @@ bool CC run_trigger_prods ( void *item, void *data )
     VProduction *prod = item;
 
     VBlob *blob;
-    pb -> rc = VProductionReadBlob ( prod, & blob, pb -> id , pb -> cnt);
+    pb -> rc = VProductionReadBlob ( prod, & blob, pb -> id , pb -> cnt, NULL);
     if ( pb -> rc != 0 )
         return true;
     if ( blob != NULL )
@@ -824,7 +938,8 @@ rc_t CC run_flush_thread ( const KThread *t, void *data )
 }
 #endif
 
-LIB_EXPORT rc_t CC VCursorFlushPage ( VCursor *self )
+static
+rc_t VCursorFlushPageInt ( VCursor *self )
 {
     rc_t rc;
 
@@ -862,22 +977,22 @@ LIB_EXPORT rc_t CC VCursorFlushPage ( VCursor *self )
             }
 
 #if VCURSOR_FLUSH_THREAD
-            MTCURSOR_DBG (( "VCursorFlushPage: going to acquire lock\n" ));
+            MTCURSOR_DBG (( "VCursorFlushPageInt: going to acquire lock\n" ));
             /* get lock */
             rc = KLockAcquire ( self -> flush_lock );
             if ( rc != 0 )
                 return rc;
 
-            MTCURSOR_DBG (( "VCursorFlushPage: have lock\n" ));
+            MTCURSOR_DBG (( "VCursorFlushPageInt: have lock\n" ));
 
             /* make sure that background thread is ready */
             while ( self -> flush_state == vfBusy )
             {
-                MTCURSOR_DBG (( "VCursorFlushPage: waiting for background thread\n" ));
+                MTCURSOR_DBG (( "VCursorFlushPageInt: waiting for background thread\n" ));
                 rc = KConditionWait ( self -> flush_cond, self -> flush_lock );
                 if ( rc != 0 )
                 {
-                    LOGERR ( klogSys, rc, "VCursorFlushPage: wait failed - exiting" );
+                    LOGERR ( klogSys, rc, "VCursorFlushPageInt: wait failed - exiting" );
                     KLockUnlock ( self -> flush_lock );
                     return rc;
                 }
@@ -890,23 +1005,23 @@ LIB_EXPORT rc_t CC VCursorFlushPage ( VCursor *self )
                 else
                 {
                     rc_t rc2;
-                    MTCURSOR_DBG (( "VCursorFlushPage: waiting on thread to exit\n" ));
+                    MTCURSOR_DBG (( "VCursorFlushPageInt: waiting on thread to exit\n" ));
                     rc = KThreadWait ( self -> flush_thread, & rc2 );
                     if ( rc == 0 )
                     {
                         rc = rc2;
-                        MTCURSOR_DBG (( "VCursorFlushPage: releasing thread\n" ));
+                        MTCURSOR_DBG (( "VCursorFlushPageInt: releasing thread\n" ));
                         KThreadRelease ( self -> flush_thread );
                         self -> flush_thread = NULL;
                     }
                 }
 
-                PLOGERR ( klogInt, (klogInt, rc, "VCursorFlushPage: not in ready state[$(state)] - exiting","state=%hu",self -> flush_state ));
+                PLOGERR ( klogInt, (klogInt, rc, "VCursorFlushPageInt: not in ready state[$(state)] - exiting","state=%hu",self -> flush_state ));
                 KLockUnlock ( self -> flush_lock );
                 return rc;
             }
 
-            MTCURSOR_DBG (( "VCursorFlushPage: running buffer page\n" ));
+            MTCURSOR_DBG (( "VCursorFlushPageInt: running buffer page\n" ));
 #endif
 
             /* first, tell all columns to bundle up their pages into buffers */
@@ -922,7 +1037,7 @@ LIB_EXPORT rc_t CC VCursorFlushPage ( VCursor *self )
                 /* supposed to be constant */
                 assert ( end_id == self -> end_id );
 #if VCURSOR_FLUSH_THREAD
-                MTCURSOR_DBG (( "VCursorFlushPage: pages buffered - capturing id and count\n" ));
+                MTCURSOR_DBG (( "VCursorFlushPageInt: pages buffered - capturing id and count\n" ));
                 self -> flush_id = self -> start_id;
                 self -> flush_cnt = self -> end_id - self -> start_id;
 
@@ -930,11 +1045,11 @@ LIB_EXPORT rc_t CC VCursorFlushPage ( VCursor *self )
                 self -> end_id = self -> row_id + 1;
                 self -> state = vcReady;
 
-                MTCURSOR_DBG (( "VCursorFlushPage: state set to busy - signaling bg thread\n" ));
+                MTCURSOR_DBG (( "VCursorFlushPageInt: state set to busy - signaling bg thread\n" ));
                 self -> flush_state = vfBusy;
                 rc = KConditionSignal ( self -> flush_cond );
                 if ( rc != 0 )
-                    LOGERR ( klogSys, rc, "VCursorFlushPage: condition returned error on signal" );
+                    LOGERR ( klogSys, rc, "VCursorFlushPageInt: condition returned error on signal" );
 #else
                 /* run all validation and trigger productions */
                 pb . id = self -> start_id;
@@ -955,10 +1070,71 @@ LIB_EXPORT rc_t CC VCursorFlushPage ( VCursor *self )
             }
 
 #if VCURSOR_FLUSH_THREAD
-            MTCURSOR_DBG (( "VCursorFlushPage: unlocking\n" ));
+            MTCURSOR_DBG (( "VCursorFlushPageInt: unlocking\n" ));
             KLockUnlock ( self -> flush_lock );
 #endif
         }
+    }
+
+    return rc;
+}
+
+LIB_EXPORT rc_t CC VCursorFlushPage ( VCursor *self )
+{
+    rc_t rc = VCursorFlushPageInt ( self );
+    if ( rc == 0 )
+    {
+#if VCURSOR_FLUSH_THREAD
+        MTCURSOR_DBG (( "VCursorFlushPage: going to acquire lock\n" ));
+        /* get lock */
+        rc = KLockAcquire ( self -> flush_lock );
+        if ( rc != 0 )
+            return rc;
+
+        MTCURSOR_DBG (( "VCursorFlushPage: have lock\n" ));
+
+        /* wait until background thread has finished */
+        while ( self -> flush_state == vfBusy )
+        {
+            MTCURSOR_DBG (( "VCursorFlushPage: waiting for background thread\n" ));
+            rc = KConditionWait ( self -> flush_cond, self -> flush_lock );
+            if ( rc != 0 )
+            {
+                LOGERR ( klogSys, rc, "VCursorFlushPage: wait failed - exiting" );
+                KLockUnlock ( self -> flush_lock );
+                return rc;
+            }
+        }
+
+        /* what was the proper rc */
+        if ( self -> flush_state != vfReady )
+        {
+            if ( self -> flush_state != vfBgErr )
+                rc = RC ( rcVDB, rcCursor, rcFlushing, rcCursor, rcInconsistent );
+            else
+            {
+                rc_t rc2;
+                MTCURSOR_DBG (( "VCursorFlushPage: waiting on thread to exit\n" ));
+                rc = KThreadWait ( self -> flush_thread, & rc2 );
+                if ( rc == 0 )
+                {
+                    rc = rc2;
+                    MTCURSOR_DBG (( "VCursorFlushPage: releasing thread\n" ));
+                    KThreadRelease ( self -> flush_thread );
+                    self -> flush_thread = NULL;
+                }
+            }
+
+            PLOGERR ( klogInt, (klogInt, rc, "VCursorFlushPage: not in ready state[$(state)] - exiting",
+                                "state=%hu", self -> flush_state ));
+
+            KLockUnlock ( self -> flush_lock );
+            return rc;
+        }
+        KLockUnlock ( self -> flush_lock );
+#endif
+        assert ( self -> row_id == self -> start_id );
+        self -> end_id = self -> row_id;
     }
 
     return rc;

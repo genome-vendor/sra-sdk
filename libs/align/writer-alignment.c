@@ -45,7 +45,7 @@
 static const TableWriterColumn TableWriterAlgn_cols[ewalgn_cn_Last + 1] =
 {
     /* order is important, see enum in .h !!! */
-    {0, "TMP_KEY_ID", sizeof(uint32_t) * 8, ewcol_Temporary | ewcol_Ignore},
+    {0, "TMP_KEY_ID", sizeof(uint64_t) * 8, ewcol_Temporary | ewcol_Ignore},
     {0, "PLOIDY", sizeof(uint32_t) * 8, ewcol_Ignore},
     {0, "SEQ_SPOT_ID", sizeof(int64_t) * 8, ewcol_IsArray | ewcol_Ignore},
     {0, "SEQ_READ_ID", sizeof(INSDC_coord_one) * 8, ewcol_IsArray },
@@ -66,7 +66,9 @@ static const TableWriterColumn TableWriterAlgn_cols[ewalgn_cn_Last + 1] =
     {0, "HAS_MISMATCH", sizeof(bool) * 8, ewcol_IsArray},
     {0, "(bool)HAS_REF_OFFSET", sizeof(bool) * 8, ewcol_IsArray},
     {0, "MISMATCH", sizeof(INSDC_dna_text) * 8, ewcol_IsArray},
-    {0, "REF_OFFSET", sizeof(int32_t) * 8, ewcol_IsArray}
+    {0, "REF_OFFSET", sizeof(int32_t) * 8, ewcol_IsArray},
+    {0, "EVIDENCE_ALIGNMENT_IDS", sizeof(int64_t) * 8, ewcol_IsArray | ewcol_Ignore},
+    {0, "ALIGN_GROUP", sizeof(char) * 8, ewcol_IsArray | ewcol_Ignore }
 };
 
 static const TableReaderColumn TableAlgnReadTmpKey_cols[] = {
@@ -105,12 +107,17 @@ LIB_EXPORT rc_t CC TableWriterAlgn_Make(const TableWriterAlgn** cself, VDatabase
             switch(type) {
             case ewalgn_tabletype_PrimaryAlignment:
                 tbl_nm = "PRIMARY_ALIGNMENT";
+                self->cols[ewalgn_cn_ALIGN_GROUP].flags &= ~ewcol_Ignore;
                 break;
             case ewalgn_tabletype_SecondaryAlignment:
                 tbl_nm = "SECONDARY_ALIGNMENT";
+#if 0
                 self->cols[ewalgn_cn_HAS_MISMATCH].flags |= ewcol_Ignore;
                 self->cols[ewalgn_cn_MISMATCH].flags |= ewcol_Ignore;
-
+#else
+                self->cols[ewalgn_cn_MISMATCH].name = "TMP_MISMATCH";
+                self->cols[ewalgn_cn_HAS_MISMATCH].name = "TMP_HAS_MISMATCH";
+#endif
                 self->cols[ewalgn_cn_MATE_REF_ORIENTATION].flags &= ~ewcol_Ignore;
                 self->cols[ewalgn_cn_MATE_REF_ID].flags &= ~ewcol_Ignore;
                 self->cols[ewalgn_cn_MATE_REF_POS].flags &= ~ewcol_Ignore;
@@ -123,13 +130,19 @@ LIB_EXPORT rc_t CC TableWriterAlgn_Make(const TableWriterAlgn** cself, VDatabase
                 options |= ewalgn_co_PLOIDY;
                 self->cols[ewalgn_cn_SEQ_SPOT_ID].flags |= ewcol_Ignore;
                 self->cols[ewalgn_cn_SEQ_READ_ID].flags |= ewcol_Ignore;
+                self->cols[ewalgn_cn_EVIDENCE_ALIGNMENT_IDS].flags &= ~ewcol_Ignore;
                 break;
             case ewalgn_tabletype_EvidenceAlignment:
                 tbl_nm = "EVIDENCE_ALIGNMENT";
                 self->ref_table_name = "EVIDENCE_INTERVAL";
                 self->cols[ewalgn_cn_REF_PLOIDY].flags &= ~ewcol_Ignore;
+#if 0
                 self->cols[ewalgn_cn_HAS_MISMATCH].flags |= ewcol_Ignore;
                 self->cols[ewalgn_cn_MISMATCH].flags |= ewcol_Ignore;
+#else
+		self->cols[ewalgn_cn_MISMATCH].name = "TMP_MISMATCH";
+                self->cols[ewalgn_cn_HAS_MISMATCH].name = "TMP_HAS_MISMATCH";
+#endif
                 options |= ewalgn_co_unsorted;
                 break;
             default:
@@ -153,6 +166,8 @@ LIB_EXPORT rc_t CC TableWriterAlgn_Make(const TableWriterAlgn** cself, VDatabase
                 if( type == ewalgn_tabletype_SecondaryAlignment ) {
                     self->cols[ewalgn_cn_MISMATCH].name = "TMP_MISMATCH";
                     self->cols[ewalgn_cn_MISMATCH].flags &= ~ewcol_Ignore;
+                    self->cols[ewalgn_cn_HAS_MISMATCH].name = "TMP_HAS_MISMATCH";
+                    self->cols[ewalgn_cn_HAS_MISMATCH].flags &= ~ewcol_Ignore;
                 }
             }
             if( options & ewalgn_co_MATE_ALIGN_ID_only ) {
@@ -250,6 +265,8 @@ LIB_EXPORT rc_t CC TableWriterAlgn_Write(const TableWriterAlgn* cself, const Tab
         TW_COL_WRITE(cself->base, cself->cols[ewalgn_cn_MATE_REF_ID], data->mate_ref_id);
         TW_COL_WRITE(cself->base, cself->cols[ewalgn_cn_MATE_REF_POS], data->mate_ref_pos);
         TW_COL_WRITE(cself->base, cself->cols[ewalgn_cn_TEMPLATE_LEN], data->template_len);
+        TW_COL_WRITE(cself->base, cself->cols[ewalgn_cn_EVIDENCE_ALIGNMENT_IDS], data->alingment_ids);
+        TW_COL_WRITE(cself->base, cself->cols[ewalgn_cn_ALIGN_GROUP], data->align_group);
 
         if( rc == 0 ) {
             rc = TableWriter_CloseRow(cself->base);
@@ -286,7 +303,7 @@ LIB_EXPORT rc_t CC TableWriterAlgn_TmpKeyStart(const TableWriterAlgn* cself)
     return rc;
 }
 
-LIB_EXPORT rc_t CC TableWriterAlgn_TmpKey(const TableWriterAlgn* cself, int64_t rowid, uint32_t* key_id)
+LIB_EXPORT rc_t CC TableWriterAlgn_TmpKey(const TableWriterAlgn* cself, int64_t rowid, uint64_t* key_id)
 {
     rc_t rc = 0;
 

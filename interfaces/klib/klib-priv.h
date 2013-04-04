@@ -91,6 +91,11 @@ KLIB_EXTERN rc_t CC ReportInitVDB ( rc_t ( CC * report_obj ) ( const ReportFuncs
     rc_t ( CC * report_software ) ( const ReportFuncs *f, uint32_t indent, const char *argv_0, const char *date, ver_t tool_ver ),
     rc_t ( CC * whack ) ( void ) );
 
+
+/* RecordZombieFile
+ */
+KLIB_EXTERN void CC ReportRecordZombieFile ( void );
+
 #ifdef __cplusplus
 }
 #endif

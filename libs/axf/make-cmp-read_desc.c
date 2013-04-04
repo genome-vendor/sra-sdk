@@ -48,29 +48,30 @@
 
 static void copy(void *dst, size_t doff, void const *src, size_t soff, size_t bits)
 {
-    if ((doff & 7) == 0 && (soff & 7) == 0 && (bits & 7) == 0) {
+    if ((doff & 7) == 0 && (soff & 7) == 0 && (bits & 7) == 0)
         memcpy(&((char *)dst)[doff >> 3], &((char const *)src)[soff >> 3], bits >> 3);
-    }
-    else {
+    else
         bitcpy(dst, doff, src, soff, bits);
-    }
 }
 
 static
 rc_t CC make_cmp_read_desc_inv_impl(void *data, const VXformInfo *info, int64_t row_id,
     VFixedRowResult const *rslt, uint32_t argc, VRowData const argv [] )
 {
-    int64_t const *alignId = &((int64_t const *)argv[1].u.data.base)[argv[1].u.data.first_elem];
+    int64_t const *const alignId = &((int64_t const *)argv[1].u.data.base)[argv[1].u.data.first_elem];
+    void const *const ZERO = data;
+    void const *const base = argv[0].u.data.base;
+    unsigned src = argv[0].u.data.first_elem * rslt->elem_bits;
+    unsigned dst = rslt->first_elem * rslt->elem_bits;
     unsigned i;
     
     for (i = 0; i != rslt->elem_count; ++i) {
-        if (alignId[i] == 0) {
-            copy(rslt->base, rslt->first_elem + i * rslt->elem_bits, argv[0].u.data.base,
-                 argv[0].u.data.first_elem + i * rslt->elem_bits, rslt->elem_bits);
-        }
-        else {
-            copy(rslt->base, rslt->first_elem + i * rslt->elem_bits, data, 0, rslt->elem_bits);
-        }
+        bool const aligned = alignId[i] != 0;
+
+        copy(rslt->base, dst, !aligned ? base : ZERO, !aligned ? src : 0, rslt->elem_bits);
+
+        src += rslt->elem_bits;
+        dst += rslt->elem_bits;
     }
     return 0;
 }
@@ -79,17 +80,38 @@ static
 rc_t CC make_cmp_read_desc_impl(void *data, const VXformInfo *info, int64_t row_id,
     VFixedRowResult const *rslt, uint32_t argc, VRowData const argv [] )
 {
-    int64_t const *alignId = &((int64_t const *)argv[1].u.data.base)[argv[1].u.data.first_elem];
+    int64_t const *const alignId = &((int64_t const *)argv[1].u.data.base)[argv[1].u.data.first_elem];
+    void const *const ZERO = data;
+    void const *const base = argv[0].u.data.base;
+    unsigned src = argv[0].u.data.first_elem * rslt->elem_bits;
+    unsigned dst = rslt->first_elem * rslt->elem_bits;
     unsigned i;
     
     for (i = 0; i != rslt->elem_count; ++i) {
-        if (alignId[i] != 0) {
-            copy(rslt->base, rslt->first_elem + i * rslt->elem_bits, argv[0].u.data.base,
-                 argv[0].u.data.first_elem + i * rslt->elem_bits, rslt->elem_bits);
-        }
-        else {
-            copy(rslt->base, rslt->first_elem + i * rslt->elem_bits, data, 0, rslt->elem_bits);
-        }
+        bool const aligned = alignId[i] != 0;
+
+        copy(rslt->base, dst, aligned ? base : ZERO, aligned ? src : 0, rslt->elem_bits);
+
+        src += rslt->elem_bits;
+        dst += rslt->elem_bits;
+    }
+    return 0;
+}
+
+static
+rc_t CC make_read_start_impl(void *data, const VXformInfo *info, int64_t row_id,
+                             VFixedRowResult const *rslt, uint32_t argc, VRowData const argv [] )
+{
+    INSDC_coord_zero *const dst = &((INSDC_coord_zero *)rslt->base)[rslt->first_elem];
+    INSDC_coord_len const *const readlen = &((INSDC_coord_len const *)argv[0].u.data.base)[argv[0].u.data.first_elem];
+    INSDC_coord_zero start;
+    unsigned i;
+    
+    for (start = 0, i = 0; i != rslt->elem_count; ++i) {
+        INSDC_coord_len const rlen = readlen[i];
+
+        dst[i] = start;
+        start += rlen;
     }
     return 0;
 }
@@ -118,4 +140,17 @@ VTRANSFACT_IMPL ( NCBI_align_make_cmp_read_desc, 1, 0, 0 )
       const VFactoryParams *cp, const VFunctionParams *dp )
 {
     return make_cmp_read_desc_factory(Self, info, rslt, cp, dp);
+}
+
+/*
+ * extern function INSDC:coord:zero NCBI:align:make_read_start #1
+ *     (INSDC:coord:len read_len, I64 align_id);
+ */
+VTRANSFACT_IMPL ( NCBI_align_make_read_start, 1, 0, 0 )
+    ( const void *Self, const VXfactInfo *info, VFuncDesc *rslt,
+      const VFactoryParams *cp, const VFunctionParams *dp )
+{
+    rslt->u.pf = make_read_start_impl;
+    rslt->variant = vftFixedRow;
+    return 0;
 }

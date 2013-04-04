@@ -46,20 +46,18 @@ ALL_TOOLS = \
 #-------------------------------------------------------------------------------
 # outer targets
 #
-vers-includes: $(addsuffix .vers.h,$(EXT_TOOLS))
-
 ifeq (win,$(OS))
 all std:
 	@ echo "not building loaders under Windows"
 else
-all std: makedirs vers-includes
+all std: vers-includes
 	@ $(MAKE_CMD) $(TARGDIR)/std
 endif
 
-$(ALL_TOOLS): makedirs vers-includes
+$(ALL_TOOLS): vers-includes
 	@ $(MAKE_CMD) $(BINDIR)/$@
 
-.PHONY: vers-includes all std $(ALL_TOOLS)
+.PHONY: all std $(ALL_TOOLS)
 
 #-------------------------------------------------------------------------------
 # std
@@ -68,6 +66,13 @@ $(TARGDIR)/std: \
 	$(addprefix $(BINDIR)/,$(ALL_TOOLS))
 
 .PHONY: $(TARGDIR)/std
+
+#-------------------------------------------------------------------------------
+# vers-includes
+#
+$(TARGDIR)/vers-includes: $(addsuffix .vers.h,$(EXT_TOOLS))
+
+.PHONY: $(TARGDIR)/vers-includes
 
 #-------------------------------------------------------------------------------
 # clean
@@ -117,11 +122,12 @@ LOADER_LIB = \
 	-lkxml \
 	-lkxfs \
 	-lklib \
+	-lkq \
 	-lkproc \
 	-lm
 
 ifneq (win,$(OS))
-	LOADER_LIB += -lkq -lxml2
+	LOADER_LIB += -lxml2
 endif
 
 #------------------------------------------------------------------------------

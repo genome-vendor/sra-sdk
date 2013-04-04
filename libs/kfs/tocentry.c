@@ -1378,10 +1378,10 @@ bool check_limit (const void * ptr, const void * limit, size_t size)
 	ptr = *_ptr;							\
 									\
 	if (rev)							\
-	    *pout = S (*ptr++);						\
+	    *pout = S (*ptr);						\
 	else								\
-	    *pout = *ptr++;						\
-	*_ptr = ptr;							\
+	    *pout = *ptr;						\
+	*_ptr = ++ptr;							\
 	return 0;							\
     }
 
@@ -1445,6 +1445,7 @@ rc_t KTocEntryInflateNodeCommon (const void ** ptr,
 	memcpy (common->name+plen+1, *ptr, nlen);
 	common->name[plen + nlen + 1] = '\0';
     }
+
     *ptr = ((uint8_t*)*ptr) + nlen;
 
     rc = read_i64 (ptr, limit, rev, &common->mtime);
@@ -1717,10 +1718,7 @@ rc_t KTocInflatePBSTree ( KToc * self, uint64_t arcsize, const void * treestart,
     rc_t rc;
     PBSTree * pbst;
 
-    /* TBD - need to make this know about byte-swapping */
-    bool byteswap = false;
-
-    rc = PBSTreeMake (&pbst, treestart, maxsize, byteswap);
+    rc = PBSTreeMake (&pbst, treestart, maxsize, rev);
     if (rc == 0)
     {
 	KTocEntryInflateData data;

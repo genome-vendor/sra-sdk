@@ -47,12 +47,16 @@
 
 #include <insdc/insdc.h>
 
+#define ARG_BASE(TYPE, N) (((TYPE const *)argv[(N)].u.data.base) + argv[(N)].u.data.first_elem)
+#define ARG_ALIAS(TYPE, NAME, N) TYPE const *const NAME = ARG_BASE(TYPE, N)
+#define ARG_ALIAS_COND(TYPE, NAME, N, ALT) TYPE const *const NAME = ((argc > (N)) ? ARG_BASE(TYPE, N) : ALT)
+
 typedef struct trim_self_struct {
     uint8_t version;
 } self_t;
 
 static
-rc_t op2b(KDataBuffer *dst, size_t offset, size_t *count, char opcode, unsigned oplen)
+rc_t op2b(KDataBuffer *dst, unsigned const offset, unsigned *const count, int const opcode, unsigned oplen)
 {
     unsigned digits = 1;
     unsigned scale = 10;
@@ -71,19 +75,22 @@ rc_t op2b(KDataBuffer *dst, size_t offset, size_t *count, char opcode, unsigned 
     *count = digits + 1;
     
     if (dst) {
-        if (offset + digits + 1 > dst->elem_count) {
-            rc_t rc = KDataBufferResize(dst, offset + digits + 1);
+        unsigned const need = offset + digits + 1;
+        
+        if (need > dst->elem_count) {
+            rc_t rc = KDataBufferResize(dst, need);
             if (rc) return rc;
         }
         {
             char *const base = &((char *)dst->base)[offset];
             
             base[digits] = opcode;
-            while (digits) {
-                --digits;
-                base[digits] = (oplen % 10) + '0';
+            do {
+                unsigned const digit = oplen % 10;
+                
                 oplen /= 10;
-            }
+                base[--digits] = digit + '0';
+            } while (digits);
         }
     }
     return 0;
@@ -96,7 +103,7 @@ rc_t cigar_string(KDataBuffer *dst, size_t boff, uint64_t *bsize, bool const ful
                   int32_t const ref_offset[], unsigned const ro_len, unsigned *ro_offset)
 {
     size_t bsz = 0;
-    size_t nwrit;
+    unsigned nwrit;
     uint32_t i,m,mm;
     rc_t rc;
     unsigned cur_off = ro_offset ? *ro_offset : 0;
@@ -187,60 +194,65 @@ rc_t cigar_string_2(KDataBuffer *dst, size_t boff, uint64_t *bsize, const int ve
                     bool const has_mismatch[], bool const has_ref_offset[],
                     INSDC_coord_zero const read_start, INSDC_coord_zero const read_end,
                     int32_t const ref_offset[], unsigned const ro_len, unsigned* ro_offset,
-                    unsigned const reflen)
+                    unsigned const reflen, bool use_S)
 {
     int ri;
     unsigned si;
     unsigned di;
-    unsigned ins;
     rc_t rc;
-    size_t nwrit;
+    unsigned nwrit;
     unsigned cur_off = ro_offset ? *ro_offset : 0;
     unsigned op_len;
     int opcode;
     int const opM = version == 1 ? '=' : 'M';
     int const opX = version == 1 ? 'X' : 'M';
+    int const opS = use_S ? 'S' : 'I';
     
 #define BUF_WRITE(OP, LEN) { if ((rc = op2b(dst, di + boff, &nwrit, (OP), (LEN))) != 0) return rc; di += nwrit; }
-
-    for (si = read_start, op_len = di = ins = 0, opcode = ri = 0; si < read_end; ) {
-#if 0
-        fprintf(stderr, "si: %u; ri: %i; ins: %u\n", si, ri, ins);
-#endif
+    si=read_start;
+    if (/* !use_S && */read_start == read_end && reflen > 0) {/** full delete as a last ploidy ends up written nowhere  **/
+        di=0;
+        opcode = 'D';
+        op_len = reflen;
+    }
+    else for (op_len = di = 0, opcode = ri = 0; si < read_end && ri <= (int)reflen; ) {
         if (has_ref_offset[si]) {
             int offs;
             
-            if (cur_off >= ro_len) /*** bad data ***/
-                return RC(rcXF, rcFunction, rcExecuting, rcData, rcInvalid);
-            
-            offs = ref_offset[cur_off++];
-            ri += offs;
-            
-            if (ins == 0) {
+            if(op_len > 0) {
                 BUF_WRITE(opcode, op_len);
                 op_len = 0;
-                opcode = 0;
             }
+            if (cur_off >= ro_len) /*** bad data ***/
+                return RC(rcXF, rcFunction, rcExecuting, rcData, rcInvalid);
+
+            offs = ref_offset[cur_off++];
             if (offs < 0) {
-                BUF_WRITE(si ? 'I' : 'S', -offs);
-                ins -= offs;
+                unsigned j;
+                for(j=1; j<-offs && (si + j) < read_end;){
+                    if(has_ref_offset[si+j]){/*** structured insert **/
+                        BUF_WRITE(si ? 'I' : opS, j);
+                        offs += j;
+                        si   += j;
+                        j=1;
+                    } else {
+                        j++;
+                    }
+                }
+                if(offs < 0){
+                    BUF_WRITE(si ? 'I' : opS, -offs);
+                    si -= offs;
+                }
+                continue;
             }
             else if (offs > 0) {
                 BUF_WRITE('D', offs);
+                ri += offs;
             }
             else
                 return RC(rcXF, rcFunction, rcExecuting, rcData, rcInvalid);
         }
-        if (ins) {
-            opcode = 'M';
-            op_len = ins;
-            --ins;
-            if (ins == 0) {
-                opcode = 0;
-                op_len = 0;
-            }
-        }
-        else if (ri < (int)reflen) {
+        if (ri < (int)reflen) {
             int const op_nxt = (has_mismatch[si] ? opX : opM);
             
             if (op_len == 0 || opcode == op_nxt)
@@ -257,15 +269,22 @@ rc_t cigar_string_2(KDataBuffer *dst, size_t boff, uint64_t *bsize, const int ve
         ++ri;
     }
     BUF_WRITE(opcode, op_len);
-    if (si < read_end)
-        BUF_WRITE('S', read_end - si);
+    if (si < read_end){
+        if (cur_off + 1 < ro_len) { 
+            assert(read_end + ref_offset[cur_off] == si);
+            cur_off++;
+            BUF_WRITE('I', read_end - si);
+        }
+        else {
+            BUF_WRITE(opS, read_end - si);
+        }
+    }
     *bsize = di;
     if (ro_offset) *ro_offset = cur_off;
 
     return 0;
 #undef BUF_WRITE
 }
-
 
 static INSDC_coord_len right_soft_clip(unsigned seq_len, unsigned ref_len,
                                        unsigned noffsets,
@@ -312,7 +331,7 @@ rc_t CC cigar_impl ( void *data, const VXformInfo *info, int64_t row_id,
         rc = cigar_string_2(rslt->data, 0, &rslt->elem_count, self->version & 0x1,
                             has_mismatch, has_ref_offset,
                             0, rdln, ref_offset, ro_len, NULL,
-                            rfln[argv[3].u.data.first_elem]);
+                            rfln[argv[3].u.data.first_elem],true);
     }
     return rc;
 }
@@ -361,12 +380,6 @@ rc_t CC cigar_impl_2 ( void *data, const VXformInfo *info, int64_t row_id,
     else {
         rslt->data->elem_bits = 8;
         rslt->elem_count = 0;
-
-        if (argv[0].u.data.elem_count == 0 ||
-            argv[1].u.data.elem_count == 0)
-        {
-            return KDataBufferResize(rslt->data, rslt->elem_count);
-        }
     }
     for (n = 0, start = 0, ro_offset = 0; n < nreads; start += read_len[n++]) {
         if (argc == 4)
@@ -381,7 +394,7 @@ rc_t CC cigar_impl_2 ( void *data, const VXformInfo *info, int64_t row_id,
                                 has_mismatch, has_ref_offset,
                                 start, start + read_len[n],
                                 ref_offset, ro_len, &ro_offset,
-                                reflen[argv[4].u.data.first_elem]);
+                                reflen[argv[4].u.data.first_elem],(nreads==1));
         }
         if (rc) return rc;
         if (self->version & 0x04)
@@ -522,25 +535,81 @@ VTRANSFACT_IMPL ( NCBI_align_edit_distance, 1, 0, 0 ) ( const void *Self, const 
 
 
 /*
- * edit distance := sum of inserts + sum of deletes + number of mismatches excluding soft clips
+ * edit distance = sum of lengths of inserts
+ *               + sum of lengths of deletes
+ *               + number of mismatches
+ * excluding soft clips
  */
+
+unsigned edit_distance(bool const has_ref_offset[],
+                       bool const has_mismatch[],
+                       unsigned const readlen,
+                       unsigned const reflen,
+                       int32_t const ref_offset[],
+                       unsigned const offsets)
+{
+    if (readlen == 0) {
+        /* full delete */
+        return reflen;
+    }
+    else {
+        INSDC_coord_len const rsc = right_soft_clip(readlen, reflen, offsets, ref_offset);
+        unsigned indels = 0;
+        unsigned misses = 0;
+        unsigned i = 0;
+        unsigned j = 0;
+        
+        if (has_ref_offset[0] && ref_offset[j] < 0)
+            j = i = 1;
+        
+        /* sum of insert lengths + sum of delete lengths excluding soft clips */
+        for ( ; i < readlen - rsc; ++i) {
+            if (has_ref_offset[i]) {
+                int const offset = ref_offset[j++];
+                
+                if (offset < 0)
+                    indels += -offset;
+                else
+                    indels +=  offset;
+            }
+        }
+        /* sum of mismatches not in inserts or soft clips */
+        for (j = i = 0; i < readlen - rsc;) {
+            if (has_ref_offset[i]) {
+                int offset = ref_offset[j++];
+                
+                if (offset < 0) {
+                    i += -offset;
+                    continue;
+                }
+            }
+            misses += has_mismatch[i] ? 1 : 0;
+            ++i;
+        }
+        return indels + misses;
+    }
+}
+
 static
 rc_t CC edit_distance_2_impl ( void *data, const VXformInfo *info, int64_t row_id,
     VRowResult *rslt, uint32_t argc, const VRowData argv [] )
 {
     rc_t rc;
+    unsigned const nreads = argc > 4 ? argv[4].u.data.elem_count : 1;
     unsigned const len = argv[0].u.data.elem_count;
     unsigned const noffsets = argv[2].u.data.elem_count;
-    uint32_t *dst;
+    INSDC_coord_len const dummy_rl = len;
 
-    uint8_t const *has_mismatch    = argv [ 0 ] . u . data . base;
-    uint8_t const *has_ref_offset  = argv [ 1 ] . u . data . base;
-    int32_t const *ref_offset      = argv [ 2 ] . u . data . base;
-    INSDC_coord_len const *ref_len = argv [ 3 ] . u . data . base;
+    ARG_ALIAS     (bool           , has_mismatch  , 0);
+    ARG_ALIAS     (bool           , has_ref_offset, 1);
+    ARG_ALIAS     (int32_t        , ref_offset    , 2);
+    ARG_ALIAS     (INSDC_coord_len, ref_len       , 3);
+    ARG_ALIAS_COND(INSDC_coord_len, readlen       , 4, &dummy_rl);
     
-    assert(argv[0].u.data.elem_bits == 8);
-    assert(argv[1].u.data.elem_bits == 8);
-    assert(argv[2].u.data.elem_bits == 32);
+    assert(argv[0].u.data.elem_bits == sizeof(has_mismatch  [0]) * 8);
+    assert(argv[1].u.data.elem_bits == sizeof(has_ref_offset[0]) * 8);
+    assert(argv[2].u.data.elem_bits == sizeof(ref_offset    [0]) * 8);
+    assert(argv[3].u.data.elem_bits == sizeof(ref_len       [0]) * 8);
 
     rslt->data->elem_bits = rslt->elem_bits;
     if (len == 0) {
@@ -549,41 +618,37 @@ rc_t CC edit_distance_2_impl ( void *data, const VXformInfo *info, int64_t row_i
     
     assert(len == argv[1].u.data.elem_count);
 
-    has_mismatch   += argv [ 0 ] . u . data . first_elem;
-    has_ref_offset += argv [ 1 ] . u . data . first_elem;
-    ref_offset     += argv [ 2 ] . u . data . first_elem;
-    ref_len        += argv [ 3 ] . u . data . first_elem;
-
-    rslt -> elem_count = 1;
-    rc = KDataBufferResize ( rslt -> data, 1);
-    if ( rc != 0 ) return rc;
-    
-    dst = rslt -> data -> base;
-    dst[0] = 0;
-    if (len) {
-        INSDC_coord_len const rsc = right_soft_clip(len, ref_len[0], noffsets, ref_offset);
-        unsigned y = 0;
+    rslt->elem_count = nreads;
+    rc = KDataBufferResize(rslt->data, nreads);
+    if (rc == 0) {
         unsigned i;
-        unsigned j;
+        unsigned start = 0;
+        unsigned offset = 0;
+        uint32_t *const dst = rslt->data->base;
         
-        for (j = i = 0; i < len - rsc;) {
-            if (has_ref_offset[i]) {
-                int offset = ref_offset[j++];
-                
-                if (offset < 0) {
-                    if (i) y -= offset;
-                    i -= offset;
-                    continue;
-                }
-                y += offset;
+        for (i = 0; i < nreads; ++i) {
+            unsigned const rlen = readlen[i];
+            unsigned j;
+            unsigned offsets = 0;
+            
+            for (j = 0; j < rlen; ++j) {
+                if (has_ref_offset[start + j])
+                    ++offsets;
             }
-            y += has_mismatch[i] ? 1 : 0;
-            ++i;
+            if (offsets + offset > noffsets)
+                return RC(rcXF, rcFunction, rcExecuting, rcData, rcInvalid);
+            
+            dst[i] = edit_distance(has_ref_offset + start,
+                                   has_mismatch + start,
+                                   rlen,
+                                   ref_len[0],
+                                   ref_offset + offset,
+                                   offsets);
+            start += rlen;
+            offset += offsets;
         }
-        dst[0] = y;
     }
-
-    return 0;
+    return rc;
 }
 
 /*
@@ -650,9 +715,9 @@ rc_t CC generate_has_mismatch_impl ( void *data, const VXformInfo *info, int64_t
             if( roi >= ro_len){
                 return RC(rcXF, rcFunction, rcExecuting, rcData, rcInvalid );
             }
-            ri += ref_offset[roi];
+            ri += ref_offset[roi++];
         }
-        if(ri >=0 && ri < ref_len && (sbj[si]&ref[ri])!=0)
+        if(ri >=0 && ri < ref_len && sbj[si]==ref[ri])
             dst[si]=0;
         else
             dst[si]=1;
@@ -707,9 +772,9 @@ rc_t CC generate_mismatch_impl ( void *data, const VXformInfo *info, int64_t row
             if( roi >= ro_len){
                 return RC(rcXF, rcFunction, rcExecuting, rcData, rcInvalid );
             }
-            ri += ref_offset[roi];
+            ri += ref_offset[roi++];
         }
-        if(ri >=0 && ri < ref_len && (sbj[si]&ref[ri])!=0){/*noop*/}
+        if(ri >=0 && ri < ref_len && sbj[si]==ref[ri]){/*noop*/}
         else {
             if(len > sizeof(buf)) return RC(rcXF, rcFunction, rcExecuting, rcBuffer, rcInsufficient);
             buf[len++]=sbj[si];

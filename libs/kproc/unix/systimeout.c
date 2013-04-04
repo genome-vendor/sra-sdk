@@ -25,6 +25,7 @@
 */
 
 #include <sysalloc.h>
+#include <kproc/timeout.h>
 #include <os-native.h>
 #include <klib/log.h>
 #include <klib/rc.h>

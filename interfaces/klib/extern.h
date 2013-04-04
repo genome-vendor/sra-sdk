@@ -54,7 +54,7 @@
    function addresses resolve to the thunk and not
    the actual function. */
 #define LIB_IMPORT extern
-#define LIB_IMPORT_DATA __declspec ( dllimport )
+#define LIB_IMPORT_DATA extern __declspec ( dllimport )
 #define LIB_EXPORT __declspec ( dllexport )
 #define LIB_EXPORT_DATA __declspec ( dllexport )
 

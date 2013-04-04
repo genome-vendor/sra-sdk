@@ -58,6 +58,7 @@ extern "C" {
  * forwards
  */
 struct KFile;
+struct KDataBuffer;
 
 
 /*--------------------------------------------------------------------------
@@ -130,6 +131,7 @@ enum
     kbtFloatKey,                /* key is a float                   */
     kbtDoubleKey,               /* key is a double                  */
 #endif
+    kbtPacked2naKey,            /* key is in packed 2na             */
     kbtLastDefined
 };
 
@@ -161,6 +163,8 @@ enum
  *   opaque key sizes. min == max implies fixed size. ignored for well
  *   known fixed size key types.
  *
+ *  "id_size" [ IN ] - size of id in bytes, from 1 to 8.
+ *
  *  "min_value_size" [ IN ] and "max_value_size" [ IN ] - specifies the allowed
  *   value sizes. min == max implies fixed size.
  *
@@ -173,7 +177,7 @@ KDB_EXTERN rc_t CC KBTreeMakeRead ( const KBTree **bt,
 #if BTREE_KEY2ID
 KDB_EXTERN rc_t CC KBTreeMakeUpdate ( KBTree **bt, struct KFile *backing,
     size_t climit, bool write_through, KBTreeKeyType type,
-    size_t min_key_size, size_t max_key_size,
+    size_t min_key_size, size_t max_key_size, size_t id_size,
     KBTreeCompareFunc cmp );
 #else
 KDB_EXTERN rc_t CC KBTreeMakeUpdate ( KBTree **bt, struct KFile *backing,
@@ -225,11 +229,94 @@ KDB_EXTERN rc_t CC KBTreeSize ( const KBTree *self,
  *   opaque key
  */
 #if BTREE_KEY2ID
-KDB_EXTERN rc_t CC KBTreeFind ( const KBTree *self, uint32_t *id,
+KDB_EXTERN rc_t CC KBTreeFind ( const KBTree *self, uint64_t *id,
     const void *key, size_t key_size );
 #else
 KDB_EXTERN rc_t CC KBTreeFind ( const KBTree *self, KBTreeValue *val,
     const void *key, size_t key_size );
+#endif
+
+
+/* FindOne
+ *  searches for a match
+ *  where "match" is defined as an exact match
+ *  of the shorter ( key, entry ) against the
+ *  corresponding prefix of the longer.
+ *
+ *  "id" [ OUT ] - return id of matching entry if found
+ *
+ *  "key" [ IN ] and "key_size" [ IN ] - describes an
+ *   opaque key
+ *
+ *  "match_type" [ IN ] - choose search algorithm
+ *
+ *  "remainder" [ OUT ] - returns the number of bytes
+ *  left unmatched by comparison between the key and entry.
+ *  values:
+ *    = 0    - exact match
+ *    < 0    - key is shorter than entry
+ *    > 0    - key is longer than entry
+ */
+#if BTREE_KEY2ID && 1
+typedef uint32_t KBTreeMatchType;
+enum
+{
+    kbtMatchFirst = 1,       /* choose first matching entry       */
+    kbtMatchRandom           /* choose a matching entry at random */
+};
+
+typedef struct KBTreeMatchResult KBTreeMatchResult;
+struct KBTreeMatchResult
+{
+    uint64_t id;
+    int64_t remainder;
+};
+
+KDB_EXTERN rc_t CC KBTreeFindOne ( const KBTree *self,
+    KBTreeMatchResult *found, KBTreeMatchType match_type,
+    const void *key, size_t key_size );
+#endif
+
+
+/* FindAll
+ *  searches for all matches
+ *  where "match" is defined as an exact match
+ *  of the shorter ( key, entry ) against the
+ *  corresponding prefix of the longer.
+ *
+ *  "ids" [ IN/OUT ] - array of uint64_t gets dynamically
+ *  resized based upon the number of matches
+ *
+ *  "key" [ IN ] and "key_size" [ IN ] - describes an
+ *   opaque key
+ *
+ *  "remainder" [ OUT ] - returns the number of bytes
+ *  left unmatched by comparison between the key and entry.
+ *  values:
+ *    = 0    - exact match
+ *    < 0    - key is shorter than entry
+ *    > 0    - key is longer than entry
+ */
+#if BTREE_KEY2ID && 1
+KDB_EXTERN rc_t CC KBTreeFindAll ( const KBTree *self,
+    struct KDataBuffer *found_set,
+    const void *key, size_t key_size );
+#endif
+
+
+/* FindCustom
+ *  searches for a match using a custom function
+ *
+ *  "val" [ OUT ] - return parameter for value found
+ *   accessed via KBTreeValueAccess* described above
+ *   must be balanced with a call to KBTreeValueWhack.
+ *
+ *  "key" [ IN ] and "key_size" [ IN ] - describes an
+ *   opaque key
+ */
+#if BTREE_KEY2ID && 0
+KDB_EXTERN rc_t CC KBTreeFindCustom ( const KBTree *self, uint64_t *id,
+    const void *key, size_t key_size, KBTreeCompareFunc custom_cmp );
 #endif
 
 
@@ -252,7 +339,7 @@ KDB_EXTERN rc_t CC KBTreeFind ( const KBTree *self, KBTreeValue *val,
  *   opaque key
  */
 #if BTREE_KEY2ID
-KDB_EXTERN rc_t CC KBTreeEntry ( KBTree *self, uint32_t *id,
+KDB_EXTERN rc_t CC KBTreeEntry ( KBTree *self, uint64_t *id,
     bool *was_inserted, const void *key, size_t key_size );
 #else
 KDB_EXTERN rc_t CC KBTreeEntry ( KBTree *self, KBTreeValue *val,
@@ -270,7 +357,7 @@ KDB_EXTERN rc_t CC KBTreeEntry ( KBTree *self, KBTreeValue *val,
  */
 #if BTREE_KEY2ID
 KDB_EXTERN rc_t CC KBTreeForEach ( const KBTree *self, bool reverse,
-    void ( CC * f ) ( const void *key, size_t key_size, uint32_t id, void *data ), void *data );
+    void ( CC * f ) ( const void *key, size_t key_size, uint64_t id, void *data ), void *data );
 #else
 KDB_EXTERN rc_t CC KBTreeForEach ( const KBTree *self, bool reverse,
     void ( CC * f ) ( const void *key, size_t key_size, KBTreeValue *val, void *data ), void *data );

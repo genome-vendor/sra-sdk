@@ -518,7 +518,7 @@ rc_t list_readable_columns ( const VTable *cself )
     VTable *self = ( VTable* ) cself;
 
     VCursor *curs;
-    rc_t rc = VTableCreateCursorRead ( self, ( const VCursor** ) & curs );
+    rc_t rc = VTableCreateCursorReadInternal ( self, ( const VCursor** ) & curs );
     if (  rc == 0 )
     {
         /* let this private VCursor-function list the columns */
@@ -593,6 +593,97 @@ LIB_EXPORT rc_t CC VTableListReadableColumns ( const VTable *self, KNamelist **n
 LIB_EXPORT rc_t CC VTableListCol ( const VTable *cself, KNamelist **names )
 {
     return VTableListReadableColumns ( cself, names );
+}
+
+
+
+/* ListPhysColumns
+ *  avail: 2.4
+ */
+LIB_EXPORT rc_t CC VTableListPhysColumns ( const VTable *self, KNamelist **names )
+{
+    rc_t rc;
+
+    if ( names == NULL )
+        rc = RC ( rcVDB, rcTable, rcListing, rcParam, rcNull );
+    else
+    {
+        * names = NULL;
+
+        if ( self == NULL )
+            rc = RC ( rcVDB, rcTable, rcListing, rcSelf, rcNull );
+        else
+        {
+            KNamelist *kcol_names;
+            rc = KTableListCol ( self -> ktbl, & kcol_names );
+            if ( rc == 0 )
+            {
+                uint32_t kcol_count;
+                rc = KNamelistCount ( kcol_names, & kcol_count );
+                if ( rc == 0 )
+                {
+                    uint32_t scol_count = 0;
+                    KNamelist *scol_names = NULL;
+                    const KMDataNode *col_node = self -> col_node;
+
+#if LAZY_OPEN_COL_NODE
+                    if ( col_node == NULL )
+                    {
+                        rc = KMetadataOpenNodeRead ( self -> meta, & ( ( VTable* ) self ) -> col_node, "col" );
+                        if ( rc == 0 || GetRCState ( rc ) != rcNotFound )
+                            col_node = self -> col_node;
+                    }
+#endif
+                    if ( col_node != NULL )
+                    {
+                        rc = KMDataNodeListChildren ( col_node, & scol_names );
+                        if ( rc == 0 )
+                            rc = KNamelistCount ( scol_names, & scol_count );
+                    }
+
+                    if ( rc == 0 )
+                    {
+                        VNamelist *vnames;
+                        rc = VNamelistMake ( & vnames, kcol_count + scol_count );
+                        if ( rc == 0 )
+                        {
+                            uint32_t i;
+                            const char *name;
+
+                            for ( i = 0; i < kcol_count && rc == 0; ++ i )
+                            {
+                                rc = KNamelistGet ( kcol_names, i, & name );
+                                if ( rc == 0 )
+                                    rc = VNamelistAppend ( vnames, name );
+                            }
+
+                            for ( i = 0; i < scol_count && rc == 0; ++ i )
+                            {
+                                rc = KNamelistGet ( scol_names, i, & name );
+                                if ( rc == 0 )
+                                    rc = VNamelistAppend ( vnames, name );
+                            }
+
+                            if ( rc == 0 )
+                            {
+                                rc = VNamelistToNamelist ( vnames, names );
+                                if ( rc == 0 )
+                                    VNamelistReorder ( vnames, false );
+                            }
+                        }
+
+                        VNamelistRelease ( vnames );
+                    }
+
+                    KNamelistRelease ( scol_names );
+                }
+
+                KNamelistRelease ( kcol_names );
+            }
+        }
+    }
+
+    return rc;
 }
 
 
@@ -946,6 +1037,34 @@ LIB_EXPORT rc_t CC VTableTypespec ( const VTable *self, char *ts_buff, size_t ts
 }
 
 
+/* HasStaticColumn - PRIVATE
+ *  given a physical column name, report whether it exists
+ *  and is ( currently ) static
+ *  avail: 2.5
+ */
+LIB_EXPORT bool CC VTableHasStaticColumn ( const VTable *self, const char *name )
+{
+    if ( self != NULL && name != NULL && name [ 0 ] != 0 )
+    {
+        /* a full check of this might include testing that the column
+           can be opened for read or write, but the API is purposely
+           vague on what this means.
+
+           currently the meaning of this ( PRIVATE ) API is whether
+           there is a metadata column entry with this name - period. */
+        const KMDataNode *node;
+        rc_t rc = KMetadataOpenNodeRead ( self -> meta, & node, "/col/%s", name );
+        if ( rc == 0 )
+        {
+            KMDataNodeRelease ( node );
+            return true;
+        }
+    }
+
+    return false;
+}
+
+
 /*--------------------------------------------------------------------------
  * VColumnRef
  *  cache entry
@@ -1027,7 +1146,7 @@ rc_t create_cursor_all_readable_columns(const VTable *self,
     rc_t rc = VTableListReadableColumns(self, &list);
     
     if (rc == 0) {
-        rc = VTableCreateCursorRead(self, curs);
+        rc = VTableCreateCursorReadInternal(self, curs);
         if (rc == 0) {
             uint32_t n;
             

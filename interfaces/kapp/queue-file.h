@@ -87,9 +87,13 @@ struct KFile;
  *  "block_size" [ IN, DEFAULT ZERO ] - optional parameter giving
  *  desired block size when reading from "src". this may be used
  *  to tune reading for source data, e.g. 64K blocks for gzip.
+ *
+ *  "timeout_ms" [ IN, DEFAULT ZERO ] - optional parameter specifying the period of time (in ms)
+ *  at which the background thread will check whether it is to quit (e.g. the foregrount thread has sealed the buffer),
+ *  when the queue cannot be written into.  If 0 specified, the timeout is set to 150 ms.
  */
 KAPP_EXTERN rc_t CC KQueueFileMakeRead ( struct KFile const **qf, uint64_t pos,
-    struct KFile const *src, size_t queue_bytes, size_t block_size );
+    struct KFile const *src, size_t queue_bytes, size_t block_size, uint32_t timeout_ms );
 
 
 /* MakeWrite
@@ -129,9 +133,13 @@ KAPP_EXTERN rc_t CC KQueueFileMakeRead ( struct KFile const **qf, uint64_t pos,
  *  "block_size" [ IN, DEFAULT ZERO ] - optional parameter giving
  *  desired block size when writing to "dst". this may be used
  *  to tune writing for source data, e.g. 64K blocks for gzip.
+ *
+ *  "timeout_ms" [ IN, DEFAULT ZERO ] - optional parameter specifying the period of time (in ms)
+ *  at which the background thread will check whether it is to quit (e.g. the foregrount thread has sealed the buffer),
+ *  when the queue cannot be read from.  If 0 specified, the timeout is set to 150 ms.
  */
 KAPP_EXTERN rc_t CC KQueueFileMakeWrite ( struct KFile **qf,
-    struct KFile *dst, size_t queue_bytes, size_t block_size );
+    struct KFile *dst, size_t queue_bytes, size_t block_size, uint32_t timeout_ms );
 
 
 #ifdef __cplusplus

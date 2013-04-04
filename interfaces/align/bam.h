@@ -215,14 +215,18 @@ ALIGN_EXTERN bool CC BAMAlignmentHasColorSpace ( const BAMAlignment *self );
  */
 ALIGN_EXTERN rc_t CC BAMAlignmentGetCSKey ( const BAMAlignment *self, char cskey[1] );
 
+ALIGN_EXTERN rc_t CC BAMAlignmentGetCSSeqLen ( const BAMAlignment *self, uint32_t *seqLen );
 /* GetCSSequence
- *  get the colorspace sequence data [0..ReadLength)
- *  caller provides buffer of ReadLength bytes
+ *  get the colorspace sequence data [0..seqLen)
+ *  caller provides buffer of seqLen bytes
  *
- *  "csseq" [ OUT ] - pointer to a buffer of at least ReadLength bytes
+ *  "csseq" [ OUT ] - pointer to a buffer of at least seqLen bytes
+ *  "seqLen" [ IN ] - length of sequence from BAMAlignmentGetCSSeqLen
  */
-ALIGN_EXTERN rc_t CC BAMAlignmentGetCSSequence ( const BAMAlignment *self, char csseq[] );
-    
+ALIGN_EXTERN rc_t CC BAMAlignmentGetCSSequence ( const BAMAlignment *self, char *csseq, uint32_t seqLen );
+
+ALIGN_EXTERN rc_t CC BAMAlignmentGetCSQuality(BAMAlignment const *cself, uint8_t const **quality, uint8_t *offset);
+
 
 /* GetFlags
  *  return the raw "flags" bitmap word
@@ -284,15 +288,15 @@ ALIGN_EXTERN rc_t CC BAMAlignmentGetMapQuality ( const BAMAlignment *self, uint8
 typedef uint32_t BAMCigarType;
 enum BAMCigarTypes
 {
-    ct_Match    = 'M',
-    ct_Insert   = 'I',
-    ct_Delete   = 'D',
-    ct_Skip     = 'N',
-    ct_SoftClip = 'S',
-    ct_HardClip = 'H',
-    ct_Padded   = 'P',
-    ct_Equal    = '=',
-    ct_NotEqual = 'X',
+    ct_Match    = 'M', /* 0 */
+    ct_Insert   = 'I', /* 1 */
+    ct_Delete   = 'D', /* 2 */
+    ct_Skip     = 'N', /* 3 */
+    ct_SoftClip = 'S', /* 4 */
+    ct_HardClip = 'H', /* 5 */
+    ct_Padded   = 'P', /* 6 */
+    ct_Equal    = '=', /* 7 */
+    ct_NotEqual = 'X', /* 8 */
     ct_Overlap  = 'B' /* Complete Genomics extension */
 };
 
@@ -429,15 +433,24 @@ ALIGN_EXTERN rc_t CC BAMAlignmentOptDataForEach
 ALIGN_EXTERN bool CC BAMAlignmentHasCGData(BAMAlignment const *self);
 
     
-ALIGN_EXTERN rc_t CC BAMAlignmentGetCGData(BAMAlignment const *self,
-                                           char sequence[/* 35 */],
-                                           uint8_t quality[/* 35 */],
-                                           uint32_t cigar[],
-                                           uint32_t cig_max,
-                                           uint32_t *cig_act);
+ALIGN_EXTERN
+rc_t CC BAMAlignmentGetCGSeqQual(BAMAlignment const *self,
+                                 char sequence[/* 35 */],
+                                 uint8_t quality[/* 35 */]);
 
-ALIGN_EXTERN rc_t BAMAlignmentGetTI(BAMAlignment const *self, uint32_t *ti);
+ALIGN_EXTERN
+rc_t CC BAMAlignmentGetCGCigar(BAMAlignment const *self,
+                               uint32_t *cigar,
+                               uint32_t cig_max,
+                               uint32_t *cig_act);
+    
+ALIGN_EXTERN rc_t BAMAlignmentGetTI(BAMAlignment const *self, uint64_t *ti);
 
+ALIGN_EXTERN rc_t BAMAlignmentGetCGAlignGroup(BAMAlignment const *self,
+                                              char buffer[],
+                                              size_t max_size,
+                                              size_t *act_size);
+    
     
 /*--------------------------------------------------------------------------
  * BAMFile

@@ -43,15 +43,13 @@ ALL_TOOLS = \
 #-------------------------------------------------------------------------------
 # outer targets
 #
-vers-includes: $(addsuffix .vers.h,$(EXT_TOOLS))
-
-all std: makedirs vers-includes
+all std: vers-includes
 	@ $(MAKE_CMD) $(TARGDIR)/std
 
-$(ALL_TOOLS): makedirs vers-includes
+$(ALL_TOOLS): vers-includes
 	@ $(MAKE_CMD) $(BINDIR)/$@
 
-.PHONY: vers-includes all std $(ALL_TOOLS)
+.PHONY: all std $(ALL_TOOLS)
 
 #-------------------------------------------------------------------------------
 # std
@@ -60,6 +58,13 @@ $(TARGDIR)/std: \
 	$(addprefix $(BINDIR)/,$(ALL_TOOLS))
 
 .PHONY: $(TARGDIR)/std
+
+#-------------------------------------------------------------------------------
+# vers-includes
+#
+$(TARGDIR)/vers-includes: $(addsuffix .vers.h,$(EXT_TOOLS))
+
+.PHONY: $(TARGDIR)/vers-includes
 
 #-------------------------------------------------------------------------------
 # clean
@@ -89,8 +94,13 @@ KAR_OBJ = \
 
 KAR_LIB = \
 	-skapp \
+	-lvfs \
+	-lkfg \
+	-lkrypto \
 	-lkfs \
-	-lklib
+	-lkproc \
+	-lklib \
+	-lm
 
 $(BINDIR)/kar: $(KAR_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(KAR_LIB)
@@ -114,10 +124,12 @@ SRA_KAR_LIB = \
 	-lvdb \
 	-lkdb \
 	-lvfs \
-	-lkrypto \
 	-lkfg \
+	-lkrypto \
 	-lkfs \
-	-lklib
+	-lkproc \
+	-lklib \
+	-lm
 
 $(BINDIR)/sra-kar: $(SRA_KAR_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(SRA_KAR_LIB)

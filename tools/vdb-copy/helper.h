@@ -61,10 +61,9 @@ rc_t helper_parse_schema( const VDBManager *my_manager,
  * if it is possible, if not the original value of path remains unchanged
  * rc = 0 if the given path is a file-system-path or we are not
  * (weakly) linked against the sra-path-library
-*/
 rc_t helper_resolve_accession( const KDirectory *my_dir,
                                char ** path );
-
+*/
 
 /*
  * calls VTableTypespec to discover the table-name out of the schema

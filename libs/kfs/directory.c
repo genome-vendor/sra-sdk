@@ -30,8 +30,11 @@
 #include <kfs/impl.h>
 #include <klib/refcount.h>
 #include <klib/rc.h>
+#include <klib/text.h>
+#include <klib/printf.h>
 #include <sysalloc.h>
 
+#include <stdlib.h>
 
 /*--------------------------------------------------------------------------
  * KDirectory
@@ -1367,3 +1370,169 @@ LIB_EXPORT struct KSysDir* CC KDirectoryGetSysDir ( const KDirectory *self )
     return NULL;
 }
 
+
+static rc_t copy_loop( const KFile *src, KFile *dst, size_t bsize )
+{
+    rc_t rc = 0;
+    uint64_t pos = 0;
+    size_t num_read = 1;
+
+    char * buffer = malloc( bsize );
+    if ( buffer == NULL )
+        return RC( rcFS, rcDirectory, rcCopying, rcMemory, rcExhausted );
+
+    while ( rc == 0 && num_read > 0 )
+    {
+        rc = KFileRead ( src, pos, buffer, bsize, &num_read );
+        if ( rc == 0 && num_read > 0 )
+        {
+            size_t num_writ;
+            rc = KFileWrite ( dst, pos, buffer, num_read, &num_writ );
+            pos += num_read;
+        }
+    }
+    free( buffer );
+    return rc;
+}
+
+
+LIB_EXPORT rc_t CC KDirectoryCopyPath ( const KDirectory *src_dir,
+    KDirectory *dst_dir, const char *src_path, const char * dst_path )
+{
+    rc_t rc;
+    struct KFile const *f_src;
+
+    if ( src_dir == NULL || dst_dir == NULL )
+        return RC ( rcFS, rcDirectory, rcCopying, rcSelf, rcNull );
+    if ( src_path == NULL || dst_path == NULL )
+        return RC ( rcFS, rcDirectory, rcCopying, rcParam, rcNull );
+
+    rc = KDirectoryOpenFileRead ( src_dir, &f_src, "%s", src_path );
+    if ( rc == 0 )
+    {
+        uint32_t pt = KDirectoryPathType ( dst_dir, "%s", dst_path );
+        switch( pt )
+        {
+            case kptFile : ; /* intentional fall through! */
+            case kptDir  : rc = KDirectoryRemove ( dst_dir, true, "%s", dst_path ); break;
+        }
+        if ( rc == 0 )
+        {
+            struct KFile *f_dst;
+            uint32_t access = 0664;
+            rc = KDirectoryCreateFile ( dst_dir, &f_dst, false, access, kcmCreate, "%s", dst_path );
+            if ( rc == 0 )
+            {
+                rc = copy_loop( f_src, f_dst, 1024 * 16 );
+            }
+        }
+    }
+    return rc;
+}
+
+
+static rc_t build_obj_path( char **s, const char *path, const char * objname )
+{
+    rc_t rc;
+    size_t lp = string_size( path );
+    size_t l = lp + string_size( objname ) + 2;
+    *s = malloc( l );
+    if ( *s == NULL )
+        rc = RC( rcFS, rcDirectory, rcCopying, rcMemory, rcExhausted );
+    else
+    {
+        size_t written;
+        const char * concat = ( ( path[ lp - 1 ] == '/' ) ? "%s%s" : "%s/%s" );
+        rc = string_printf( *s, l, &written, concat, path, objname );
+    }
+    return rc;
+}
+
+
+LIB_EXPORT rc_t CC KDirectoryCopyPaths( const KDirectory * src_dir,
+    KDirectory * dst_dir, bool recursive, const char *src, const char *dst )
+{
+    rc_t rc;
+    struct KNamelist *list;
+
+    if ( src_dir == NULL || dst_dir == NULL )
+        return RC ( rcFS, rcDirectory, rcCopying, rcSelf, rcNull );
+    if ( src == NULL || dst == NULL )
+        return RC ( rcFS, rcDirectory, rcCopying, rcParam, rcNull );
+
+    rc = KDirectoryList ( src_dir, &list, NULL, NULL, "%s", src );
+    if ( rc == 0 )
+    {
+        uint32_t pt = KDirectoryPathType ( dst_dir, "%s", dst );
+        /* if the output-directory does not exist: create it! */
+        switch( pt )
+        {
+            case kptFile : rc = KDirectoryRemove ( dst_dir, true, "%s", dst );
+                            /* intentially no break ! */
+
+            case kptNotFound : if ( rc == 0 )
+                                    rc = KDirectoryCreateDir ( dst_dir, 0775, kcmCreate | kcmParents, "%s", dst );
+                               break;
+        }
+        if ( rc == 0 )
+        {
+            uint32_t i, n;
+            rc = KNamelistCount ( list, &n );
+            for ( i = 0; i < n && rc == 0; ++i )
+            {
+                const char *name;
+                rc = KNamelistGet ( list, i, &name );
+                if ( rc == 0 )
+                {
+                    char *src_obj;
+                    rc = build_obj_path( &src_obj, src, name );
+                    if ( rc == 0 )
+                    {
+                        char *dst_obj;
+                        rc = build_obj_path( &dst_obj, dst, name );
+                        if ( rc == 0 )
+                        {
+                            pt = KDirectoryPathType ( src_dir, "%s", src_obj );
+                            switch( pt )
+                            {
+                                case kptFile : rc = KDirectoryCopyPath ( src_dir, dst_dir, src_obj, dst_obj );
+                                               break;
+
+                                case kptDir  : if ( recursive )
+                                                    rc = KDirectoryCopyPaths( src_dir, dst_dir, true, src_obj, dst_obj );
+                                               break;
+                            }
+                            free( dst_obj );
+                        }
+                        free( src_obj );
+                    }
+                }
+            }
+        }
+        KNamelistRelease ( list );
+    }
+    return rc;
+}
+
+
+LIB_EXPORT rc_t CC KDirectoryCopy( const KDirectory * src_dir,
+    KDirectory * dst_dir, bool recursive, const char *src, const char *dst )
+{
+    rc_t rc = 0;
+    uint32_t pt;
+
+    if ( src_dir == NULL || dst_dir == NULL )
+        return RC ( rcFS, rcDirectory, rcCopying, rcSelf, rcNull );
+    if ( src == NULL || dst == NULL )
+        return RC ( rcFS, rcDirectory, rcCopying, rcParam, rcNull );
+
+    pt = KDirectoryPathType ( src_dir, "%s", src );
+    switch( pt )
+    {
+        case kptFile : rc = KDirectoryCopyPath ( src_dir, dst_dir, src, dst );
+                        break;
+        case kptDir  : rc = KDirectoryCopyPaths ( src_dir, dst_dir, recursive, src, dst );
+                        break;
+    }
+    return rc;
+}

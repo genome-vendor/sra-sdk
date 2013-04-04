@@ -145,9 +145,9 @@ then
             ;;
 
 ##### TEMPORARY #####
-# skip kproc
+# use ksproc for kproc
     kproc)
-        continue
+        xLIBNAME=ksproc
         ;;
 #####################
 
@@ -304,16 +304,21 @@ load-dynamic
 
 # produce shared library, stub library and exp file
 echo $CMD
-if ! $CMD
+$CMD
+STATUS=$?
+if [[ ${STATUS} != 0 ]]
 then
-    STATUS=$?
     rm -f "$TARG" "${TARG%lib}dll"
     exit $STATUS
 fi
 
 # copy dll to binary directory, so they can be found by the executables
-# leave the dll in it's original place, so that they can be found in /mod and /wmod too
 cp "${TARG%lib}dll" "$BINDIR"
+STATUS=$?
+if [[ ${STATUS} != 0 ]]
+then
+    exit $STATUS
+fi
 
 # produce dependencies
 if [ "$DEPFILE" != "" ]

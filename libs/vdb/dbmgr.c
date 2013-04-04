@@ -90,11 +90,6 @@ LIB_EXPORT rc_t CC VDBManagerMakeRead ( const VDBManager **mgrp, const KDirector
                         {
                             mgr -> user = NULL;
                             mgr -> user_whack = NULL;
-                            DLListInit ( & mgr -> mpool );
-                            mgr -> mlimit = 0;
-                            mgr -> mcount = 0;
-                            mgr -> plimit = 0;
-                            mgr -> pcount = 0;
                             KRefcountInit ( & mgr -> refcount, 1, "VDBManager", "make-read", "vmgr" );
                             * mgrp = mgr;
                             return 0;

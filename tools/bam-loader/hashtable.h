@@ -33,7 +33,7 @@ typedef void (*HashTableFreeFunc)(void *value, void *context);
 struct HashTableIterator {
     const void *root;
     const void *bucket;
-    const uint64_t id;
+    uint64_t id;
 };
 
 rc_t HashTableMake(HashTable **rslt, uint32_t initialSize, HashTableKeyCompFunc kf, const void *context);

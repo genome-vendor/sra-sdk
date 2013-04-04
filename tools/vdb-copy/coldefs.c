@@ -28,6 +28,9 @@
 #include "helper.h"
 #include "definitions.h"
 
+#include <klib/text.h>
+#include <klib/printf.h>
+
 #include <sysalloc.h>
 
 #include <stdlib.h>
@@ -229,7 +232,7 @@ rc_t col_defs_add_to_rd_cursor( col_defs* defs, const VCursor *cursor, bool show
                     DISP_RC( rc, "col_defs_add_to_cursor:VCursorDatatype() failed" );
                     col->src_valid = ( rc == 0 );
                     if ( show && col->src_valid )
-                        OUTMSG(( "added to rd-cursor: >%s<\n", col->name ));
+                        KOutMsg( "added to rd-cursor: >%s<\n", col->name );
                 }
 
             }
@@ -321,9 +324,9 @@ rc_t col_defs_add_to_wr_cursor( col_defs* defs, const VCursor* cursor, bool show
                 if ( show )
                 {
                     if ( col->to_copy )
-                        OUTMSG(( "added to wr-cursor: >%s<\n", col->name ));
+                        KOutMsg( "added to wr-cursor: >%s<\n", col->name );
                     else
-                        OUTMSG(( "cannot add >%s<\n", col->name ));
+                        KOutMsg( "cannot add >%s<\n", col->name );
                 }
             }
     }
@@ -544,11 +547,10 @@ uint32_t col_defs_count_copy_cols( col_defs* defs )
  * given list of column-names the to copy-flag is cleared
  * does not require an open cursor.
 */
-rc_t col_defs_exclude_these_columns( col_defs* defs, const char * column_names )
+rc_t col_defs_exclude_these_columns( col_defs* defs, const char * prefix, const char * column_names )
 {
     rc_t rc = 0;
     const KNamelist *names;
-    uint32_t idx, len;
 
     if ( defs == NULL )
         return RC( rcExe, rcNoTarg, rcResolving, rcSelf, rcNull );
@@ -562,14 +564,40 @@ rc_t col_defs_exclude_these_columns( col_defs* defs, const char * column_names )
     DISP_RC( rc, "col_defs_parse_string:nlt_make_namelist_from_string() failed" );
     if ( rc == 0 )
     {
-        len = VectorLength( &(defs->cols) );
+        uint32_t idx, len = VectorLength( &(defs->cols) );
+        size_t prefix_len = 0;
+        if ( prefix != 0 )
+            prefix_len = string_size( prefix ) + 2;
         for ( idx = 0;  idx < len; ++idx )
         {
             p_col_def col = (p_col_def) VectorGet ( &(defs->cols), idx );
             if ( col != NULL )
+            {
                 if ( col->requested )
+                {
                     if ( nlt_is_name_in_namelist( names, col->name ) )
                         col->requested = false;
+                    else
+                    {
+                        if ( prefix != NULL )
+                        {
+                            size_t len1 = string_size ( col->name ) + prefix_len;
+                            char * s = malloc( len1 );
+                            if ( s != NULL )
+                            {
+                                size_t num_writ;
+                                rc_t rc1 = string_printf ( s, len1, &num_writ, "%s:%s", prefix, col->name );
+                                if ( rc1 == 0 )
+                                {
+                                    if ( nlt_is_name_in_namelist( names, s ) )
+                                        col->requested = false;
+                                }
+                                free( s );
+                            }
+                        }
+                    }
+                }
+            }
         }
         KNamelistRelease( names );
     }
@@ -695,7 +723,7 @@ rc_t col_defs_mark_writable_columns( col_defs* defs, VTable *tab, bool show )
                     if ( nlt_is_name_in_namelist( writables, col->name ) )
                     {
                         if ( show )
-                            OUTMSG(( "writable column: >%s<\n", col->name ));
+                            KOutMsg( "writable column: >%s<\n", col->name );
                         col->to_copy = true;
                     }
         }

@@ -43,9 +43,18 @@
 extern "C" {
 #endif
 
-struct KDirectory;
+
+/*--------------------------------------------------------------------------
+ * forwards
+ */
 struct KFile;
 struct VPath;
+struct SRAPath;
+struct VResolver;
+struct KDirectory;
+struct VPath;
+
+/* temporary */
 
 
 /*--------------------------------------------------------------------------
@@ -77,6 +86,12 @@ VFS_EXTERN rc_t CC VFSManagerOpenFileRead (const VFSManager *self,
 VFS_EXTERN rc_t CC VFSManagerOpenDirectoryRead ( const VFSManager *self,
     struct KDirectory const **d, const struct VPath * path );
 
+/* it forces decryption to be used for kdb */
+VFS_EXTERN rc_t CC VFSManagerOpenDirectoryReadDecrypt ( const VFSManager *self,
+    struct KDirectory const **d, const struct VPath * path );
+
+VFS_EXTERN rc_t CC VFSManagerOpenDirectoryUpdate ( const VFSManager *self,
+    struct KDirectory **d, const struct VPath * path );
 
 
 /* OpenFileWrite
@@ -143,6 +158,13 @@ VFS_EXTERN rc_t CC VFSManagerGetConfigPWFile (const VFSManager * self,
  */
 VFS_EXTERN rc_t CC VFSManagerGetCWD (const VFSManager * self, struct KDirectory ** cwd);
 
+/* GetSRAPath
+ *  why aren't any of these functions properly commented?
+ */
+VFS_EXTERN rc_t CC VFSManagerGetSRAPath ( const VFSManager * self, struct SRAPath ** pmgr );
+
+VFS_EXTERN rc_t CC VFSManagerGetResolver ( const VFSManager * self, struct VResolver ** resolver );
+
 
 VFS_EXTERN rc_t CC VFSManagerGetKryptoPassword (const VFSManager * self, char * new_password, size_t max_size, size_t * size);
 
@@ -178,19 +200,105 @@ VFS_EXTERN rc_t CC VFSManagerResetKryptoPassword (const VFSManager * self,
   incomplete writes to temporary password file
   RC (rcVFS, rcEncryptionKey, rcWriting, rcFile, rcInsufficient);
 
-
-
-
   other errors from KFS and KLIB
 */
 
-
-
+/* pwd_dir[pwd_dir_size] -
+    Output parameters for path to directory containing the password file.
+    pwd_dir is not updated if pwd_dir == NULL or pwd_dir_size == 0
+                  or pwd_dir_size is insufficient to copy the path
+ */
 VFS_EXTERN rc_t CC VFSManagerUpdateKryptoPassword (const VFSManager * self, 
                                                    const char * password,
-                                                   size_t size);
+                                                   size_t size,
+                                                   char * pwd_dir,
+                                                   size_t pwd_dir_size);
 
 #endif
+
+
+VFS_EXTERN rc_t CC VFSManagerResolveSpec ( const VFSManager * self,
+                                           const char * spec,
+                                           struct VPath ** path_to_build,
+                                           const struct KFile ** remote_file,
+                                           const struct VPath ** local_cache,
+                                           bool resolve_acc );
+
+struct KDirectory;
+
+VFS_EXTERN rc_t CC VFSManagerResolveSpecIntoDir ( const VFSManager * self,
+                                                  const char * spec,
+                                                  const struct KDirectory ** dir,
+                                                  bool resolve_acc );
+
+/*--------------------------------------------------------------------------
+ * KConfig
+ *  placing some KConfig code that relies upon VFS here
+ */
+struct KConfig;
+struct KConfigNode;
+
+
+/* ReadVPath
+ *  read a VPath node value
+ *
+ * self [ IN ] - KConfig object
+ * path [ IN ] - path to the node
+ * result [ OUT ] - return value (rc != 0 if cannot be converted)
+ *
+ */
+VFS_EXTERN rc_t CC KConfigReadVPath ( struct KConfig const* self, const char* path, struct VPath** result );
+
+/* ReadVPath
+ *  read a VPath node value
+ *
+ * self [ IN ] - KConfigNode object
+ * result [ OUT ] - return value (rc != 0 if cannot be converted)
+ *
+ */
+VFS_EXTERN rc_t CC KConfigNodeReadVPath ( struct KConfigNode const *self, struct VPath** result );
+
+
+
+/* ResolvePath
+ *
+ * take a VPath and resolve to a final form apropriate for KDB
+ *
+ * that is take a relative path and resolve it against the CWD
+ * or take an accession and resolve into the local or remote 
+ * VResolver file based on config. It is just a single resolution percall
+ *
+ * flags
+ *      can disable all Accession resolution
+ *      can let VPath With no scheme be treated as a possible accession
+ *
+ */
+
+/* bit values for flags */
+    /* allow no local accession resolution */
+#define vfsmgr_rflag_no_acc_local (1<<0)
+    /* allow no remote accession resolution */
+#define vfsmgr_rflag_no_acc_remote (1<<1)
+    /* never do VResolver Accession resolution */
+#define vfsmgr_rflag_no_acc  (vfsmgr_rflag_no_acc_local|vfsmgr_rflag_no_acc_remote)
+    /* use VResolver Accession resolution for simple names with no scheme */
+
+#define vfsmgr_rflag_kdb_acc (1<<2)
+    /* over ridden by vfsmgr_rflag_no_acc */
+
+
+VFS_EXTERN rc_t CC VFSManagerResolvePath (const VFSManager * self,
+                                          uint32_t flags,
+                                          const struct  VPath * in_path,
+                                          struct VPath ** out_path);
+
+VFS_EXTERN rc_t CC VFSManagerResolvePathRelative (const VFSManager * self,
+                                                  uint32_t flags,
+                                                  const struct  VPath * base_path,
+                                                  const struct  VPath * in_path,
+                                                  struct VPath ** out_path);
+
+
 #ifdef __cplusplus
 }
 #endif

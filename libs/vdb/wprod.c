@@ -124,7 +124,7 @@ rc_t VProdResolveColumnRoot ( const VProdResolve *self,
     /* pick up production */
     if ( scol -> validate != NULL )
     {
-        rc = VSimpleProdMake ( & wcol -> val, self -> owned,
+        rc = VSimpleProdMake ( & wcol -> val, self -> owned, self -> curs,
             prodSimpleCast, name, NULL, NULL, NULL, in, chainDecoding );
         if ( rc != 0 )
             return rc;
@@ -176,15 +176,12 @@ rc_t VProdResolveColumn ( const VProdResolve *self,
         vcol = VCursorCacheGet ( & curs -> col, & scol -> cid );
         if ( vcol == NULL )
         {
-#if OPEN_COLUMN_ALTERS_ROW
-            uint32_t idx;
-#endif
             rc = VCursorMakeColumn ( curs, & vcol, scol );
             if ( rc != 0 )
                 return rc;
 
 #if OPEN_COLUMN_ALTERS_ROW
-            rc = VectorAppend ( & curs -> row, & idx, vcol );
+            rc = VectorAppend ( & curs -> row, & vcol -> ord, vcol );
             if ( rc != 0 )
             {
                 VColumnWhack ( vcol, NULL );
@@ -196,7 +193,8 @@ rc_t VProdResolveColumn ( const VProdResolve *self,
             {
 #if OPEN_COLUMN_ALTERS_ROW
                 void *ignore;
-                VectorSwap ( & curs -> row, idx, NULL, & ignore );
+                VectorSwap ( & curs -> row, vcol -> ord, NULL, & ignore );
+                vcol -> ord = 0;
 #endif
                 VColumnWhack ( vcol, NULL );
                 return rc;
@@ -222,19 +220,19 @@ rc_t VProdResolveColumn ( const VProdResolve *self,
     wcol = VCursorCacheGet ( & curs -> col, & scol -> cid );
     if ( wcol == NULL )
     {
-        uint32_t idx;
-
         /* normally write-only cursor must have existing column */
         if ( ! self -> discover_writable_columns )
             return 0;
 
         /* auto-create writable column for purposes of discovery */
+        if ( scol -> read_only )
+            return 0;
         rc = VCursorMakeColumn ( curs, & vcol, scol );
         if ( rc != 0 )
             return rc;
 
         /* add it to the row as if user had done it */
-        rc = VectorAppend ( & curs -> row, & idx, vcol );
+        rc = VectorAppend ( & curs -> row, & vcol -> ord, vcol );
         if ( rc == 0 )
         {
             /* add it to the indexed vector */
@@ -242,7 +240,8 @@ rc_t VProdResolveColumn ( const VProdResolve *self,
             if ( rc != 0 )
             {
                 void *ignore;
-                VectorSwap ( & curs -> row, idx, NULL, & ignore );
+                VectorSwap ( & curs -> row, vcol -> ord, NULL, & ignore );
+                vcol -> ord = 0;
             }
         }
 
@@ -346,7 +345,7 @@ rc_t VProdResolvePhysicalWrite ( const VProdResolve *self, VPhysical *phys )
     /* build encoding schema in steps:
          in <- page-to-blob
     */
-    rc = VSimpleProdMake ( & prod, pr . owned,
+    rc = VSimpleProdMake ( & prod, pr . owned,  self->curs,
         prodSimplePage2Blob, name, & fd, & desc, NULL, phys -> in, chainEncoding );
     if ( rc == 0 && enc != NULL )
     {
@@ -362,7 +361,7 @@ rc_t VProdResolvePhysicalWrite ( const VProdResolve *self, VPhysical *phys )
     }
     if ( rc == 0 )
     {
-        rc = VSimpleProdMake ( & phys -> b2s, pr . owned,
+        rc = VSimpleProdMake ( & phys -> b2s, pr . owned, self->curs,
             prodSimpleBlob2Serial, name, & fd, & desc, NULL, prod, chainEncoding );
     }
 

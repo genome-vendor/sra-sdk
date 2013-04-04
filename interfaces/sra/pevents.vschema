@@ -71,7 +71,7 @@ table NCBI:SRA:tbl:pevents #1.0
         zip_encoding #1.0 < Z_RLE > .SORT_ORDER = sort_encode;
 
     F32 reorder = NCBI:SRA:reorder < 4 > ( sort_encode, LIKELIHOODS );
-    F32 like_scale = vdb:vec_sum < F32, 4 > ( reorder );
+    F32 like_scale = vdb:fixed_vec_sum < F32, 4 > ( reorder );
 
     physical column < F32 >
         fzip_encoding #1.0 < 4 > .SCALE = like_scale;

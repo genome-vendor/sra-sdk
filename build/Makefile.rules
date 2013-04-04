@@ -99,11 +99,6 @@
 	$(CP) -S -o $@ -fPIC $(NOPT) $<
 
 
-######################################################################
-## TBD: *.vers.h will no longer be generated or used for executables #
-#       instead, we will update the linker to produce a *.vers.o     #
-#       with a stub for KAppVersion to return a constant             #
-######################################################################
 # version include generation
 %.vers.h: %.vers
 	$(TOP)/build/make-vers-inc.sh $^ > $@

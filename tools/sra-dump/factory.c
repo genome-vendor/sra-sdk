@@ -824,24 +824,32 @@ rc_t SRASplitter_FileActivate(const SRASplitter* cself, const char* key)
     return rc;
 }
 
-rc_t SRASplitter_FileWrite(const SRASplitter* cself, spotid_t spot, const void* buf, size_t size)
+rc_t SRASplitter_FileWrite( const SRASplitter* cself, spotid_t spot, const void* buf, size_t size )
 {
-    rc_t rc = 0;
     SRASplitter* self = NULL;
-
-    if( (rc = SRASplitter_ResolveSelf(cself, rcWriting, &self)) == 0 ) {
-        if( self->last_found == NULL ) {
-            rc = RC(rcExe, rcFile, rcWriting, rcDirEntry, rcUnknown);
-        } else if( buf != NULL && size > 0 ) {
+    
+    rc_t rc = SRASplitter_ResolveSelf( cself, rcWriting, &self );
+    if ( rc == 0 )
+    {
+        if ( self->last_found == NULL )
+        {
+            rc = RC( rcExe, rcFile, rcWriting, rcDirEntry, rcUnknown );
+        }
+        else if ( buf != NULL && size > 0 )
+        {
             size_t writ = 0;
-            SRASplitterFile* f = (SRASplitterFile*)(self->last_found->child.file);
-            if( (rc = KFileWrite(f->file, f->pos, buf, size, &writ)) == 0 ) {
+            SRASplitterFile* f = ( SRASplitterFile* )( self->last_found->child.file );
+            rc = KFileWrite( f->file, f->pos, buf, size, &writ );
+            if ( rc == 0 )
+            {
                 f->pos += writ;
-                if( f->curr_spot != spot && spot != 0 ) {
-                    f->curr_spot = spot;
-                    f->spot_qty = f->spot_qty + 1;
+                if ( f->curr_spot != spot && spot != 0 )
+                {
+                     f->curr_spot = spot;
+                     f->spot_qty = f->spot_qty + 1;
                 }
-                if( g_filer->curr_spot != spot && spot != 0 ) {
+                if ( g_filer->curr_spot != spot && spot != 0 )
+                {
                     g_filer->curr_spot = spot;
                     g_filer->spot_qty = g_filer->spot_qty + 1;
                 }
@@ -851,24 +859,30 @@ rc_t SRASplitter_FileWrite(const SRASplitter* cself, spotid_t spot, const void* 
     return rc;
 }
 
-rc_t SRASplitter_FileWritePos(const SRASplitter* cself, spotid_t spot, uint64_t pos, const void* buf, size_t size)
+rc_t SRASplitter_FileWritePos( const SRASplitter* cself, spotid_t spot, 
+                               uint64_t pos, const void* buf, size_t size )
 {
-    rc_t rc = 0;
     SRASplitter* self = NULL;
 
-    if( (rc = SRASplitter_ResolveSelf(cself, rcWriting, &self)) == 0 ) {
-        if( self->last_found == NULL ) {
-            rc = RC(rcExe, rcFile, rcWriting, rcDirEntry, rcUnknown);
-        } else if( buf != NULL && size > 0 ) {
+    rc_t rc = SRASplitter_ResolveSelf( cself, rcWriting, &self );
+    if ( rc == 0 )
+    {
+        if ( self->last_found == NULL )
+        {
+            rc = RC( rcExe, rcFile, rcWriting, rcDirEntry, rcUnknown );
+        }
+        else if ( buf != NULL && size > 0 )
+        {
             const SRASplitterFile* f = self->last_found->child.file;
             /* remember last position */
             uint64_t old_pos = f->pos;
-            ((SRASplitterFile*)f)->pos = pos;
+            ( ( SRASplitterFile* ) f )->pos = pos;
             /* write to requested position */
-            rc = SRASplitter_FileWrite(cself, spot, buf, size);
-            if( f->pos < old_pos ) {
+            rc = SRASplitter_FileWrite( cself, spot, buf, size );
+            if ( f->pos < old_pos )
+            {
                 /* revert to last position if wrote less than it was */
-                ((SRASplitterFile*)f)->pos = old_pos;
+                ( ( SRASplitterFile* ) f )->pos = old_pos;
             }
         }
     }

@@ -35,7 +35,7 @@ struct KGZipFile;
 #include <klib/out.h>
 #include <sysalloc.h>
 
-#include <ext/zlib.h>      /* z_stream */
+#include <zlib.h>      /* z_stream */
 #include <assert.h>
 #include <stdlib.h>    /* malloc */
 
@@ -134,7 +134,7 @@ LIB_EXPORT rc_t CC KFileMakeGzipForRead( const struct KFile **result,
     if (!obj)
         return RC ( rcFS, rcFile, rcConstructing, rcMemory, rcExhausted );
 
-    rc = KFileInit(&obj->dad, (const KFile_vt*) &s_vtKFile_InGz, true, false);
+    rc = KFileInit(&obj->dad, (const KFile_vt*) &s_vtKFile_InGz, "KGZipFile", "no-name", true, false);
     if (rc != 0) {
         free(obj);
         return rc;
@@ -289,7 +289,6 @@ static rc_t z_read ( KGZipFile * self, void * buffer, size_t bsize, size_t * _nu
             GZIP_DEBUG(("%s: data error %d\n",__func__, zret));
             return RC (rcFS, rcFile, rcReading, rcData, rcCorrupt);
 
-            /* don't handle these yet */
         case Z_STREAM_END:
             GZIP_DEBUG(("%s: stream end %d\n",__func__, zret));
             self->completed = true;
@@ -426,7 +425,7 @@ LIB_EXPORT rc_t CC KFileMakeGzipForWrite( struct KFile **result,
     if (!obj)
         return RC ( rcFS, rcFile, rcConstructing, rcMemory, rcExhausted );
 
-    rc = KFileInit(&obj->dad, (const KFile_vt*) &s_vtKFile_OutGz, false, true);
+    rc = KFileInit(&obj->dad, (const KFile_vt*) &s_vtKFile_OutGz, "KGZipFile", "no-name", false, true);
     if (rc != 0) {
         free(obj);
         return rc;

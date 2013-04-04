@@ -68,3 +68,10 @@ OS_DAD = bsd
 OS_GDAD = unix
 
 LIBXML_LPATH = /usr/lib
+
+# flex+bison: on Mac, use source-controlled generated .c/.h files
+YACC = @ true
+LEX = @ true
+
+# build matrix
+COMPILERS = GCC CLANG

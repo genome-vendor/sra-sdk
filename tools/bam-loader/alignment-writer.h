@@ -50,7 +50,7 @@ struct AlignmentRecord {
     uint64_t global_ref_start;
     bool ref_orientation;
     uint32_t mapq;
-    uint32_t tmp_key_id;
+    uint64_t tmp_key_id;
 
     INSDC_coord_zero read_start;
     INSDC_coord_len read_len;
@@ -86,7 +86,7 @@ rc_t AlignmentWriteRecord(Alignment *self, AlignmentRecord *data);
 
 rc_t AlignmentStartUpdatingSpotIds(Alignment *self);
 
-rc_t AlignmentGetSpotKey(Alignment *self, uint32_t *keyId);
+rc_t AlignmentGetSpotKey(Alignment *self, uint64_t *keyId);
 
 rc_t AlignmentWriteSpotId(Alignment *self, int64_t spotId);
 

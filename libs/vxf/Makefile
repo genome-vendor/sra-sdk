@@ -40,12 +40,10 @@ include $(TOP)/build/Makefile.env
 #-------------------------------------------------------------------------------
 # outer targets
 #
-vers-includes: $(addsuffix .vers.h,$(ALL_LIBS))
-
-all std: makedirs vers-includes
+all std: makedirs
 	@ $(MAKE_CMD) $(TARGDIR)/std
 
-$(MOD_LIBS): makedirs vers-includes
+$(MOD_LIBS): makedirs
 	@ $(MAKE_CMD) $(TARGDIR)/$@
 
 .PHONY: vers-includes all std $(ALL_LIBS)

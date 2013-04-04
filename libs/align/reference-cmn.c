@@ -28,6 +28,7 @@
 #include <insdc/insdc.h>
 
 #include "reference-cmn.h"
+#include <sysalloc.h>
 
 rc_t CC ReferenceSeq_ReOffset(bool circular, INSDC_coord_len seq_len, INSDC_coord_zero* offset)
 {

@@ -81,9 +81,28 @@ static int CC SRAPTNodeFindFmt ( const void *item, const struct PBSTNode *n, voi
     for(i=j=0;q[i]!=0 && db[j]!= 0;){
         if(q[i] == db[j]){
                 i++;j++;
-        } else if(   db[j] == '$'
-                  && isdigit(q[i])){
+        } else if(db[j] == '$'){
                 switch(db[j+1]){
+		 case 'q':
+                 case 'Q':
+		 {
+			int k;
+			uint32_t xy=0;
+			j+=2;
+			for(k=0;k<5 && q[i]!=0;k++,i++){
+				xy *= 36;
+				if(isdigit(q[i])){
+					xy += q[i] - '0' + 26;
+				} else if(isalpha(q[i])){
+					xy += toupper(q[i]) - 'A';
+				}
+			}
+			if(u){
+				u->x = xy >> 12;
+				u->y = xy &0xFFF;
+			}
+	       		break;
+		 }
                  case 'x':
                  case 'X':
                         if(u) u->x=atoi(q+i);

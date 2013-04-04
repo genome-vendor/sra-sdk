@@ -64,12 +64,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <assert.h>
 
 #include "sra-dbcc.vers.h"
 
 static bool exhaustive;
 static bool md5_required;
 static bool ref_int_check;
+static bool s_IndexOnly = false;
 
 struct node_s {
     int parent;
@@ -292,7 +294,8 @@ static rc_t CC report(CCReportInfoBlock const *what, void *Ctx)
 }
 
 static
-rc_t kdbcc(const KDirectory *dir, char const name[], int mode, bool *is_db, bool is_file, node_t nodes[], char names[])
+rc_t kdbcc(const KDirectory *dir, char const name[], uint32_t mode, bool *is_db,
+    bool is_file, node_t nodes[], char names[], INSDC_SRA_platform_id platform)
 {
     const KDBManager *mgr;
     rc_t rc = KDBManagerMakeRead ( & mgr, dir );
@@ -300,13 +303,17 @@ rc_t kdbcc(const KDirectory *dir, char const name[], int mode, bool *is_db, bool
     if ( rc == 0 )
     {
         cc_context_t ctx;
-        uint32_t level = ( mode & 4 ) ? 3 : ( mode & 2 ) ? 1 : 0;
         char const *objtype;
+
+        uint32_t level = ( mode & 4 ) ? 3 : ( mode & 2 ) ? 1 : 0;
+        if (s_IndexOnly) {
+            level |= CC_INDEX_ONLY;
+        }
 
         memset(&ctx, 0, sizeof(ctx));
         ctx.nodes = &nodes[0];
         ctx.names = &names[0];
-        
+
         * is_db = KDBManagerExists ( mgr, kptDatabase, name );
         if ( * is_db )
         {
@@ -319,6 +326,8 @@ rc_t kdbcc(const KDirectory *dir, char const name[], int mode, bool *is_db, bool
                 rc = KDatabaseConsistencyCheck ( db, 0, level, report, & ctx );
                 if ( rc == 0 ) {
                     rc = ctx.rc;
+                    if (s_IndexOnly)
+                    {   (void)LOGMSG(klogInfo, "Indices: checked"); }
                 }
                 KDatabaseRelease ( db );
             }
@@ -331,14 +340,18 @@ rc_t kdbcc(const KDirectory *dir, char const name[], int mode, bool *is_db, bool
             rc = KDBManagerOpenTableRead ( mgr, & tbl, name );
             if ( rc == 0 )
             {
-                rc = KTableConsistencyCheck ( tbl, 0, level, report, & ctx );
+                rc = KTableConsistencyCheck ( tbl, 0, level, report, & ctx,
+                    platform );
                 if ( rc == 0 ) {
                     rc = ctx.rc;
+                }
+                if ( rc == 0 && s_IndexOnly ) {
+                    (void)LOGMSG(klogInfo, "Index: checked");
                 }
                 KTableRelease ( tbl );
             }
         }
-        if (rc == 0 && ctx.num_columns == 0) {
+        if (rc == 0 && ctx.num_columns == 0 && !s_IndexOnly) {
             if (is_file) {
                 (void)PLOGMSG(klogWarn, (klogWarn, "Nothing to validate; the file '$(file)' has no checksums or is truncated.", "file=%s", name));
             }
@@ -353,7 +366,7 @@ rc_t kdbcc(const KDirectory *dir, char const name[], int mode, bool *is_db, bool
 }
 
 static
-rc_t vdbcc(const KDirectory *dir, char const name[], int mode, bool is_db, bool is_file)
+rc_t vdbcc(const KDirectory *dir, char const name[], uint32_t mode, bool is_db, bool is_file)
 {
 #if 0
     if (mode & 8) {
@@ -512,7 +525,7 @@ static rc_t sra_dbcc_454(VTable const *tbl, char const name[])
 static rc_t sra_dbcc_fastq(VTable const *tbl, char const name[])
 {
     static char const *const cn_FastQ[] = {
-        "NAME", "READ", "QUALITY"
+        "READ", "QUALITY", "SPOT_LEN", "READ_START", "READ_LEN", "READ_TYPE"
     };
     
     VCursor const *curs;
@@ -552,7 +565,7 @@ static rc_t sra_dbcc_fastq(VTable const *tbl, char const name[])
     return rc;
 }
 
-static rc_t get_platform(VTable const *tbl, INSDC_SRA_platform_id *rslt)
+static rc_t VTable_get_platform(VTable const *tbl, INSDC_SRA_platform_id *rslt)
 {
     rc_t rc;
     VCursor const *curs;
@@ -600,7 +613,7 @@ static rc_t verify_table(VTable const *tbl, char const name[])
         /* SRA or legacy SRA */
         INSDC_SRA_platform_id platform;
         
-        rc = get_platform(tbl, &platform);
+        rc = VTable_get_platform(tbl, &platform);
         if (rc == 0) {
             if (platform == (INSDC_SRA_platform_id)-1) {
                 (void)PLOGMSG(klogWarn, (klogWarn, "Couldn't determine SRA Platform; type of table '$(name)' is indeterminate.", "name=%s", name));
@@ -644,6 +657,7 @@ static rc_t verify_mgr_table(VDBManager const *mgr, char const name[])
     }
 }
 
+#if 0
 static rc_t verify_db_table(VDatabase const *db, char const name[])
 {
     VTable const *tbl;
@@ -709,6 +723,7 @@ static rc_t align_dbcc_primary_alignment(VTable const *tbl, char const name[])
     }
     return rc;
 }
+#endif
 
 typedef struct id_pair_s {
     int64_t first;
@@ -1031,7 +1046,7 @@ static rc_t verify_database_align(VDatabase const *db, char const name[], node_t
     }
     if (tables == tbSequence) {
         /* sequence data only */
-        (void)PLOGMSG(klogInfo, (klogInfo, "Database '$(name)' contains only unaligned reads", name));
+        (void)PLOGMSG(klogInfo, (klogInfo, "Database '$(name)' contains only unaligned reads", "name=%s", name));
     }
     else if (   (tables & tbReference) == 0
              || (tables & tbPrimaryAlignment) == 0)
@@ -1131,20 +1146,64 @@ static rc_t sra_dbcc(KDirectory const *dir, char const name[], node_t const node
 }
 
 static
-rc_t dbcc(const KDirectory *dir, char const name[], int mode, bool *is_db, bool is_file)
+rc_t get_platform(const KDirectory *dir, const VDBManager *aMgr,
+    const VTable *aTbl, char const name[], INSDC_SRA_platform_id *platform)
+{
+    rc_t rc = 0;
+    const VDBManager *mgr = aMgr;
+    const VTable *tbl = aTbl;
+    assert(name && platform);
+    if (mgr == NULL) {
+        rc = VDBManagerMakeRead(&mgr, dir);
+        if (rc != 0) {
+            return rc;
+        }
+    }
+    if (tbl == NULL) {
+        VSchema *sra_schema = NULL;
+        for ( ; rc == 0; ) {
+            rc = VDBManagerOpenTableRead(mgr, &tbl, sra_schema, name);
+            VSchemaRelease(sra_schema);
+            if (rc == 0) {
+                rc = VTable_get_platform(tbl, platform);
+                break;
+            }
+            else if (GetRCState(rc) == rcNotFound && GetRCObject(rc) == rcSchema
+                && sra_schema == NULL)
+            {
+                rc = VDBManagerMakeSRASchema(mgr, &sra_schema);
+            }
+        }
+    }
+    if (aTbl == NULL) {
+        VTableRelease(tbl);
+    }
+    if (aMgr == NULL) {
+        VDBManagerRelease(mgr);
+    }
+    return rc;
+}
+
+static
+rc_t dbcc(const char *src_path, const KDirectory *dir,
+    char const name[], uint32_t mode, bool *is_db, bool is_file)
 {
     rc_t rc;
     node_t *nodes = NULL;
     char *names;
-    
+
+    assert(src_path);
+
     rc = init_dbcc(dir, name, is_file, &nodes, &names);
     if (rc == 0) {
-        rc = kdbcc(dir, name, mode, is_db, is_file, nodes, names);
+        INSDC_SRA_platform_id platform = SRA_PLATFORM_UNDEFINED;
+        get_platform(dir, NULL, NULL, src_path, &platform);
+        rc = kdbcc(dir, src_path, mode, is_db, is_file, nodes, names, platform);
         if ( rc == 0 )
-            rc = vdbcc(dir, name, mode, * is_db, is_file);
+            rc = vdbcc(dir, src_path, mode, * is_db, is_file);
     }
     if (rc == 0)
-        rc = sra_dbcc(dir, name, nodes, names);
+        rc = sra_dbcc(dir, src_path, nodes, names);
 
     free(nodes);
 
@@ -1174,7 +1233,8 @@ char const *help_text[] =
     "Check blobs CRC32 (default: no)", NULL,
     "Check 'skey' index (default: no)", NULL,
     "Continue checking table for all possible errors (default: no)", NULL,
-    "Check data referential integrity for databases (default: no)", NULL
+    "Check data referential integrity for databases (default: no)", NULL,
+    "Check index-only with blobs CRC32 (default: no)", NULL
 };
 
 OptDef Options[] = 
@@ -1185,7 +1245,10 @@ OptDef Options[] =
     { "index"     , "i", NULL, &help_text[4], 1, false, false },
 #endif
     { "exhaustive", "x", NULL, &help_text[6], 1, false, false },
-    { "dri"       , "d", NULL, &help_text[8], 1, false, false }
+    { "dri"       , "d", NULL, &help_text[8], 1, false, false },
+
+    /* should be the last one here: it is not printed by --help */
+    { "index-only",NULL, NULL, &help_text[10], 1, false, false }
 };
 #define NOPTS ( sizeof(Options)/sizeof(Options[0]))
 
@@ -1207,7 +1270,7 @@ rc_t CC Usage (const Args * args)
     
     KOutMsg ("Options:\n");
     
-    for (i = 0; i != NOPTS; ++i) {
+    for (i = 0; i != NOPTS - 1; ++i) {
         HelpOptionLine(Options[i].aliases, Options[i].name, NULL, Options[i].help);
     }
     
@@ -1232,7 +1295,7 @@ uint32_t CC KAppVersion(void)
 rc_t CC KMain ( int argc, char *argv [] )
 {
     Args * args;
-    void *src_path_p = NULL;
+    char *src_dir_path = NULL;
     char *src_path = NULL;
     char *obj_name = NULL;
     bool md5_chk = true, md5_chk_explicit = false;
@@ -1259,26 +1322,26 @@ rc_t CC KMain ( int argc, char *argv [] )
                 char const *value;
                 
                 rc = ArgsParamValue (args, 0, &value); if (rc) break;
-                src_path_p = malloc(strlen(value)+1);
-                src_path = src_path_p;
-                strcpy(src_path, value);
-                obj_name = strrchr(src_path, '/');
+                src_dir_path = strdup(value);
+                src_path = strdup(value);
+                obj_name = strrchr(src_dir_path, '/');
                 if ( obj_name != NULL && obj_name [ 1 ] == 0 )
                 {
                     * obj_name = 0;
-                    obj_name = strrchr(src_path, '/');
+                    obj_name = strrchr(src_dir_path, '/');
                 }
                 if (obj_name != NULL)
                 {
-                    if (obj_name == src_path) {
-                        src_path = "/";
+                    if (obj_name == src_dir_path) {
+                        src_dir_path[0] = '/';
+                        src_dir_path[1] = '\0';
                     }
                     *obj_name++ = '\0';
                 }
                 else
                 {
-                    SRAPath *pmgr;
-                    
+                    SRAPath *pmgr = NULL;
+
                     /* check for accession */
                     rc = SRAPathMake ( & pmgr, dir );
                     if ( rc == 0 )
@@ -1287,14 +1350,19 @@ rc_t CC KMain ( int argc, char *argv [] )
                         if ( rc == 0 )
                         {
                             /* use mapped path */
-                            src_path = path_buffer;
-                            obj_name = strrchr(src_path, '/');
+                            free(src_path);
+                            src_path = strdup(path_buffer);
+                            free(src_dir_path);
+                            src_dir_path = strdup(path_buffer);
+                            obj_name = strrchr(src_dir_path, '/');
                             if ( obj_name == NULL )
-                                obj_name = src_path;
+                                obj_name = src_dir_path;
                             else
                             {
-                                if ( obj_name == src_path )
-                                    src_path = "/";
+                                if ( obj_name == src_dir_path ) {
+                                    src_dir_path[0] = '/';
+                                    src_dir_path[1] = '\0';
+                                }
                                 * obj_name ++ = '\0';
                             }
                         }
@@ -1305,15 +1373,17 @@ rc_t CC KMain ( int argc, char *argv [] )
                     if ( rc != 0 )
                     {
                         /* appears to be a simple name */
-                        obj_name = src_path;
-                        src_path = ".";
+                        obj_name = strdup(src_dir_path);
+                        src_dir_path[0] = '.';
+                        src_dir_path[1] = '\0';
                     }
                 }
                 
-                rc = KDirectoryOpenDirRead(dir, &src_dir, false, src_path);
+                rc = KDirectoryOpenDirRead(dir, &src_dir, false, src_dir_path);
                 KDirectoryRelease(dir);
                 if (rc) {
-                    (void)PLOGERR(klogErr, (klogErr, rc, "Failed to open '$(dir)'", "dir=%s", src_path));
+                    (void)PLOGERR(klogErr, (klogErr, rc,
+                        "Failed to open '$(dir)'", "dir=%s", src_dir_path));
                     break;
                 }
                 else {
@@ -1331,7 +1401,8 @@ rc_t CC KMain ( int argc, char *argv [] )
         }
         else {
             MiniUsage(args);
-            break;
+            ArgsWhack(args);
+            exit(EXIT_FAILURE);
         }
         
         rc = ArgsOptionCount(args, "md5", &pcount); if (rc) break;
@@ -1375,7 +1446,16 @@ rc_t CC KMain ( int argc, char *argv [] )
             break;
         }
 #endif
-        
+
+        rc = ArgsOptionCount(args, "index-only", &pcount);
+        if (rc) {
+            break;
+        }
+        if (pcount > 0) {
+            s_IndexOnly = blob_crc = true;
+        }
+            
+
         if (blob_crc || index_chk)
         {
             /* if blob or index is requested, md5 is off unless explicitly requested */
@@ -1384,7 +1464,7 @@ rc_t CC KMain ( int argc, char *argv [] )
         
         {
             bool is_db = false;
-            rc = dbcc(src_dir, obj_name, (md5_chk ? 1 : 0)|(blob_crc ? 2 : 0)|(index_chk ? 4 : 0), & is_db, is_file);
+            rc = dbcc(src_path, src_dir, obj_name, (md5_chk ? 1 : 0)|(blob_crc ? 2 : 0)|(index_chk ? 4 : 0), & is_db, is_file);
             if ( is_db )
             {
                 if ( rc != 0 )
@@ -1402,8 +1482,8 @@ rc_t CC KMain ( int argc, char *argv [] )
         }
         break;
     }
-    if (src_path_p) free(src_path_p);
     
+    free(src_path);
     KDirectoryRelease(src_dir);
    
     return rc;

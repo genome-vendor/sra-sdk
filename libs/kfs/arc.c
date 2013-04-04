@@ -28,6 +28,7 @@
 #include "toc-priv.h"
 
 #include <kfs/arc.h>
+
 #include <klib/debug.h>
 #include <klib/log.h>
 #include <klib/status.h>
@@ -38,6 +39,9 @@
 #include <klib/pbstree.h>
 #include <klib/text.h>
 #include <klib/sort.h>
+#include <klib/printf.h>
+#include <klib/klib-priv.h> /* ReportRecordZombieFile */
+
 #include <kfs/directory.h>
 #include <kfs/file.h>
 #include <kfs/toc.h>
@@ -1121,43 +1125,47 @@ uint32_t KArcDirFullPathType (const KArcDir *self, const char * path)
 
     for (loopcount = 0; loopcount < KARC_LINK_RESOLVE_LOOPMAX; ++loopcount)
     {
-	rc = KArcDirResolvePathNode (self, rcConstructing, local_path, false, &node, &type); 
-	if (rc != 0)
-	{
-	    /* TODO: filter rc into kptBadPath or kptNotFound... */
-	    return (tt | kptNotFound);
-	}
-	switch (type)
-	{
-	default:
-	    return kptBadPath;
+        rc = KArcDirResolvePathNode (self,
+            rcConstructing, local_path, false, &node, &type); 
+        if (rc != 0)
+        {
+            /* TODO: filter rc into kptBadPath or kptNotFound... */
+            return (tt | kptNotFound);
+        }
+        switch (type)
+        {
+        default:
+            return kptBadPath;
 
-	case ktocentrytype_unknown:
-	    return kptBadPath;
+        case ktocentrytype_unknown:
+            return kptBadPath;
 
-	case ktocentrytype_hardlink:
-	    return kptDir;
+        case ktocentrytype_hardlink:
+            return kptDir;
 
-	case ktocentrytype_dir:
-	    return tt | kptDir;
+        case ktocentrytype_dir:
+            return tt | kptDir;
 
-	case ktocentrytype_file:
-	case ktocentrytype_emptyfile:
-	    return tt | kptFile;
+        case ktocentrytype_file:
+        case ktocentrytype_emptyfile:
+            return tt | kptFile;
 
-	case ktocentrytype_chunked:
-	    return tt | kptFile;
+        case ktocentrytype_chunked:
+            return tt | kptFile;
 
-	case ktocentrytype_softlink:
-	    tt = kptAlias;
-	    if (KTocEntryGetSoftTarget(node,&local_path) != 0)
-		return kptAlias|kptNotFound;
-	    break;
+        case ktocentrytype_softlink:
+            tt = kptAlias;
+            if (KTocEntryGetSoftTarget(node,&local_path) != 0)
+                return kptAlias|kptNotFound;
+            break;
 
         case ktocentrytype_zombiefile:
+            PLOGMSG (klogWarn, (klogWarn,
+                "zombie file detected: '$(P)'", "P=%s", path));
+            ReportRecordZombieFile();
             return tt | kptZombieFile;
 
-	}
+        }
     }
     return kptBadPath;
 }
@@ -2203,6 +2211,7 @@ rc_t KArcFileMake (KArcFile ** self,
             {
                 rc = KFileInit (&pF->dad,				/* initialize base class */
                                 (const KFile_vt*)&vtKArcFile,	/* VTable for KArcFile */
+                                "KArcFile", "no-name",
                                 true,				/* read allowed */
                                 false);				/* write disallowed */
                 if (rc == 0)
@@ -3511,72 +3520,83 @@ rc_t KDirectoryOpenArcDirRead_intern( const KDirectory * self,
         return RC ( rcFS, rcDirectory, rcAccessing, rcPath, rcInvalid );
     }
 
-    /* -----
-     * we got a local String type mixed in along with ASCIZ cstrings
-     */
-    rc = KDirectoryResolvePath ( self, true, cpath, sizeof (cpath), path );
-    if ( rc == 0 )
+    if (_archive == NULL)
+    {
+        /* -----
+         * we got a local String type mixed in along with ASCIZ cstrings
+         */
+        rc = KDirectoryResolvePath ( self, true, cpath, sizeof (cpath), path );
+        if ( rc == 0 )
+        {
+            size_t ln;
+            ln = strlen (cpath);
+            if ((cpath[ln-1] == '.')&&(cpath[ln-2] == '/'))
+                cpath[ln-2] = '\0';
+        }
+        else
+            return rc;
+    }
+    else
     {
         size_t ln;
-        ln = strlen (cpath);
-        if ((cpath[ln-1] == '.')&&(cpath[ln-2] == '/'))
-            cpath[ln-2] = '\0';
+
+        rc = string_printf (cpath, sizeof cpath, &ln, path);
+        if ((rc == 0) && (ln > sizeof cpath))
+            rc = RC (rcFS, rcArc, rcOpening, rcBuffer, rcInsufficient);
     }
-    if ( rc != 0 )
-        return rc;
+
     StringInitCString ( &spath, cpath );
     pathlen = strlen ( cpath );
 
-    type = KDirectoryVPathType ( self, cpath, NULL );
-    switch ( type & ~kptAlias )
+    if (_archive == NULL)
     {
-    default:
-        rc = RC ( rcFS, rcArc, rcOpening, rcFile, rcUnexpected );
-        if ( !silent )
-            LOGERR (klogErr, rc, "Unusable file type" );
-        break;
-    case kptNotFound:
-    case kptBadPath:
-        rc = RC ( rcFS, rcArc, rcOpening, rcFile, rcNotFound );
-        break;
-
-    case kptFile:
-    /* -----
-     * Open the archive file as a KFILE for internal use
-     *
-     * Fail / quit if we couldn't
-     */
-    if ( baseType != tocKFile )
-    {
-        rc = RC ( rcFS, rcArc, rcOpening, rcFile, rcIncorrect );
-        if ( !silent )
-            LOGERR ( klogErr, rc, "Mismatch of file type and expected type" );
-        return rc;
-    }
-
-    if (archive.v == NULL)
-    {
-        rc = KDirectoryVOpenFileRead ( self, &archive.f, cpath, NULL );
-        if ( rc != 0 && !silent )
+        type = KDirectoryVPathType ( self, cpath, NULL );
+        switch ( type & ~kptAlias )
         {
-            PLOGERR ( klogErr, ( klogErr, rc,
-                                 "Failed to open archive file $(file)",
-                                 PLOG_S (file),
-                                 path ) );
-        }
-    }
-    break;
-
-    case kptDir:
-        if ( baseType != tocKDirectory )
-        {
-            rc = RC ( rcFS, rcArc, rcOpening, rcFile, rcInconsistent );
+        default:
+            rc = RC ( rcFS, rcArc, rcOpening, rcFile, rcUnexpected );
             if ( !silent )
-                LOGERR ( klogErr, rc, "Mismatch of file type and expected type" );
-            return rc;
-        }
-        if (archive.v == NULL)
-        {
+                LOGERR (klogErr, rc, "Unusable file type" );
+            break;
+        case kptNotFound:
+        case kptBadPath:
+            rc = RC ( rcFS, rcArc, rcOpening, rcFile, rcNotFound );
+            break;
+
+        case kptFile:
+            /* -----
+             * Open the archive file as a KFILE for internal use
+             *
+             * Fail / quit if we couldn't
+             */
+            if ( baseType != tocKFile )
+            {
+                rc = RC ( rcFS, rcArc, rcOpening, rcFile, rcIncorrect );
+                if ( !silent )
+                    LOGERR ( klogErr, rc, "Mismatch of file type and expected type" );
+                return rc;
+            }
+
+            rc = KDirectoryVOpenFileRead ( self, &archive.f, cpath, NULL );
+            if ( rc != 0 && !silent )
+            {
+                PLOGERR ( klogErr, ( klogErr, rc,
+                                     "Failed to open archive file $(file)",
+                                     PLOG_S (file),
+                                     path ) );
+            }
+        
+            break;
+
+        case kptDir:
+            if ( baseType != tocKDirectory )
+            {
+                rc = RC ( rcFS, rcArc, rcOpening, rcFile, rcInconsistent );
+                if ( !silent )
+                    LOGERR ( klogErr, rc, "Mismatch of file type and expected type" );
+                return rc;
+            }
+
             rc = KDirectoryVOpenDirRead ( self, &archive.d, false, cpath, NULL );
             if ( rc != 0 && !silent )
             {
@@ -3584,10 +3604,9 @@ rc_t KDirectoryOpenArcDirRead_intern( const KDirectory * self,
                           ( klogErr, "Failed to open archive directory $(file)",
                             PLOG_S ( file ), path ) );
             }
-        }
-        break;
-    } /* switch ( type & ~kptAlias ) */
-
+            break;
+        } /* switch ( type & ~kptAlias ) */
+    }
     if ( rc == 0 )
     {
         /* -----
@@ -3669,6 +3688,8 @@ rc_t KDirectoryOpenArcDirRead_intern( const KDirectory * self,
         }
     }
 
+    rc = rc | rcaux;
+
     if ( rc != 0 )
     {
         if ( arcdir != NULL )
@@ -3678,7 +3699,8 @@ rc_t KDirectoryOpenArcDirRead_intern( const KDirectory * self,
 
     if ( toc != NULL )
         KTocRelease ( toc );
-    return rc | rcaux;
+
+    return rc;
 }
 
 

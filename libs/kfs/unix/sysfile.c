@@ -466,29 +466,29 @@ rc_t KSysFileWrite ( KSysFile *self, uint64_t pos,
             return rc;
 
         case EIO:
-            rc = RC ( rcFS, rcFile, rcReading, rcTransfer, rcUnknown );
+            rc = RC ( rcFS, rcFile, rcWriting, rcTransfer, rcUnknown );
             LOGERR (klogErr, rc, "system I/O error");
             return rc;
 
         case EBADF:
-            rc = RC ( rcFS, rcFile, rcReading, rcFileDesc, rcInvalid );
+            rc = RC ( rcFS, rcFile, rcWriting, rcFileDesc, rcInvalid );
             PLOGERR (klogErr,
                      (klogErr, rc, "system bad file descriptor error fd='$(E)'",
                       "E=%d", self->fd));
             return rc;
 
         case EISDIR:
-            rc = RC ( rcFS, rcFile, rcReading, rcFileDesc, rcIncorrect );
+            rc = RC ( rcFS, rcFile, rcWriting, rcFileDesc, rcIncorrect );
             LOGERR (klogErr, rc, "system misuse of a directory error");
             return rc;
 
         case EINVAL:
-            rc = RC ( rcFS, rcFile, rcReading, rcParam, rcInvalid );
+            rc = RC ( rcFS, rcFile, rcWriting, rcParam, rcInvalid );
             LOGERR (klogErr, rc, "system invalid argument error");
             return rc;
 
         default:
-            rc = RC ( rcFS, rcFile, rcReading, rcNoObj, rcUnknown );
+            rc = RC ( rcFS, rcFile, rcWriting, rcNoObj, rcUnknown );
             PLOGERR (klogErr,
                      (klogErr, rc, "unknown system error errno='$(S)($(E))'",
                       "S=%!,E=%d", lerrno, lerrno));
@@ -530,7 +530,7 @@ static KFile_vt_v1 vtKSysFile =
 
 static
 rc_t KSysFileMakeVT ( KSysFile **fp, int fd, const KFile_vt *vt,
-    bool read_enabled, bool write_enabled )
+    const char *path, bool read_enabled, bool write_enabled )
 {
     rc_t rc;
     KSysFile *f;
@@ -564,7 +564,7 @@ rc_t KSysFileMakeVT ( KSysFile **fp, int fd, const KFile_vt *vt,
         }
 #endif
 
-        rc = KFileInit ( & f -> dad, vt, read_enabled, write_enabled );
+        rc = KFileInit ( & f -> dad, vt, "KSysFile", path, read_enabled, write_enabled );
         if ( rc == 0 )
         {
             f -> fd = fd;
@@ -577,10 +577,10 @@ rc_t KSysFileMakeVT ( KSysFile **fp, int fd, const KFile_vt *vt,
     return rc;
 }
 
-LIB_EXPORT rc_t CC KSysFileMake ( KSysFile **fp, int fd, bool read_enabled, bool write_enabled )
+LIB_EXPORT rc_t CC KSysFileMake ( KSysFile **fp, int fd, const char *path, bool read_enabled, bool write_enabled )
 {
     return KSysFileMakeVT ( fp, fd, ( const KFile_vt* ) & vtKSysFile,
-        read_enabled, write_enabled );
+        path, read_enabled, write_enabled );
 }
 
 /*--------------------------------------------------------------------------
@@ -917,7 +917,7 @@ rc_t KStdIOFileMake ( KFile **fp, int fd,
     if ( seekable )
     {
         return KSysFileMakeVT ( ( KSysFile** ) fp, fd,
-            ( const KFile_vt* ) & vtKStdIOFile, read_enabled, write_enabled );
+            ( const KFile_vt* ) & vtKStdIOFile, "stdio-file", read_enabled, write_enabled );
     }
 
     if ( fd < 0 )
@@ -955,7 +955,7 @@ rc_t KStdIOFileMake ( KFile **fp, int fd,
             }
 #endif
             rc = KFileInit ( &f->dad.dad, (const KFile_vt*) &vtKStdIOStream,
-                             read_enabled, write_enabled );
+                             "KStdIOFile", "fd", read_enabled, write_enabled );
             if ( rc == 0 )
             {
                 f -> dad . fd = fd;

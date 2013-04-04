@@ -31,6 +31,10 @@
 #include <klib/defs.h>
 #endif
 
+#ifndef _h_vdb_blob_
+#include <vdb/blob.h>
+#endif
+
 #ifndef _h_klib_refcount_
 #include <klib/refcount.h>
 #endif
@@ -65,10 +69,29 @@ struct BlobHeaders;
 struct VProduction;
 struct VBlobPageMapCache;
 
+typedef struct PageMapProcessRequest{
+    struct PageMap *pm;        /**** deserialized form **/
+    KDataBuffer data;   /**** serialized   form **/
+    uint32_t    row_count;
+    uint64_t    elem_count;
+    rc_t rc;            /**** results **/
+
+    volatile enum {
+        ePMPR_STATE_NONE=0,
+        ePMPR_STATE_SERIALIZE_REQUESTED,
+        ePMPR_STATE_DESERIALIZE_REQUESTED,
+        ePMPR_STATE_SERIALIZE_DONE,
+        ePMPR_STATE_DESERIALIZE_DONE,
+	ePMPR_STATE_EXIT
+    } state;            /**** request state      **/
+    struct KLock      *lock;
+    struct KCondition *cond;
+} PageMapProcessRequest;
+
+
 /*--------------------------------------------------------------------------
  * VBlob
  */
-typedef struct VBlob VBlob;
 struct VBlob
 {
     int64_t start_id;
@@ -106,9 +129,15 @@ struct VBlobPageMapCache {
 
 rc_t VBlobNew( VBlob **lhs, int64_t start_id, int64_t stop_id, const char *name );
 
+/* use inline-able addref and release on blobs
+   within the library for efficiency */
 #if 1
 #define VBlobAddRef( self ) \
-    ( ( ( self ) == NULL ) ? 0 : ( atomic32_inc ( & ( self ) -> refcount ), 0 ) )
+    ( ( ( self ) == NULL ) ? \
+      0 : ( atomic32_inc ( & ( self ) -> refcount ), 0 ) )
+#define VBlobRelease( self ) \
+    ( ( ( self ) == NULL || atomic32_read_and_add_gt ( & ( self ) -> refcount, -1, 1 ) > 1 ) ? \
+      0 : VBlobRelease ( self ) )
 #endif
 
 #if _DEBUGGING
@@ -118,20 +147,12 @@ void VBlobCheckIntegrity ( const VBlob *self );
   ( void ) 0
 #endif
 
-#ifdef VBlobAddRef
-rc_t VBlobReleaseLast ( VBlob *self );
-#define VBlobRelease( self ) \
-    ( ( ( self ) == NULL || atomic32_read_and_add_gt ( & ( self ) -> refcount, -1, 1 ) > 1 ) ? 0 : VBlobReleaseLast ( self ) )
-#else
-rc_t VBlobAddRef( VBlob *self );
-rc_t VBlobRelease( VBlob *self );
-#endif
-
 rc_t VBlobCreateFromData(
                          struct VBlob **lhs,
                          int64_t start_id, int64_t stop_id,
                          const KDataBuffer *src,
-                         uint32_t elem_bits
+                         uint32_t elem_bits,
+			 PageMapProcessRequest const *pmpr
 );
 
 rc_t VBlobCreateFromSingleRow(
@@ -140,6 +161,8 @@ rc_t VBlobCreateFromSingleRow(
                               const KDataBuffer *src,
                               VByteOrder byte_order
 );
+/*** VBlob as a new array; meaning fixed len,data_run(..)=1 **/
+rc_t VBlobNewAsArray(struct VBlob **lhs, int64_t start_id, int64_t stop_id, uint32_t rowlen, uint32_t elem_bits); 
     
 rc_t VBlobSerialize( const VBlob *self, KDataBuffer *result );
 
@@ -150,6 +173,26 @@ uint32_t VBlobFixedRowLength( const struct VBlob *self );
 rc_t VBlobAppend( struct VBlob *self, const struct VBlob *other );
 /**** finds start_id in a blob and builds sub-blob for the number or repetitions ***/
 rc_t VBlobSubblob( const struct VBlob *self,struct VBlob **sub, int64_t start_id );
+
+void VBlobPageMapOptimize( struct VBlob **self );
+
+#define LAST_BLOB_CACHE_SIZE 256
+
+
+typedef struct VBlobMRUCache VBlobMRUCache; /** forward declaration **/
+typedef  struct VBlobMRUCacheCursorContext {  /** to be used to pass cache context down to production level ***/
+	VBlobMRUCache * cache;
+	uint32_t	col_idx;
+} VBlobMRUCacheCursorContext;
+
+VBlobMRUCache * VBlobMRUCacheMake(uint64_t capacity );
+void VBlobMRUCacheDestroy( VBlobMRUCache *self );
+const VBlob* VBlobMRUCacheFind(const VBlobMRUCache *cself, uint32_t col_idx, int64_t row_id);
+rc_t VBlobMRUCacheSave(const VBlobMRUCache *cself, uint32_t col_idx, const VBlob *blob);
+
+
+rc_t PageMapProcessGetPagemap(const PageMapProcessRequest *self,struct PageMap **pm);
+
 
 #ifdef __cplusplus
 }

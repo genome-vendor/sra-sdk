@@ -623,9 +623,9 @@ static rc_t CC dump_to_stderr(void *dst, const void *buf, size_t sz)
     return 0;
 }
 
-rc_t VSchemaDebugPrint(const VSchema *self, const char *decl)
+rc_t VSchemaDebugPrint ( const VSchema *self, const char *decl )
 {
-    return VSchemaDump(self, sdmPrint, decl, dump_to_stderr, NULL);
+    return VSchemaDump ( self, sdmPrint, decl, dump_to_stderr, NULL );
 }
 
 /* ToText

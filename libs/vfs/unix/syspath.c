@@ -92,9 +92,10 @@ rc_t VPathGetCWD (char * buffer, size_t buffer_size)
 }
 
 
-#if USE_EXPERIMENTAL_CODE
 rc_t VPathTransformPathHier (char ** ppath)
 {
+#if USE_EXPERIMENTAL_CODE && 0
+/* turning this off until http urls are better handled. */
     char * pc;
 
     pc = *ppath;
@@ -121,6 +122,6 @@ rc_t VPathTransformPathHier (char ** ppath)
         *ppath = pc;
     }
     PATH_DEBUG (("%s: outgoing path '%s'\n",__func__, *ppath));
+#endif
     return 0;
 }
-#endif

@@ -36,6 +36,9 @@ ALL_LIBS = \
 	$(INT_LIBS) \
 	$(EXT_LIBS)
 
+TEST_TOOLS = \
+	wb-test-kfg
+
 include $(TOP)/build/Makefile.env
 
 #-------------------------------------------------------------------------------
@@ -50,7 +53,10 @@ $(INT_LIBS): makedirs
 $(EXT_LIBS): makedirs
 	@ $(MAKE_CMD) $(LIBDIR)/$@
 
-.PHONY: all std $(ALL_LIBS)
+$(TEST_TOOLS): makedirs
+	@ $(MAKE_CMD) $(TEST_BINDIR)/$@
+
+.PHONY: all std $(ALL_LIBS) $(TEST_TOOLS)
 
 #-------------------------------------------------------------------------------
 # std
@@ -65,6 +71,7 @@ $(TARGDIR)/std: \
 # clean
 #
 clean: stdclean
+	@ rm -f $(addsuffix *,$(addprefix $(TEST_BINDIR)/,$(TEST_TOOLS)))
 
 .PHONY: clean
 
@@ -79,12 +86,16 @@ tag: \
 #-------------------------------------------------------------------------------
 # kfg
 #
-$(LIBDIR)/libkfg: $(addprefix $(LIBDIR)/libkfg.,$(LIBEXT))
+$(LIBDIR)/libkfg: $(NCBIDIR)/config.kfg $(addprefix $(LIBDIR)/libkfg.,$(LIBEXT))
+
+$(NCBIDIR)/config.kfg: $(SRCDIR)/config.$(OS).kfg
+	sed -e "s|\$$"'(TOP)|'$(TOP)'|g' -e 's|/cygdrive||g' $^ > $@
 
 KFG_SRC = \
 	config-grammar \
 	config-lex \
 	config \
+	repository \
 	report 
 
 KFG_OBJ = \
@@ -102,3 +113,27 @@ $(LIBDIR)/libkfg.$(LIBX): $(KFG_OBJ)
 
 libkfg_tag:
 	@ $(TOP)/build/tag-module.sh $(MODULE) libkfg $(KFG_OBJ)
+
+#-------------------------------------------------------------------------------
+# white-box test
+#
+TEST_SRC = \
+	wb-test-kfg
+
+TEST_OBJ = \
+	$(addsuffix .$(OBJX),$(TEST_SRC))
+
+TEST_LIB = \
+	-skapp \
+	-skfg \
+	-svdb \
+	-svfs \
+	-skdb \
+	-skfs \
+	-skrypto \
+	-skproc \
+	-sktst \
+	-sklib 
+
+$(TEST_BINDIR)/wb-test-kfg: $(TEST_OBJ)
+	$(LP) --exe -o $@ $^ $(TEST_LIB) 

@@ -53,43 +53,68 @@ rc_t CC tokenize_spot_name_IonTorrent( void *self, const VXformInfo *info, int64
     
     assert(rslt->elem_bits == sizeof(spot_name_tok[0]) * 8);
     rslt->data->elem_bits = sizeof(spot_name_tok[0]) * 8;
-    if( (rc = KDataBufferResize(rslt->data, EXPECTED_NUMBER_OF_TOKENS)) != 0 ) {
+    rc = KDataBufferResize(rslt->data, EXPECTED_NUMBER_OF_TOKENS);
+    if( rc != 0 )
         return rc;
-    }
     
     spot_name_tok = rslt->data->base;
     
     /* reverse line parse by format:
        /^(.+):([0-9]+):([0-9]+)$/ = (name, x, x) = ($1, $2, $3)
     */
-    name = &((const char *)argv[0].u.data.base)[argv[0].u.data.first_elem];
+    name = argv[0].u.data.base;
+    name += argv[0].u.data.first_elem;
     end = name + argv[0].u.data.elem_count;
 
-    while(rc == 0 && end > name && tok > 0 ) {
-        size_t l = 0;
-        while( isdigit(*--end) && end > name ) {
-            l++;
+    while ( end > name && tok > 0 )
+    {
+        const char *num_start, *num_end = end;
+
+        /* examine least significant digit */
+        -- end;
+        if ( ! isdigit ( * end ) )
+            break;
+
+        /* any digit 0-9 is okay as least significant */
+        num_start = end;
+
+        /* examine remaining digits */
+        while ( end > name )
+        {
+            /* require 0-9 to stay within parse */
+            -- end;
+            if ( ! isdigit ( * end ) )
+                break;
+
+            /* only reset numeric start if not 0 */
+            if ( * end != '0' )
+                num_start = end;
         }
-        if( *end != ':' || l == 0 ) {
-            rc = RC(rcSRA, rcFormatter, rcReading, rcName, rcUnrecognized);
-        } else {
-            tok--;
-            spot_name_tok[tok].s.token_type = types[tok];
-            spot_name_tok[tok].s.position = end - name + 1;
-            spot_name_tok[tok].s.length = l;
-        }
+
+        /* should have stopped on ':' */
+        if ( *end != ':' )
+            break;
+
+        /* we have a numeric token
+           due to oddities, exclude leading zeros from numeral */
+        -- tok;
+        spot_name_tok[tok].s.token_type = types[tok];
+        spot_name_tok[tok].s.position = num_start - name;
+        spot_name_tok[tok].s.length = num_end - num_start;
     }
-    if( rc == 0 && tok != 0 ) {
-        rc = RC(rcSRA, rcFormatter, rcReading, rcName, rcInvalid);
-    }
-    if( rc != 0 ) {
+
+    /* if all tokens were seen, the parse was good */
+    if( tok == 0 )
+        rslt->elem_count = EXPECTED_NUMBER_OF_TOKENS;
+    else
+    {
+        /* otherwise, treat entire string as unrecognized */
         spot_name_tok[0].s.token_type = nt_unrecognized;
         spot_name_tok[0].s.position = 0;
         spot_name_tok[0].s.length = argv[0].u.data.elem_count;
         rslt->elem_count = 1;
-    } else {
-        rslt->elem_count = EXPECTED_NUMBER_OF_TOKENS;
     }
+
     return 0;
 }
 

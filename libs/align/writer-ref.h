@@ -45,16 +45,17 @@ enum ETableWriterRefData_ColNames {
 
 enum ETableWriterRefCoverage_ColNames {
     /* coverage data starts here */
-    ewrefcv_cn_CGRAPH_HIGH,
+    ewrefcv_cn_CGRAPH_HIGH=0,
     ewrefcv_cn_CGRAPH_LOW,
     ewrefcv_cn_CGRAPH_MISMATCHES,
     ewrefcv_cn_CGRAPH_INDELS,
     ewrefcv_cn_OVERLAP_REF_POS,
     ewrefcv_cn_OVERLAP_REF_LEN,
+    ewrefcv_cn_ReCover = ewrefcv_cn_OVERLAP_REF_LEN,
     ewrefcv_cn_PRIMARY_ALIGNMENT_IDS,
     ewrefcv_cn_SECONDARY_ALIGNMENT_IDS,
-    ewrefcv_cn_EVIDENCE_ALIGNMENT_IDS,
-    ewrefcv_cn_Last = ewrefcv_cn_EVIDENCE_ALIGNMENT_IDS
+    ewrefcv_cn_EVIDENCE_INTERVAL_IDS,
+    ewrefcv_cn_Last = ewrefcv_cn_EVIDENCE_INTERVAL_IDS
 };
 
 enum ETableWriterRef_ColOptions {
@@ -95,11 +96,11 @@ rc_t CC TableWriterRef_WriteCoverage(const TableWriterRef* cself, int64_t rowid,
 
 typedef struct TableWriterRefCoverage TableWriterRefCoverage;
 
-rc_t CC TableWriterRefCoverage_Make(const TableWriterRefCoverage** cself, VDatabase* db, const uint32_t options);
-
+rc_t CC TableWriterRefCoverage_MakeCoverage(const TableWriterRefCoverage** cself, VDatabase* db, const uint32_t options);
+rc_t CC TableWriterRefCoverage_MakeIds(const TableWriterRefCoverage** cself, VDatabase* db, const char *col_name);
 /* rows optional here */
 rc_t CC TableWriterRefCoverage_Whack(const TableWriterRefCoverage* cself, bool commit, uint64_t* rows);
-
-rc_t CC TableWriterRefCoverage_Write(const TableWriterRefCoverage* cself, int64_t rowid, const ReferenceSeqCoverage* coverage);
+rc_t CC TableWriterRefCoverage_WriteCoverage(const TableWriterRefCoverage* cself, int64_t rowid, const ReferenceSeqCoverage* coverage);
+rc_t CC TableWriterRefCoverage_WriteIds(const TableWriterRefCoverage* cself, int64_t rowid, const int64_t* buf,uint32_t num);
 
 #endif /* _h_align_writer_ref_ */

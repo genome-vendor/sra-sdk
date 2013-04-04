@@ -485,11 +485,11 @@ rc_t log_print( KFmtHandler* formatter, const KLogFmtFlags flags, KWrtHandler* w
 
     uint32_t envc = 0;
     wrt_nvp_t envs[20];
-    const char ebuffer[2048];
+    char ebuffer[2048];
     uint32_t argc = 0;
     wrt_nvp_t argv[32];
     char pbuffer[4096];
-    const char abuffer[4096];
+    char abuffer[4096];
     KFmtWriter fmtwrt;
     
     assert(formatter != NULL);
@@ -650,19 +650,23 @@ rc_t log_print( KFmtHandler* formatter, const KLogFmtFlags flags, KWrtHandler* w
     }
     if( rc != 0 ) {
         /* print reason for failure */
-        rc = string_printf((char*)abuffer, sizeof(abuffer), &num_writ, "log failure: %R in '%s'", rc, msg);
+        string_printf((char*)abuffer, sizeof(abuffer), &num_writ, "log failure: %R in '%s'", rc, msg);
         envs[envc].name = "message";
         envs[envc++].value = abuffer;
     }
+
     wrt_nvp_sort(envc, envs);
-    rc = fmtwrt(formatter->data, writer, argc, argv, envc, envs);
-    if( (rc == 0) && use_rc ) {
-        KLogLastErrorCodeSet(lvl, status);
+
+    {
+        rc_t rc2 = fmtwrt(formatter->data, writer, argc, argv, envc, envs);
+        if( (rc2 == 0) && use_rc ) {
+            KLogLastErrorCodeSet(lvl, status);
+        }
+        if(nbuffer != abuffer) {
+            free(nbuffer);
+        }
+        return rc != 0 ? rc : rc2;
     }
-    if(nbuffer != abuffer) {
-        free(nbuffer);
-    }
-    return rc;
 }
 
 /* LogMsg

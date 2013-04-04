@@ -66,6 +66,7 @@ struct KIndex
         KTrieIndex_v2 txt234;
         KU64Index_v3  u64_3;
     } u;
+    bool converted_from_v1;
     uint8_t type;
     char path [ 1 ];
 };
@@ -102,7 +103,7 @@ rc_t KIndexWhack ( KIndex *self )
         self -> mgr = NULL;
 
         /* complete */
-        rc = RC ( rcDB, rcIndex, rcDestroying, rcIndex, rcBadVersion );
+        rc = SILENT_RC ( rcDB, rcIndex, rcDestroying, rcIndex, rcBadVersion );
 
         switch ( self -> type )
         {
@@ -270,6 +271,9 @@ rc_t KIndexAttach ( KIndex *self, const KMMap *mm, bool *byteswap )
                 switch ( hdr -> version )
                 {
                 case 1:
+#if KDBINDEXVERS != 1
+                    self -> converted_from_v1 = true;
+#endif
                 case 2:
                     self -> type = kitText;
                     break;
@@ -638,7 +642,7 @@ LIB_EXPORT rc_t CC KIndexConsistencyCheck ( const KIndex *self, uint32_t level,
             case 4:
                 rc = KTrieIndexCheckConsistency_v2 ( & self -> u . txt234,
                     start_id, id_range, num_keys, num_rows, num_holes,
-                    self, key2id, id2key, all_ids );
+                    self, key2id, id2key, all_ids, self -> converted_from_v1 );
                 break;
             default:
                 return RC ( rcDB, rcIndex, rcValidating, rcIndex, rcBadVersion );
@@ -697,9 +701,9 @@ LIB_EXPORT rc_t CC KIndexFindText ( const KIndex *self, const char *key, int64_t
         case 3:
         case 4:
 #if V2FIND_RETURNS_SPAN
-            rc = KTrieIndexFind_v2 ( & self -> u . txt234, key, start_id, & span, custom_cmp, data );
+            rc = KTrieIndexFind_v2 ( & self -> u . txt234, key, start_id, & span, custom_cmp, data, self -> converted_from_v1 );
 #else
-            rc = KTrieIndexFind_v2 ( & self -> u . txt234, key, start_id, custom_cmp, data );
+            rc = KTrieIndexFind_v2 ( & self -> u . txt234, key, start_id, custom_cmp, data, self -> converted_from_v1 );
 #endif
             break;
         default:
@@ -755,9 +759,9 @@ LIB_EXPORT rc_t CC KIndexFindAllText ( const KIndex *self, const char *key,
         case 3:
         case 4:
 #if V2FIND_RETURNS_SPAN
-            rc = KTrieIndexFind_v2 ( & self -> u . txt234, key, & id64, & span, NULL, NULL );
+            rc = KTrieIndexFind_v2 ( & self -> u . txt234, key, & id64, & span, NULL, NULL, self -> converted_from_v1 );
 #else
-            rc = KTrieIndexFind_v2 ( & self -> u . txt234, key, & id64, NULL, NULL );
+            rc = KTrieIndexFind_v2 ( & self -> u . txt234, key, & id64, NULL, NULL, self -> converted_from_v1 );
 #endif
             if ( rc == 0 )
                 rc = ( * f ) ( id64, span, data );

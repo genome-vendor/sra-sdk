@@ -175,7 +175,7 @@ rc_t VTableLoadSchema ( VTable *self );
 /* StoreSchema
  *  stores schema definition in metadata
  */
-rc_t VTableStoreSchema ( VTable *self );
+VDB_EXTERN rc_t VTableStoreSchema ( VTable *self );
 
 /* support for listing
  */

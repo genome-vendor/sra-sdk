@@ -41,6 +41,9 @@
 #include <kdb/table.h>
 #include <kdb/database.h>
 #include <kdb/kdb-priv.h>
+#include <vfs/path.h>
+#include <vfs/path-priv.h>
+#include <vfs/resolver.h>
 #include <klib/refcount.h>
 #include <klib/log.h>
 #include <klib/debug.h>
@@ -57,6 +60,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <assert.h>
+#include <va_copy.h>
 
 /* Destroy
  */
@@ -75,6 +79,8 @@ void SRATableDestroy ( SRATable *self )
     KMetadataRelease ( self -> meta );
     VTableRelease ( self -> vtbl );
     SRAMgrSever ( self -> mgr );
+
+    memset(self, 0, sizeof *self);
 
     free ( self );
 }
@@ -164,32 +170,187 @@ static rc_t ReadSpotSequence_v1(SRATable *self)
     return rc;
 }
 
+typedef enum {
+    eNotRead,
+    eNotFound,
+    eFailed,
+    eRead
+} EState;
+typedef struct {
+    EState state;
+    rc_t rc;
+} State;
+typedef struct {
+    uint64_t value;
+    State state;
+} U64;
+typedef struct {
+    uint32_t value;
+    State state;
+} U32;
+typedef struct {
+    U64 BASE_COUNT;
+    U32 MAX_SPOT_ID;
+    U32 MIN_SPOT_ID;
+    U64 SPOT_COUNT;
+} PseudoMeta;
 static
-rc_t SRATableLoadMetadata ( SRATable *self )
+rc_t VCursor_ReadPseudoMeta(rc_t rc, const VCursor *self,
+    const char *name, void *buffer, uint32_t blen, State *state)
+{
+    uint32_t idx = ~0;
+    uint32_t row_len = ~0;
+
+    assert(state);
+    state->rc = 0;
+
+    if (rc != 0)
+    {   return rc; }
+
+    state->state = eNotRead;
+
+    rc = VCursorAddColumn(self, &idx, name);
+
+    if (rc != 0) {
+        state->rc = rc;
+
+        if (GetRCObject(rc) == rcColumn && GetRCState(rc) == rcNotFound) {
+            rc = 0;
+            state->state = eNotFound;
+        }
+        else {
+            state->state = eFailed;
+        }
+    }
+
+    if (state->rc == 0) {
+        rc = VCursorReadDirect(self, 1, idx, blen * 8, buffer, blen, &row_len);
+
+        state->rc = rc;
+
+        if (rc != 0)
+        {   state->state = eFailed; }
+        else
+        {   state->state = eRead; }
+
+    }
+
+    return rc;
+}
+
+static
+rc_t VCursor_ReadPseudoMetaU32(rc_t rc, const VCursor *self,
+    const char *name, U32 *val)
+{
+    assert(val);
+    return VCursor_ReadPseudoMeta(rc, self,
+        name, &val->value, sizeof val->value, &val->state);
+}
+
+static
+rc_t VCursor_ReadPseudoMetaU64(rc_t rc, const VCursor *self,
+    const char *name, U64 *val)
+{
+    assert(val);
+    return VCursor_ReadPseudoMeta(rc, self,
+        name, &val->value, sizeof val->value, &val->state);
+}
+
+static
+rc_t PseudoMetaInit(PseudoMeta *self, const VCursor *curs,
+    bool readSpotCount, uint64_t spot_count)
 {
     rc_t rc = 0;
-    uint32_t idx, len;
-   
-    assert(self->curs != NULL);
+
+    assert(self);
+
+    memset(self, 0, sizeof *self);
+
+    if (readSpotCount) {
+        rc =
+         VCursor_ReadPseudoMetaU64(rc, curs, "SPOT_COUNT", &self->SPOT_COUNT);
+    }
+    else {
+        self->SPOT_COUNT.value = spot_count;
+        self->SPOT_COUNT.state.state = eRead;
+    }
+
+    rc = VCursor_ReadPseudoMetaU64(rc, curs, "BASE_COUNT", &self->BASE_COUNT);
+
+    rc = VCursor_ReadPseudoMetaU32(rc, curs, "MIN_SPOT_ID", &self->MIN_SPOT_ID);
+
+    rc = VCursor_ReadPseudoMetaU32(rc, curs, "MAX_SPOT_ID", &self->MAX_SPOT_ID);
+
+    return rc;
+}
+
+static
+rc_t PseudoMetaFix(PseudoMeta *self)
+{
+    rc_t rc = 0;
+
+    assert(self);
+
+    if (self->MIN_SPOT_ID.state.state != eRead)
+    {   self->MIN_SPOT_ID.value = 1; }
+
+    if (self->SPOT_COUNT.state.state != eRead &&
+        self->MAX_SPOT_ID.state.state != eRead)
+    {
+        return self->SPOT_COUNT.state.rc;
+    }
+    else if (self->SPOT_COUNT.state.state == eRead) {
+        if (self->MAX_SPOT_ID.state.state != eRead) {
+            self->MAX_SPOT_ID.value
+                = self->MIN_SPOT_ID.value + self->SPOT_COUNT.value - 1;
+        }
+        else if (self->MAX_SPOT_ID.value >= self->MIN_SPOT_ID.value) {
+            if (self->SPOT_COUNT.value
+                > self->MAX_SPOT_ID.value - self->MIN_SPOT_ID.value + 1)
+            {
+                self->SPOT_COUNT.value
+                    = self->MAX_SPOT_ID.value - self->MIN_SPOT_ID.value + 1;
+            }
+        }
+    }
+    else {
+            self->SPOT_COUNT.value
+                = self->MAX_SPOT_ID.value - self->MIN_SPOT_ID.value - 1;
+    }
+
+    return rc;
+}
+
+static
+rc_t SRATableLoadMetadata(SRATable *self)
+{
+    rc_t rc = 0;
+    PseudoMeta meta;
+    bool readSpotCount = true;
+
+    assert(self && self->curs != NULL);
     assert(self->curs_open == true);
 
-#define RD_META(nm, var, fail, dflt) \
-    if( (rc = VCursorAddColumn(self->curs, &idx, nm)) != 0 || \
-        (rc = VCursorReadDirect(self->curs, 1, idx, sizeof(var) * 8, \
-                                &var, sizeof(var), &len)) != 0 ) { \
-        if( fail ) return rc; else rc = 0; \
-	    var = dflt; \
+    readSpotCount = self->metavers > 1;
+    if (!readSpotCount) {
+        rc = ReadSpotSequence_v1(self);
+        if (rc != 0)
+        {   return rc; }
     }
 
-    if(self->metavers <= 1 ) {
-        rc = ReadSpotSequence_v1 ( self );
-        if ( rc != 0 ) return rc;
-    } else {	
-        RD_META("SPOT_COUNT", self->spot_count, true, 0);
-    }
-    RD_META("BASE_COUNT", self->base_count, false, 0);
-    RD_META("MIN_SPOT_ID", self->min_spot_id, false, 1);
-    RD_META("MAX_SPOT_ID", self->max_spot_id, false, self->spot_count);
+    rc = PseudoMetaInit(&meta, self->curs, readSpotCount, self->spot_count);
+    if (rc != 0)
+    {   return rc; }
+
+    rc = PseudoMetaFix(&meta);
+    if (rc != 0)
+    {   return rc; }
+
+    self->spot_count = meta.SPOT_COUNT.value;
+    self->base_count = meta.BASE_COUNT.value;
+    self->min_spot_id = meta.MIN_SPOT_ID.value;
+    self->max_spot_id = meta.MAX_SPOT_ID.value;
+
     return rc;
 }
 
@@ -217,15 +378,16 @@ rc_t SRATableFillOut ( SRATable *self, bool update )
  *  resolves via SRAPath mgr if present
  */
 rc_t ResolveTablePath ( const SRAMgr *mgr,
-        char *path, size_t psize, const char *spec, va_list args )
+    char *path, size_t psize, const char *spec, va_list args )
 {
+#if OLD_SRAPATH_MGR
     int len;
     char tblpath [ 4096 ];
-    const SRAPath *pmgr = mgr -> pmgr;
+    const SRAPath *pmgr = mgr -> _pmgr;
 
     /* if no path manager or if the spec string has embedded path separators,
        then this can't be an accession - just print it out */
-    if ( mgr -> pmgr == NULL || strchr( spec, '/' ) != NULL )
+    if ( mgr -> _pmgr == NULL || strchr( spec, '/' ) != NULL )
     {
         len = vsnprintf ( path, psize, spec, args );
         if ( len < 0 || ( size_t ) len >= psize )
@@ -241,7 +403,6 @@ rc_t ResolveTablePath ( const SRAMgr *mgr,
     /* test if the path exists in current directory, i.e. with assumed dot */
     if ( ! SRAPathTest ( pmgr, tblpath ) )
     {
-        /* try to resolve the path using mgr */
         rc_t rc = SRAPathFind ( pmgr, tblpath, path, psize );
         if ( rc == 0 )
             return 0;
@@ -253,6 +414,23 @@ rc_t ResolveTablePath ( const SRAMgr *mgr,
     strcpy ( path, tblpath );
 
     return 0;
+#else
+    VPath *accession;
+    const VPath *tblpath = NULL;
+    rc_t rc = VPathMakeFmt ( & accession, spec, args );
+    if ( rc == 0 )
+    {
+        rc = VResolverLocal ( ( const VResolver* ) mgr -> _pmgr, accession, & tblpath );
+        if ( rc == 0 )
+        {
+            size_t size;
+            rc = VPathReadPath ( tblpath, path, psize, & size );
+            VPathRelease ( tblpath );
+        }
+        VPathRelease ( accession );
+    }
+    return rc;
+#endif
 }
 
 /* OpenRead
@@ -281,66 +459,65 @@ rc_t CC SRAMgrVOpenAltTableRead ( const SRAMgr *self,
             rc = RC ( rcSRA, rcTable, rcOpening, rcName, rcEmpty );
         else
         {
-            char path [ 4096 ];
-            rc = ResolveTablePath ( self, path, sizeof path, spec, args );
-            if ( rc == 0 )
+            SRATable *tbl = calloc ( 1, sizeof *tbl );
+            if ( tbl == NULL )
+                rc = RC ( rcSRA, rcTable, rcConstructing, rcMemory, rcExhausted );
+            else
             {
-                SRATable *tbl = calloc ( 1, sizeof *tbl );
-                if ( tbl == NULL )
-                    rc = RC ( rcSRA, rcTable, rcConstructing, rcMemory, rcExhausted );
-                else
+                VSchema *schema = NULL;
+
+                rc = VDBManagerMakeSRASchema(self -> vmgr, & schema);
+                if ( rc == 0 ) 
                 {
-                    VSchema *schema;
-                    rc = VDBManagerMakeSRASchema ( self -> vmgr, & schema );
-                    if ( rc == 0 ) 
+                    va_list args_copy;
+                    va_copy ( args_copy, args );
+                    rc = VDBManagerVOpenTableRead ( self -> vmgr, & tbl -> vtbl, schema, spec, args );
+                    if ( rc != 0 && GetRCObject ( rc ) == rcTable && GetRCState ( rc ) == rcIncorrect )
                     {
-                        rc = VDBManagerOpenTableRead ( self -> vmgr, & tbl -> vtbl, schema, path );
-                        if ( rc != 0 && GetRCObject ( rc ) == rcTable && GetRCState ( rc ) == rcIncorrect )
+                        const VDatabase *db;
+                        rc_t rc2 = VDBManagerVOpenDBRead ( self -> vmgr, & db, schema, spec, args_copy );
+                        if ( rc2 == 0 )
                         {
-                            const VDatabase *db;
-                            rc_t rc2 = VDBManagerOpenDBRead ( self -> vmgr, & db, schema, path );
+                            rc2 = VDatabaseOpenTableRead ( db, & tbl -> vtbl, altname );
                             if ( rc2 == 0 )
-                            {
-                                rc2 = VDatabaseOpenTableRead ( db, & tbl -> vtbl, altname );
-                                if ( rc2 == 0 )
-                                    rc = 0;
+                                rc = 0;
 
-                                VDatabaseRelease ( db );
-                            }
+                            VDatabaseRelease ( db );
                         }
+                    }
+                    va_end ( args_copy );
 
-                        VSchemaRelease(schema);
+                    VSchemaRelease(schema);
 
+                    if ( rc == 0 )
+                    {
+                        rc = VTableOpenMetadataRead ( tbl -> vtbl, & tbl -> meta );
                         if ( rc == 0 )
                         {
-                            rc = VTableOpenMetadataRead ( tbl -> vtbl, & tbl -> meta );
+                            rc = KMetadataVersion ( tbl -> meta, & tbl -> metavers );
                             if ( rc == 0 )
                             {
-                                rc = KMetadataVersion ( tbl -> meta, & tbl -> metavers );
+                                rc = VTableCreateCursorRead ( tbl -> vtbl, & tbl -> curs );
                                 if ( rc == 0 )
                                 {
-                                    rc = VTableCreateCursorRead ( tbl -> vtbl, & tbl -> curs );
+                                    tbl -> mgr = SRAMgrAttach ( self );
+                                    tbl -> mode = self -> mode;
+                                    tbl -> read_only = true;
+                                    KRefcountInit ( & tbl -> refcount, 1, "SRATable", "OpenTableRead", spec );
+                                        
+                                    rc = SRATableFillOut ( tbl, false );
                                     if ( rc == 0 )
                                     {
-                                        tbl -> mgr = SRAMgrAttach ( self );
-                                        tbl -> mode = self -> mode;
-                                        tbl -> read_only = true;
-                                        KRefcountInit ( & tbl -> refcount, 1, "SRATable", "OpenTableRead", path );
-                                        
-                                        rc = SRATableFillOut ( tbl, false );
-                                        if ( rc == 0 )
-                                        {
-                                            * rslt = tbl;
-                                            return 0;
-                                        }
+                                        * rslt = tbl;
+                                        return 0;
                                     }
                                 }
                             }
                         }
-                        
                     }
-                    SRATableWhack ( tbl );
+                    
                 }
+                SRATableWhack ( tbl );
             }
         }
 
@@ -1080,11 +1257,13 @@ LIB_EXPORT rc_t CC SRATableMakeSingleFileArchive ( const SRATable *self, const K
             const VDatabase *db;
             if( (rc = VTableOpenParentRead(self->vtbl, &db)) == 0 && db != NULL ) {
                 const KDatabase *kdb;
-                if( (rc = VDatabaseOpenKDatabaseRead(db, &kdb)) == 0 ) {
+                if ((rc = VDatabaseOpenKDatabaseRead(db, &kdb)) == 0) {
                     const KDirectory *db_dir;
                     if( (rc = KDatabaseOpenDirectoryRead(kdb, &db_dir)) == 0 ) {
-                        rc = KDirectoryOpenTocFileRead(db_dir, sfa, sraAlign4Byte,
-                           lightweight ? sfa_filter_light : sfa_filter, (void*)sfa_path_type_db, sfa_sort_db);
+                        rc = KDirectoryOpenTocFileRead(db_dir, sfa,
+                            sraAlign4Byte,
+                            lightweight ? sfa_filter_light : sfa_filter,
+                            (void*)sfa_path_type_db, sfa_sort_db);
                         KDirectoryRelease(db_dir);
                         if( ext != NULL ) {
                             *ext = CSRA_EXT(lightweight);

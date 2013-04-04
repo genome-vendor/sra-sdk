@@ -1,0 +1,592 @@
+GAS LISTING /tmp/ccB53OyH.s 			page 1
+
+
+   1              		.file	"compile-test.c"
+   2              		.section	.debug_abbrev,"",@progbits
+   3              	.Ldebug_abbrev0:
+   4              		.section	.debug_info,"",@progbits
+   5              	.Ldebug_info0:
+   6              		.section	.debug_line,"",@progbits
+   7              	.Ldebug_line0:
+   8 0000 D3000000 		.text
+   8      0200B600 
+   8      00000101 
+   8      FB0E0D00 
+   8      01010101 
+   9              	.Ltext0:
+  10              	.globl KCipherVecRegtest
+  11              		.type	KCipherVecRegtest, @function
+  12              	KCipherVecRegtest:
+  13              	.LFB570:
+  14              		.file 1 "/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c"
+   1:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c **** /*===========================================================================
+   2:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c ****  *
+   3:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c ****  *                            PUBLIC DOMAIN NOTICE
+   4:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c ****  *               National Center for Biotechnology Information
+   5:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c ****  *
+   6:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c ****  *  This software/database is a "United States Government Work" under the
+   7:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c ****  *  terms of the United States Copyright Act.  It was written as part of
+   8:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c ****  *  the author's official duties as a United States Government employee and
+   9:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c ****  *  thus cannot be copyrighted.  This software/database is freely available
+  10:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c ****  *  to the public for use. The National Library of Medicine and the U.S.
+  11:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c ****  *  Government have not placed any restriction on its use or reproduction.
+  12:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c ****  *
+  13:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c ****  *  Although all reasonable efforts have been taken to ensure the accuracy
+  14:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c ****  *  and reliability of the software and data, the NLM and the U.S.
+  15:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c ****  *  Government do not and cannot warrant the performance or results that
+  16:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c ****  *  may be obtained by using this software or data. The NLM and the U.S.
+  17:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c ****  *  Government disclaim all warranties, express or implied, including
+  18:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c ****  *  warranties of performance, merchantability or fitness for any particular
+  19:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c ****  *  purpose.
+  20:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c ****  *
+  21:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c ****  *  Please cite the author in any work or product based on this material.
+  22:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c ****  *
+  23:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c ****  * ===========================================================================
+  24:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c ****  */
+  25:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c **** 
+  26:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c **** 
+  27:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c **** #include <cpuid.h>
+  28:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c **** #include <v128.h>
+  29:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c **** 
+  30:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c **** #include "ncbi-priv.h"
+  31:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c **** #include "blockcipher-impl.h"
+  32:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c **** 
+  33:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c **** 
+  34:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c **** 
+  35:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c **** const
+  36:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c **** CipherVec CMEMBER(test) (void)
+  37:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c **** {
+  15              		.loc 1 37 0
+  16              		.cfi_startproc
+GAS LISTING /tmp/ccB53OyH.s 			page 2
+
+
+  17 0000 55       		pushq	%rbp
+  18              	.LCFI0:
+  19              		.cfi_def_cfa_offset 16
+  20 0001 4889E5   		movq	%rsp, %rbp
+  21              		.cfi_offset 6, -16
+  22              	.LCFI1:
+  23              		.cfi_def_cfa_register 6
+  38:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c **** #if USEVEC
+  39:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c ****     CipherVec zero  =  { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  40:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c ****                          0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+  24              		.loc 1 40 0
+  25 0004 660F6F05 		movdqa	.LC0(%rip), %xmm0
+  25      00000000 
+  26 000c F30F7F45 		movdqu	%xmm0, -32(%rbp)
+  26      E0
+  41:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c ****     CipherVec one   =  { 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+  42:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c ****                          0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01 };
+  27              		.loc 1 42 0
+  28 0011 660F6F05 		movdqa	.LC1(%rip), %xmm0
+  28      00000000 
+  29 0019 F30F7F45 		movdqu	%xmm0, -16(%rbp)
+  29      F0
+  43:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c **** #else
+  44:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c ****     CipherVec zero  =  { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  45:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c ****                          0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+  46:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c ****     CipherVec one   =  { 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+  47:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c ****                          0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01 };
+  48:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c **** #endif
+  49:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c ****     return zero + one;
+  30              		.loc 1 49 0
+  31 001e F30F6F45 		movdqu	-16(%rbp), %xmm0
+  31      F0
+  32 0023 F30F6F4D 		movdqu	-32(%rbp), %xmm1
+  32      E0
+  33 0028 660FFCC1 		paddb	%xmm1, %xmm0
+  50:/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c **** }
+  34              		.loc 1 50 0
+  35 002c C9       		leave
+  36 002d C3       		ret
+  37              		.cfi_endproc
+  38              	.LFE570:
+  39              		.size	KCipherVecRegtest, .-KCipherVecRegtest
+  40              		.section	.rodata
+  41              		.align 16
+  42              	.LC0:
+  43 0000 00       		.byte	0
+  44 0001 00       		.byte	0
+  45 0002 00       		.byte	0
+  46 0003 00       		.byte	0
+  47 0004 00       		.byte	0
+  48 0005 00       		.byte	0
+  49 0006 00       		.byte	0
+  50 0007 00       		.byte	0
+  51 0008 00       		.byte	0
+  52 0009 00       		.byte	0
+  53 000a 00       		.byte	0
+  54 000b 00       		.byte	0
+GAS LISTING /tmp/ccB53OyH.s 			page 3
+
+
+  55 000c 00       		.byte	0
+  56 000d 00       		.byte	0
+  57 000e 00       		.byte	0
+  58 000f 00       		.byte	0
+  59              		.align 16
+  60              	.LC1:
+  61 0010 01       		.byte	1
+  62 0011 01       		.byte	1
+  63 0012 01       		.byte	1
+  64 0013 01       		.byte	1
+  65 0014 01       		.byte	1
+  66 0015 01       		.byte	1
+  67 0016 01       		.byte	1
+  68 0017 01       		.byte	1
+  69 0018 01       		.byte	1
+  70 0019 01       		.byte	1
+  71 001a 01       		.byte	1
+  72 001b 01       		.byte	1
+  73 001c 01       		.byte	1
+  74 001d 01       		.byte	1
+  75 001e 01       		.byte	1
+  76 001f 01       		.byte	1
+  77              		.text
+  78              	.Letext0:
+  79              		.section	.debug_loc,"",@progbits
+  80              	.Ldebug_loc0:
+  81              	.LLST0:
+  82 0000 00000000 		.quad	.LFB570-.Ltext0
+  82      00000000 
+  83 0008 01000000 		.quad	.LCFI0-.Ltext0
+  83      00000000 
+  84 0010 0200     		.value	0x2
+  85 0012 77       		.byte	0x77
+  86 0013 08       		.sleb128 8
+  87 0014 01000000 		.quad	.LCFI0-.Ltext0
+  87      00000000 
+  88 001c 04000000 		.quad	.LCFI1-.Ltext0
+  88      00000000 
+  89 0024 0200     		.value	0x2
+  90 0026 77       		.byte	0x77
+  91 0027 10       		.sleb128 16
+  92 0028 04000000 		.quad	.LCFI1-.Ltext0
+  92      00000000 
+  93 0030 2E000000 		.quad	.LFE570-.Ltext0
+  93      00000000 
+  94 0038 0200     		.value	0x2
+  95 003a 76       		.byte	0x76
+  96 003b 10       		.sleb128 16
+  97 003c 00000000 		.quad	0x0
+  97      00000000 
+  98 0044 00000000 		.quad	0x0
+  98      00000000 
+  99              		.file 2 "/usr/include/stdint.h"
+ 100              		.file 3 "/home/rodarmer/sra_sdk-2.3.1/interfaces/cc/gcc/v128.h"
+ 101              		.file 4 "/home/rodarmer/sra_sdk-2.3.1/libs/krypto/blockcipher-impl.h"
+ 102              		.section	.debug_info
+ 103 0000 FD000000 		.long	0xfd
+GAS LISTING /tmp/ccB53OyH.s 			page 4
+
+
+ 104 0004 0200     		.value	0x2
+ 105 0006 00000000 		.long	.Ldebug_abbrev0
+ 106 000a 08       		.byte	0x8
+ 107 000b 01       		.uleb128 0x1
+ 108 000c 00000000 		.long	.LASF16
+ 109 0010 01       		.byte	0x1
+ 110 0011 00000000 		.long	.LASF17
+ 111 0015 00000000 		.quad	.Ltext0
+ 111      00000000 
+ 112 001d 00000000 		.quad	.Letext0
+ 112      00000000 
+ 113 0025 00000000 		.long	.Ldebug_line0
+ 114 0029 02       		.uleb128 0x2
+ 115 002a 01       		.byte	0x1
+ 116 002b 06       		.byte	0x6
+ 117 002c 00000000 		.long	.LASF0
+ 118 0030 02       		.uleb128 0x2
+ 119 0031 02       		.byte	0x2
+ 120 0032 05       		.byte	0x5
+ 121 0033 00000000 		.long	.LASF1
+ 122 0037 03       		.uleb128 0x3
+ 123 0038 04       		.byte	0x4
+ 124 0039 05       		.byte	0x5
+ 125 003a 696E7400 		.string	"int"
+ 126 003e 02       		.uleb128 0x2
+ 127 003f 08       		.byte	0x8
+ 128 0040 05       		.byte	0x5
+ 129 0041 00000000 		.long	.LASF2
+ 130 0045 04       		.uleb128 0x4
+ 131 0046 00000000 		.long	.LASF12
+ 132 004a 02       		.byte	0x2
+ 133 004b 31       		.byte	0x31
+ 134 004c 50000000 		.long	0x50
+ 135 0050 02       		.uleb128 0x2
+ 136 0051 01       		.byte	0x1
+ 137 0052 08       		.byte	0x8
+ 138 0053 00000000 		.long	.LASF3
+ 139 0057 02       		.uleb128 0x2
+ 140 0058 02       		.byte	0x2
+ 141 0059 07       		.byte	0x7
+ 142 005a 00000000 		.long	.LASF4
+ 143 005e 02       		.uleb128 0x2
+ 144 005f 04       		.byte	0x4
+ 145 0060 07       		.byte	0x7
+ 146 0061 00000000 		.long	.LASF5
+ 147 0065 02       		.uleb128 0x2
+ 148 0066 08       		.byte	0x8
+ 149 0067 07       		.byte	0x7
+ 150 0068 00000000 		.long	.LASF6
+ 151 006c 05       		.uleb128 0x5
+ 152 006d 08       		.byte	0x8
+ 153 006e 07       		.byte	0x7
+ 154 006f 02       		.uleb128 0x2
+ 155 0070 01       		.byte	0x1
+ 156 0071 06       		.byte	0x6
+ 157 0072 00000000 		.long	.LASF7
+ 158 0076 02       		.uleb128 0x2
+GAS LISTING /tmp/ccB53OyH.s 			page 5
+
+
+ 159 0077 08       		.byte	0x8
+ 160 0078 05       		.byte	0x5
+ 161 0079 00000000 		.long	.LASF8
+ 162 007d 02       		.uleb128 0x2
+ 163 007e 04       		.byte	0x4
+ 164 007f 04       		.byte	0x4
+ 165 0080 00000000 		.long	.LASF9
+ 166 0084 02       		.uleb128 0x2
+ 167 0085 08       		.byte	0x8
+ 168 0086 07       		.byte	0x7
+ 169 0087 00000000 		.long	.LASF10
+ 170 008b 02       		.uleb128 0x2
+ 171 008c 08       		.byte	0x8
+ 172 008d 04       		.byte	0x4
+ 173 008e 00000000 		.long	.LASF11
+ 174 0092 04       		.uleb128 0x4
+ 175 0093 00000000 		.long	.LASF13
+ 176 0097 03       		.byte	0x3
+ 177 0098 26       		.byte	0x26
+ 178 0099 9D000000 		.long	0x9d
+ 179 009d 06       		.uleb128 0x6
+ 180 009e 01       		.byte	0x1
+ 181 009f 45000000 		.long	0x45
+ 182 00a3 AE000000 		.long	0xae
+ 183 00a7 07       		.uleb128 0x7
+ 184 00a8 6C000000 		.long	0x6c
+ 185 00ac 0F       		.byte	0xf
+ 186 00ad 00       		.byte	0x0
+ 187 00ae 04       		.uleb128 0x4
+ 188 00af 00000000 		.long	.LASF14
+ 189 00b3 04       		.byte	0x4
+ 190 00b4 3B       		.byte	0x3b
+ 191 00b5 92000000 		.long	0x92
+ 192 00b9 08       		.uleb128 0x8
+ 193 00ba 01       		.byte	0x1
+ 194 00bb 00000000 		.long	.LASF18
+ 195 00bf 01       		.byte	0x1
+ 196 00c0 24       		.byte	0x24
+ 197 00c1 01       		.byte	0x1
+ 198 00c2 FB000000 		.long	0xfb
+ 199 00c6 00000000 		.quad	.LFB570
+ 199      00000000 
+ 200 00ce 00000000 		.quad	.LFE570
+ 200      00000000 
+ 201 00d6 00000000 		.long	.LLST0
+ 202 00da FB000000 		.long	0xfb
+ 203 00de 09       		.uleb128 0x9
+ 204 00df 00000000 		.long	.LASF15
+ 205 00e3 01       		.byte	0x1
+ 206 00e4 27       		.byte	0x27
+ 207 00e5 AE000000 		.long	0xae
+ 208 00e9 02       		.byte	0x2
+ 209 00ea 91       		.byte	0x91
+ 210 00eb 50       		.sleb128 -48
+ 211 00ec 0A       		.uleb128 0xa
+ 212 00ed 6F6E6500 		.string	"one"
+ 213 00f1 01       		.byte	0x1
+GAS LISTING /tmp/ccB53OyH.s 			page 6
+
+
+ 214 00f2 29       		.byte	0x29
+ 215 00f3 AE000000 		.long	0xae
+ 216 00f7 02       		.byte	0x2
+ 217 00f8 91       		.byte	0x91
+ 218 00f9 60       		.sleb128 -32
+ 219 00fa 00       		.byte	0x0
+ 220 00fb 0B       		.uleb128 0xb
+ 221 00fc AE000000 		.long	0xae
+ 222 0100 00       		.byte	0x0
+ 223              		.section	.debug_abbrev
+ 224 0000 01       		.uleb128 0x1
+ 225 0001 11       		.uleb128 0x11
+ 226 0002 01       		.byte	0x1
+ 227 0003 25       		.uleb128 0x25
+ 228 0004 0E       		.uleb128 0xe
+ 229 0005 13       		.uleb128 0x13
+ 230 0006 0B       		.uleb128 0xb
+ 231 0007 03       		.uleb128 0x3
+ 232 0008 0E       		.uleb128 0xe
+ 233 0009 11       		.uleb128 0x11
+ 234 000a 01       		.uleb128 0x1
+ 235 000b 12       		.uleb128 0x12
+ 236 000c 01       		.uleb128 0x1
+ 237 000d 10       		.uleb128 0x10
+ 238 000e 06       		.uleb128 0x6
+ 239 000f 00       		.byte	0x0
+ 240 0010 00       		.byte	0x0
+ 241 0011 02       		.uleb128 0x2
+ 242 0012 24       		.uleb128 0x24
+ 243 0013 00       		.byte	0x0
+ 244 0014 0B       		.uleb128 0xb
+ 245 0015 0B       		.uleb128 0xb
+ 246 0016 3E       		.uleb128 0x3e
+ 247 0017 0B       		.uleb128 0xb
+ 248 0018 03       		.uleb128 0x3
+ 249 0019 0E       		.uleb128 0xe
+ 250 001a 00       		.byte	0x0
+ 251 001b 00       		.byte	0x0
+ 252 001c 03       		.uleb128 0x3
+ 253 001d 24       		.uleb128 0x24
+ 254 001e 00       		.byte	0x0
+ 255 001f 0B       		.uleb128 0xb
+ 256 0020 0B       		.uleb128 0xb
+ 257 0021 3E       		.uleb128 0x3e
+ 258 0022 0B       		.uleb128 0xb
+ 259 0023 03       		.uleb128 0x3
+ 260 0024 08       		.uleb128 0x8
+ 261 0025 00       		.byte	0x0
+ 262 0026 00       		.byte	0x0
+ 263 0027 04       		.uleb128 0x4
+ 264 0028 16       		.uleb128 0x16
+ 265 0029 00       		.byte	0x0
+ 266 002a 03       		.uleb128 0x3
+ 267 002b 0E       		.uleb128 0xe
+ 268 002c 3A       		.uleb128 0x3a
+ 269 002d 0B       		.uleb128 0xb
+ 270 002e 3B       		.uleb128 0x3b
+GAS LISTING /tmp/ccB53OyH.s 			page 7
+
+
+ 271 002f 0B       		.uleb128 0xb
+ 272 0030 49       		.uleb128 0x49
+ 273 0031 13       		.uleb128 0x13
+ 274 0032 00       		.byte	0x0
+ 275 0033 00       		.byte	0x0
+ 276 0034 05       		.uleb128 0x5
+ 277 0035 24       		.uleb128 0x24
+ 278 0036 00       		.byte	0x0
+ 279 0037 0B       		.uleb128 0xb
+ 280 0038 0B       		.uleb128 0xb
+ 281 0039 3E       		.uleb128 0x3e
+ 282 003a 0B       		.uleb128 0xb
+ 283 003b 00       		.byte	0x0
+ 284 003c 00       		.byte	0x0
+ 285 003d 06       		.uleb128 0x6
+ 286 003e 01       		.uleb128 0x1
+ 287 003f 01       		.byte	0x1
+ 288 0040 8742     		.uleb128 0x2107
+ 289 0042 0C       		.uleb128 0xc
+ 290 0043 49       		.uleb128 0x49
+ 291 0044 13       		.uleb128 0x13
+ 292 0045 01       		.uleb128 0x1
+ 293 0046 13       		.uleb128 0x13
+ 294 0047 00       		.byte	0x0
+ 295 0048 00       		.byte	0x0
+ 296 0049 07       		.uleb128 0x7
+ 297 004a 21       		.uleb128 0x21
+ 298 004b 00       		.byte	0x0
+ 299 004c 49       		.uleb128 0x49
+ 300 004d 13       		.uleb128 0x13
+ 301 004e 2F       		.uleb128 0x2f
+ 302 004f 0B       		.uleb128 0xb
+ 303 0050 00       		.byte	0x0
+ 304 0051 00       		.byte	0x0
+ 305 0052 08       		.uleb128 0x8
+ 306 0053 2E       		.uleb128 0x2e
+ 307 0054 01       		.byte	0x1
+ 308 0055 3F       		.uleb128 0x3f
+ 309 0056 0C       		.uleb128 0xc
+ 310 0057 03       		.uleb128 0x3
+ 311 0058 0E       		.uleb128 0xe
+ 312 0059 3A       		.uleb128 0x3a
+ 313 005a 0B       		.uleb128 0xb
+ 314 005b 3B       		.uleb128 0x3b
+ 315 005c 0B       		.uleb128 0xb
+ 316 005d 27       		.uleb128 0x27
+ 317 005e 0C       		.uleb128 0xc
+ 318 005f 49       		.uleb128 0x49
+ 319 0060 13       		.uleb128 0x13
+ 320 0061 11       		.uleb128 0x11
+ 321 0062 01       		.uleb128 0x1
+ 322 0063 12       		.uleb128 0x12
+ 323 0064 01       		.uleb128 0x1
+ 324 0065 40       		.uleb128 0x40
+ 325 0066 06       		.uleb128 0x6
+ 326 0067 01       		.uleb128 0x1
+ 327 0068 13       		.uleb128 0x13
+GAS LISTING /tmp/ccB53OyH.s 			page 8
+
+
+ 328 0069 00       		.byte	0x0
+ 329 006a 00       		.byte	0x0
+ 330 006b 09       		.uleb128 0x9
+ 331 006c 34       		.uleb128 0x34
+ 332 006d 00       		.byte	0x0
+ 333 006e 03       		.uleb128 0x3
+ 334 006f 0E       		.uleb128 0xe
+ 335 0070 3A       		.uleb128 0x3a
+ 336 0071 0B       		.uleb128 0xb
+ 337 0072 3B       		.uleb128 0x3b
+ 338 0073 0B       		.uleb128 0xb
+ 339 0074 49       		.uleb128 0x49
+ 340 0075 13       		.uleb128 0x13
+ 341 0076 02       		.uleb128 0x2
+ 342 0077 0A       		.uleb128 0xa
+ 343 0078 00       		.byte	0x0
+ 344 0079 00       		.byte	0x0
+ 345 007a 0A       		.uleb128 0xa
+ 346 007b 34       		.uleb128 0x34
+ 347 007c 00       		.byte	0x0
+ 348 007d 03       		.uleb128 0x3
+ 349 007e 08       		.uleb128 0x8
+ 350 007f 3A       		.uleb128 0x3a
+ 351 0080 0B       		.uleb128 0xb
+ 352 0081 3B       		.uleb128 0x3b
+ 353 0082 0B       		.uleb128 0xb
+ 354 0083 49       		.uleb128 0x49
+ 355 0084 13       		.uleb128 0x13
+ 356 0085 02       		.uleb128 0x2
+ 357 0086 0A       		.uleb128 0xa
+ 358 0087 00       		.byte	0x0
+ 359 0088 00       		.byte	0x0
+ 360 0089 0B       		.uleb128 0xb
+ 361 008a 26       		.uleb128 0x26
+ 362 008b 00       		.byte	0x0
+ 363 008c 49       		.uleb128 0x49
+ 364 008d 13       		.uleb128 0x13
+ 365 008e 00       		.byte	0x0
+ 366 008f 00       		.byte	0x0
+ 367 0090 00       		.byte	0x0
+ 368              		.section	.debug_pubnames,"",@progbits
+ 369 0000 24000000 		.long	0x24
+ 370 0004 0200     		.value	0x2
+ 371 0006 00000000 		.long	.Ldebug_info0
+ 372 000a 01010000 		.long	0x101
+ 373 000e B9000000 		.long	0xb9
+ 374 0012 4B436970 		.string	"KCipherVecRegtest"
+ 374      68657256 
+ 374      65635265 
+ 374      67746573 
+ 374      7400
+ 375 0024 00000000 		.long	0x0
+ 376              		.section	.debug_aranges,"",@progbits
+ 377 0000 2C000000 		.long	0x2c
+ 378 0004 0200     		.value	0x2
+ 379 0006 00000000 		.long	.Ldebug_info0
+ 380 000a 08       		.byte	0x8
+GAS LISTING /tmp/ccB53OyH.s 			page 9
+
+
+ 381 000b 00       		.byte	0x0
+ 382 000c 0000     		.value	0x0
+ 383 000e 0000     		.value	0x0
+ 384 0010 00000000 		.quad	.Ltext0
+ 384      00000000 
+ 385 0018 2E000000 		.quad	.Letext0-.Ltext0
+ 385      00000000 
+ 386 0020 00000000 		.quad	0x0
+ 386      00000000 
+ 387 0028 00000000 		.quad	0x0
+ 387      00000000 
+ 388              		.section	.debug_str,"MS",@progbits,1
+ 389              	.LASF8:
+ 390 0000 6C6F6E67 		.string	"long long int"
+ 390      206C6F6E 
+ 390      6720696E 
+ 390      7400
+ 391              	.LASF5:
+ 392 000e 756E7369 		.string	"unsigned int"
+ 392      676E6564 
+ 392      20696E74 
+ 392      00
+ 393              	.LASF17:
+ 394 001b 2F686F6D 		.string	"/home/rodarmer/sra_sdk-2.3.1/libs/krypto/compile-test.c"
+ 394      652F726F 
+ 394      6461726D 
+ 394      65722F73 
+ 394      72615F73 
+ 395              	.LASF6:
+ 396 0053 6C6F6E67 		.string	"long unsigned int"
+ 396      20756E73 
+ 396      69676E65 
+ 396      6420696E 
+ 396      7400
+ 397              	.LASF10:
+ 398 0065 6C6F6E67 		.string	"long long unsigned int"
+ 398      206C6F6E 
+ 398      6720756E 
+ 398      7369676E 
+ 398      65642069 
+ 399              	.LASF12:
+ 400 007c 75696E74 		.string	"uint8_t"
+ 400      385F7400 
+ 401              	.LASF16:
+ 402 0084 474E5520 		.string	"GNU C 4.4.2"
+ 402      4320342E 
+ 402      342E3200 
+ 403              	.LASF3:
+ 404 0090 756E7369 		.string	"unsigned char"
+ 404      676E6564 
+ 404      20636861 
+ 404      7200
+ 405              	.LASF7:
+ 406 009e 63686172 		.string	"char"
+ 406      00
+ 407              	.LASF2:
+ 408 00a3 6C6F6E67 		.string	"long int"
+GAS LISTING /tmp/ccB53OyH.s 			page 10
+
+
+ 408      20696E74 
+ 408      00
+ 409              	.LASF11:
+ 410 00ac 646F7562 		.string	"double"
+ 410      6C6500
+ 411              	.LASF18:
+ 412 00b3 4B436970 		.string	"KCipherVecRegtest"
+ 412      68657256 
+ 412      65635265 
+ 412      67746573 
+ 412      7400
+ 413              	.LASF4:
+ 414 00c5 73686F72 		.string	"short unsigned int"
+ 414      7420756E 
+ 414      7369676E 
+ 414      65642069 
+ 414      6E7400
+ 415              	.LASF0:
+ 416 00d8 7369676E 		.string	"signed char"
+ 416      65642063 
+ 416      68617200 
+ 417              	.LASF13:
+ 418 00e4 76313238 		.string	"v128_u8_t"
+ 418      5F75385F 
+ 418      7400
+ 419              	.LASF14:
+ 420 00ee 43697068 		.string	"CipherVec"
+ 420      65725665 
+ 420      6300
+ 421              	.LASF9:
+ 422 00f8 666C6F61 		.string	"float"
+ 422      7400
+ 423              	.LASF15:
+ 424 00fe 7A65726F 		.string	"zero"
+ 424      00
+ 425              	.LASF1:
+ 426 0103 73686F72 		.string	"short int"
+ 426      7420696E 
+ 426      7400
+ 427              		.ident	"GCC: (GNU) 4.4.2"
+ 428              		.section	.note.GNU-stack,"",@progbits
+GAS LISTING /tmp/ccB53OyH.s 			page 11
+
+
+DEFINED SYMBOLS
+                            *ABS*:0000000000000000 compile-test.c
+     /tmp/ccB53OyH.s:12     .text:0000000000000000 KCipherVecRegtest
+
+NO UNDEFINED SYMBOLS

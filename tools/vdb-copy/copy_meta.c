@@ -87,7 +87,7 @@ static rc_t copy_metadata_attribs ( const KMDataNode *snode, KMDataNode *dnode,
                 if ( rc == 0 )
                 {
                     if ( show_meta )
-                        OUTMSG (( "copy atr %s : %s\n", node_path, attr ));
+                        KOutMsg( "copy atr %s : %s\n", node_path, attr );
                     rc = KMDataNodeWriteAttr ( dnode, attr, buffer );
                 }
             }
@@ -111,7 +111,7 @@ static rc_t copy_metadata_child ( const KMDataNode *src_root, KMDataNode *dst_ro
     if ( rc != 0 ) return rc;
 
     if ( show_meta )
-        OUTMSG (( "copy child-node: %s\n", node_path ));
+        KOutMsg( "copy child-node: %s\n", node_path );
 
     rc = KMDataNodeOpenNodeUpdate ( dst_root, & dnode, node_path );
     DISP_RC( rc, "copy_metadata_child:KMDataNodeOpenNodeUpdate(dst) failed" );
@@ -259,7 +259,7 @@ static rc_t copy_back_revisions ( const KMetadata *src_meta, VTable *dst_table,
         const KMetadata *src_rev_meta;
 
         if ( show_meta )
-            OUTMSG (( "+++copy metadata rev. #%u:\n", revision ));
+            KOutMsg( "+++copy metadata rev. #%u:\n", revision );
         rc = KMetadataOpenRevision ( src_meta, &src_rev_meta, revision );
         DISP_RC( rc, "copy_back_revisions:KMetadataOpenRevision() failed" );
         if ( rc == 0 )
@@ -360,7 +360,7 @@ static rc_t enter_schema_update( KMetadata *dst_meta, const bool show_meta )
     KMDataNode *sw_node;
 
     if ( show_meta )
-        OUTMSG(( "--- entering schema-update\n" ));
+        KOutMsg( "--- entering schema-update\n" );
 
     rc = KMetadataOpenNodeUpdate ( dst_meta, &sw_node, "SOFTWARE" );
     DISP_RC( rc, "enter_schema_update:KMetadataOpenNodeUpdate('SOFTWARE') failed" );
@@ -402,7 +402,7 @@ static rc_t enter_vdbcopy_node( KMetadata *dst_meta, const bool show_meta )
     KMDataNode *hist_node;
 
     if ( show_meta )
-        OUTMSG(( "--- entering Copy entry...\n" ));
+        KOutMsg( "--- entering Copy entry...\n" );
 
     rc = KMetadataOpenNodeUpdate ( dst_meta, &hist_node, "HISTORY" );
     DISP_RC( rc, "enter_vdbcopy_node:KMetadataOpenNodeUpdate('HISTORY') failed" );
@@ -453,12 +453,12 @@ rc_t copy_table_meta ( const VTable *src_table, VTable *dst_table,
             if ( rc == 0 )
             {
                 if ( show_meta )
-                    OUTMSG (( "+++copy current metadata\n" ));
+                    KOutMsg( "+++copy current metadata\n" );
 
                 rc = copy_stray_metadata ( src_meta, dst_meta, excluded_nodes,
                                            show_meta );
                 if ( show_meta )
-                    OUTMSG (( "+++end of copy current metadata\n" ));
+                    KOutMsg( "+++end of copy current metadata\n" );
 
                 /* enter a attribute "vdb-copy" under '/SOFTWARE/update'
                    *if the schema was updated ! */
@@ -503,12 +503,12 @@ rc_t copy_database_meta ( const VDatabase *src_db, VDatabase *dst_db,
         if ( rc == 0 )
         {
             if ( show_meta )
-                OUTMSG (( "+++copy current db-metadata\n" ));
+                KOutMsg( "+++copy current db-metadata\n" );
 
             rc = copy_stray_metadata ( src_meta, dst_meta, excluded_nodes,
                                        show_meta );
             if ( show_meta )
-                OUTMSG (( "+++end of copy db-current metadata\n" ));
+                KOutMsg( "+++end of copy db-current metadata\n" );
 
             KMetadataRelease ( dst_meta );
         }

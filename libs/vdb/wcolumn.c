@@ -49,175 +49,27 @@
 #include <string.h>
 #include <assert.h>
 
+/* these constants MUST each be a power of two */
+#define INITIAL_DATA_PEAK ( 32 * 1024 )
+#define SINGLE_PAGE_SIZE ( 4 * 1024 )
+
+/* this is a fairly high value, useful for writing single tables
+   of data that are generally accessed serially. it's bad for random. */
 #define DFLT_TRIGGER ( 2 * 1024 * 1024 )
+
+/* debugging aid - Row-wise RunLengthEncoding ( repeated column
+   elimination ) can be disabled to check for errors it may introduce. */
 #define USE_RLE 1
 
-/*--------------------------------------------------------------------------
- * VDBMemBuffer
- *  manages a linked list of VDBMem objects
- */
-typedef struct VDBMemBuffer VDBMemBuffer;
-struct VDBMemBuffer
-{
-    bitsz_t start;      /* offset in bits from the first memory page start to the first unwritten element */
-    bitsz_t end;        /* bit offset just past last unwritten element */
-    bitsz_t marker;     /* a cursor of sorts that should be in the page referred to by mem */
-    /* NOTE: marker is not always referring to an element and the user of this object
-     * is required to track this */
-    const VDBMem *mem;  /* a memory page that should contain the marker below */
-};
+/* when defined, use as an additional condition for detecting
+   auto-commit cutoff points, with a limit in kilo-rows given below */
+#define ROW_COUNT_CUTOFFS 128
 
-/* these are compile time constants */
-#define VDBMemBitsInPage()      ((bitsz_t)(sizeof ((VDBMem*)0)->page * 8))
-#define VDBMemBitsInPageMask()  (VDBMemBitsInPage()-1)
-
-/* InitHead
- * initialize buffer to point to left edge of first element
- * buffer may be empty
- *
- * Parameters are expected to be good, no production run-time verification applied.
- */
-static
-void VDBMemBufferInitHead ( VDBMemBuffer *self, void *mem,
-    bitsz_t start, bitsz_t elem_size, uint64_t elem_count )
-{
-    /* during development these are validated: element size can't ever be zero
-     * the memory page must be an actual page or if its not then there can't be
-     * any elements or offset with in the NULL page */
-    assert (self != NULL);
-    assert (elem_size != 0);
-    assert ((mem != NULL) || ((mem == NULL) && (start == 0) && (elem_count == 0)));
-
-    self -> mem = ( const void* ) mem;
-    self -> start = self -> marker = start;     /* cursor at first element */
-    self -> end = start + elem_size * elem_count; /* just past last element */
-}
-
-/* InitTail
- *  initialize buffer to point to last bit
- *  buffer must not be empty
- *
- * Parameters are expected to be good, no verification applied.
- */
-static
-void VDBMemBufferInitTail ( VDBMemBuffer *self, void *mem,
-    bitsz_t start, bitsz_t elem_size, uint64_t elem_count )
-{
-    /* during development these are validated: element size can't ever be zero
-     * the memory page must be an actual page and there must be valid elements */
-    assert (self != NULL);
-    assert (elem_size != 0);
-    assert ( mem != NULL );
-    assert (elem_count != 0);
-    assert (start < VDBMemBitsInPage());
-
-    self -> mem = ( const void* ) mem;
-    self -> start = start;
-    self -> end = start + elem_size * elem_count;
-    assert ( self -> end > start );
-    self -> marker = self -> end - 1;   /* cursor at last element's last bit */
-    /* NOTE: with marker not referring to an element the first "advance" must
-     * take that off by one bit into account rather than seek the exact number of bits
-     * in elements that we'd want to move the marker */
-}
-
-/* Advance
- *  sets marker
- */
-static
-bool VDBMemBufferAdvance ( VDBMemBuffer *self, bitsz_t bits, bool reverse )
-{
-    if ( bits != 0 )
-    {
-        bitsz_t marker;
-        const VDBMem *mem;
-        uint64_t cur, targ;
-
-        if ( ! reverse )                        /* forward */
-            marker = self -> marker + bits;
-        else                                    /* backward */
-        {
-            if ( self -> marker < bits )        /* can't back up past beginning of buffer list */
-                return false;
-            marker = self -> marker - bits;
-            if ( marker < self -> start )       /* can't back up past stored begining of valid data */
-                return false;
-        }
-
-        /* anything beyond buffer is an illegal seek */
-        if ( marker >= self -> end )
-            return false;
-
-        /* convert markers to zero-based page ids */
-        cur = self -> marker / ( sizeof mem -> page * 8 );
-        targ = marker / ( sizeof mem -> page * 8 );
-        if ( cur != targ )      /* change pages if we have to */
-        {
-            /* rewind loop */
-            for ( mem = self -> mem; cur > targ; -- cur )
-            {
-                mem = ( const VDBMem* ) DLNodePrev ( & mem -> n );
-                assert ( mem != NULL );
-            }
-
-            /* forward loop */
-            for ( ; cur < targ; ++ cur )
-            {
-                mem = ( const VDBMem* ) DLNodeNext ( & mem -> n );
-                assert ( mem != NULL );
-            }
-
-            self -> mem = mem;
-        }
-
-        /* take new marker */
-        self -> marker = marker;
-    }
-
-    return true;
-}
-
-/* Access
- *  return pointer to current element (by marker/cursor)
- *  along with bit offset and number of BITS available
- */
-static
-const void *VDBMemBufferAccess ( VDBMemBuffer const *self, bitsz_t *boff, bitsz_t *avail )
-{
-    const VDBMem *mem = self -> mem;
-    bitsz_t bits, marker = self -> marker;
-
-    /* if nothing was ever added to the buffer list */
-    assert (marker < self->end);
-    if ( mem == NULL )
-    {
-        if ( boff != NULL )
-            * boff = 0;
-        if ( avail != NULL )
-            * avail = 0;
-        return NULL;
-    }
-
-    /* bits available in page past marker */
-    bits =  VDBMemBitsInPage() - ( marker & VDBMemBitsInPageMask()) ;
-
-    /* limit to end of buffer if not full page */
-    if ( marker + bits > self -> end )
-        bits = self -> end - marker;
-
-    /* return bit offset */
-    if ( boff != NULL )
-        * boff = marker & 7;
-
-    /* return bytes available */
-    if ( avail != NULL )
-        * avail = bits;
-
-    /* return byte pointer */
-/*     return & mem -> page [ ( marker >> 3 ) & ( sizeof mem -> page - 1 ) ]; */
-    return & mem->page[(marker & VDBMemBitsInPageMask()) >> 3];
-}
-
+#if ROW_COUNT_CUTOFFS
+#define MAX_ROW_COUNT ( ROW_COUNT_CUTOFFS * 1024 )
+#else
+#define MAX_ROW_COUNT 0x40000000
+#endif
 
 
 /*--------------------------------------------------------------------------
@@ -225,15 +77,17 @@ const void *VDBMemBufferAccess ( VDBMemBuffer const *self, bitsz_t *boff, bitsz_
  */
 
 static 
-void WColumnDestroy (WColumn * self)
+void WColumnDestroy ( WColumn * self )
 {
 #if PROD_REFCOUNT && ! PROD_ALL_IN_CURSOR
-    PROD_TRACK_REFCOUNT (VProductionRelease,self->out);
-    VProductionRelease ( self->out, NULL);
-    PROD_TRACK_REFCOUNT (VProductionRelease,self->val);
-    VProductionRelease (self->val, NULL);
+    PROD_TRACK_REFCOUNT ( VProductionRelease, self -> out );
+    VProductionRelease ( self -> out, NULL );
+    PROD_TRACK_REFCOUNT ( VProductionRelease, self -> val );
+    VProductionRelease ( self -> val, NULL );
 #endif
 }
+
+
 /* Whack
  *  perform read-only cleanup
  */
@@ -251,19 +105,18 @@ void CC VColumnWhack ( void *item, void *data )
 
     if ( ! self -> read_only )
     {
-        WColumn *wself = (WColumn *)self;
+        WColumn *wself = ( WColumn* ) self;
 
         if ( wself -> page != NULL )
         {
             TRACK_BLOB (VBlobRelease, wself->page);
-            (void)VBlobRelease ( wself -> page );
+            VBlobRelease ( wself -> page );
         }
 
         KDataBufferWhack ( & wself -> dflt );
-        DLListWhack ( & wself -> data, VDBMemRelease, wself -> mgr );
-        DLListWhack ( & wself -> rowmap, VDBMemRelease, wself -> mgr );
-        VDBManagerSever ( wself -> mgr );
-        WColumnDestroy (wself);
+        KDataBufferWhack ( & wself -> data );
+        KDataBufferWhack ( & wself -> rowmap );
+        WColumnDestroy ( wself );
 
     }
 
@@ -286,27 +139,35 @@ rc_t WColumnMake ( VColumn **colp, const VSchema *schema,
     assert ( scol != NULL );
     assert ( mgr != NULL );
 
-    col = malloc ( sizeof * col );
+    col = calloc ( 1, sizeof * col );
     if ( col == NULL )
         rc = RC ( rcVDB, rcColumn, rcConstructing, rcMemory, rcExhausted );
     else
     {
-        memset ( col, 0, sizeof * col );
         rc = VColumnInit ( & col -> dad, schema, scol );
         if ( rc == 0 )
         {
-            col -> mgr = VDBManagerAttach ( mgr );
-            DLListInit ( & col -> data );
-            DLListInit ( & col -> rowmap );
+            uint32_t i;
 
+            /* initialize peak histories */
+            for ( i = 0; i < sizeof col -> data_peak_hist / sizeof col -> data_peak_hist [ 0 ]; ++ i )
+                col -> data_peak_hist [ i ] = INITIAL_DATA_PEAK;
+
+            /* initial current peak */
+            col -> data_peak = INITIAL_DATA_PEAK;
+
+            /* use column-specific expression if provided */
             if ( scol -> limit != NULL )
                 blob_limit = scol -> limit;
 
+            /* evaluate blob cutoff limit expression */
             if ( blob_limit == NULL )
             {
 #ifdef DFLT_TRIGGER
+                /* use define */
                 col -> trigger = DFLT_TRIGGER;
 #else
+                /* produce max unsigned integer */
                 -- col -> trigger;
 #endif
             }
@@ -375,7 +236,7 @@ rc_t WColumnSetDefault ( VColumn *vcol,
     bitsz_t elem_bits, const void *buffer, bitsz_t boff, uint64_t len )
 {
     rc_t rc;
-    bitsz_t elem_size;
+    bitsz_t elem_size, to_copy;
     WColumn *self = ( WColumn* ) vcol;
 
     assert ( elem_bits != 0 );
@@ -412,10 +273,15 @@ rc_t WColumnSetDefault ( VColumn *vcol,
     }
 
     /* copy in the row */
-    bitcpy ( self -> dflt . base, 0, buffer, boff, len * elem_bits );
+    to_copy = len * elem_bits;
+    if ( ( ( boff | to_copy ) & 7 ) != 0 )
+        bitcpy ( self -> dflt . base, 0, buffer, boff, to_copy );
+    else
+        memcpy ( self -> dflt . base, & ( ( const uint8_t* ) buffer ) [ boff >> 3 ], to_copy >> 3 );
     self -> have_dflt = true;
     return 0;
 }
+
 
 /* OpenRow
  *  update state
@@ -426,22 +292,24 @@ rc_t WColumnSetDefault ( VColumn *vcol,
 void CC WColumnOpenRow ( void *item, void *const_row_id )
 {
     WColumn *self = item;
-    int64_t row_id = * ( const int64_t* ) const_row_id;
+    if ( self != NULL )
+    {
+        int64_t row_id = * ( const int64_t* ) const_row_id;
 
-    assert ( ! self -> row_written );
-    if ( self -> start_id != self -> end_id )
-    {
-        assert ( row_id == self -> end_id );
-    }
-    else
-    {
-        /* capture row id */
-        self -> start_id = self -> end_id = self -> cutoff_id = row_id;
-        assert ( self -> data_off == 0 );
-        assert ( self -> rowmap_off == 0 );
-        assert ( self -> num_rows == 0 );
-        assert ( self -> num_elems == 0 );
-        assert ( self -> row_len == 0 );
+        assert ( ! self -> row_written );
+        if ( self -> start_id != self -> end_id )
+        {
+            assert ( row_id == self -> end_id );
+        }
+        else
+        {
+            /* capture row id */
+            self -> start_id = self -> end_id = self -> cutoff_id = row_id;
+            assert ( self -> bits_in_buffer == 0 );
+            assert ( self -> row_len == 0 );
+            assert ( self -> num_rows == 0 );
+            assert ( self -> dflt_last == false );
+        }
     }
 }
 
@@ -451,30 +319,34 @@ void CC WColumnOpenRow ( void *item, void *const_row_id )
 rc_t WColumnWrite ( VColumn *cself,
     bitsz_t elem_bits, const void *buffer, bitsz_t boff, uint64_t len )
 {
-    rc_t rc;
-    bitsz_t elem_size;
     WColumn *self = ( WColumn* ) cself;
 
-    DLList data;
-    VDBMem *mem;
-    uint8_t *dst;
-    bitsz_t num_bits, num_writ, to_write, doff;
+    bitsz_t elem_size, num_bits, data_bits, doff;
 
     assert ( elem_bits != 0 );
     assert ( buffer != NULL || ( boff == 0 && len == 0 ) );
 
+    /* the number of bits to write */
+    num_bits = ( bitsz_t ) elem_bits * len;
+
     /* test "compatibility" of elem_bits
        this is used to interpret "len" */
     elem_size = VTypedescSizeof ( & self -> dad . desc );
-    if ( elem_bits < elem_size && elem_size % elem_bits != 0 )
-        return RC ( rcVDB, rcColumn, rcUpdating, rcType, rcInconsistent );
-    if ( elem_bits > elem_size && elem_bits % elem_size != 0 )
-        return RC ( rcVDB, rcColumn, rcUpdating, rcType, rcInconsistent );
+    if ( elem_bits != elem_size )
+    {
+        if ( elem_bits < elem_size && elem_size % elem_bits != 0 )
+            return RC ( rcVDB, rcColumn, rcUpdating, rcType, rcInconsistent );
+        if ( elem_bits > elem_size && elem_bits % elem_size != 0 )
+            return RC ( rcVDB, rcColumn, rcUpdating, rcType, rcInconsistent );
+        if ( num_bits % elem_size != 0 )
+            return RC ( rcVDB, rcColumn, rcUpdating, rcType, rcInconsistent );
+    }
 
     /* allow empty row */
     if ( len == 0 )
     {
         self -> row_written = true;
+        self -> dflt_last = false;
         return 0;
     }
 
@@ -482,58 +354,55 @@ rc_t WColumnWrite ( VColumn *cself,
     if ( self -> row_committed )
         return RC ( rcVDB, rcColumn, rcUpdating, rcColumn, rcBusy );
 
-    /* the number of bits to write */
-    num_bits = ( bitsz_t ) elem_bits * len;
+    /* total number of bits to be put into buffer */
+    doff = self -> bits_in_buffer + self -> row_len;
+    data_bits = doff + num_bits;
 
-    /* prepare data row pointer */
-    doff = self -> data_off + ( self -> num_elems + self -> row_len ) * elem_size;
-    doff &= sizeof mem -> page * 8 - 1;
-
-    /* prepare whack lists */
-    DLListInit ( & data );
-
-    /* prepare initial destination pointer */
-    mem = ( VDBMem* ) DLListTail ( & self -> data );
-    dst = ( mem == NULL ) ? NULL : mem -> page;
-
-    /* append row data */
-    for ( rc = 0, num_writ = 0; num_writ < num_bits; doff += to_write, num_writ += to_write )
+    /* see if it fits into buffer */
+    if ( data_bits > KDataBufferBits ( & self -> data ) )
     {
-        bitsz_t avail;
+        rc_t rc;
 
-        /* allocate more buffer space */
-        if ( ( doff & ( sizeof mem -> page * 8 - 1 ) ) == 0 )
+        /* calculate needed bytes */
+        size_t new_size = ( ( size_t ) ( ( data_bits + 7 ) >> 3 ) + INITIAL_DATA_PEAK - 1 )
+            & ~ ( size_t ) ( INITIAL_DATA_PEAK - 1 );
+
+        /* need buffer memory */
+        if ( self -> data . elem_count == 0 )
         {
-            rc = VDBManagerMakeMem ( self -> mgr, & mem );
+            /* always go with the peak size if larger */
+            if ( new_size < self -> data_peak )
+                new_size = self -> data_peak;
+
+            /* make initial buffer at most recent peak */
+            rc = KDataBufferMakeBytes ( & self -> data, new_size );
             if ( rc != 0 )
-                break;
-            DLListPushTail ( & data, & mem -> n );
-            dst = mem -> page;
-            doff = 0;
+                return rc;
         }
-
-        /* decide on the bits to write */
-        avail = ( sizeof mem -> page * 8 ) - doff;
-        to_write = num_bits - num_writ;
-        if ( avail < to_write )
-            to_write = avail;
-
-        /* copy in the data */
-        bitcpy ( dst, doff, buffer, boff + num_writ, to_write );
+        else
+        {
+            /* we have a new peak */
+            rc = KDataBufferResize ( & self -> data, new_size );
+            if ( rc != 0 )
+                return rc;
+        }
     }
 
-    /* if all were written, accept changes */
-    if ( rc == 0 )
+    /* copy in data */
+    if ( ( ( boff | doff | num_bits ) & 7 ) != 0 )
+        bitcpy ( self -> data . base, doff, buffer, boff, num_bits );
+    else
     {
-        self -> row_len += num_bits / elem_size;
-        DLListAppendList ( & self -> data, & data );
-        self -> row_written = true;
+        memcpy ( & ( ( uint8_t* ) self -> data . base ) [ doff >> 3 ],
+                 & ( ( const uint8_t* ) buffer ) [ boff >> 3 ], num_bits >> 3 );
     }
 
-    /* drop any uncommitted buffers */
-    DLListWhack ( & data, VDBMemRelease, self -> mgr );
+    /* accept changes */
+    self -> row_len += num_bits;
+    self -> row_written = true;
+    self -> dflt_last = false;
 
-    return rc;
+    return 0;
 }
 
 /* RowDefaults
@@ -551,31 +420,52 @@ bool CC WColumnRowDefaults ( void *item, void *data )
     rc_t *rc = data;
 
     /* nothing to do if row written */
-    if ( self -> row_written )
+    if ( self == NULL || self -> row_written )
         return false;
 
     /* error if no default value */
     if ( ! self -> have_dflt )
     {
         * rc = RC ( rcVDB, rcColumn, rcClosing, rcRow, rcIncomplete );
-        (void)PLOGERR(klogErr, (klogErr, *rc, "Column: $(col)", "col=%.*s", self->dad.scol->name->name.size, self->dad.scol->name->name.addr));
+        PLOGERR ( klogErr,
+                  ( klogErr, * rc, "Column: $(col)", "col=%.*s"
+                    , self -> dad . scol -> name -> name . size
+                    , self -> dad . scol -> name -> name . addr )
+            );
         return true;
     }
-
+        
     /* detect NULL row as default */
     if ( self -> dflt . elem_bits == 0 )
     {
-        /* need to clip here, i.e. need to cut off blobs */
         * rc = RC ( rcVDB, rcColumn, rcClosing, rcRow, rcNull );
-        (void)PLOGERR(klogWarn, (klogWarn, *rc, "Column: $(col)", "col=%.*s", self->dad.scol->name->name.size, self->dad.scol->name->name.addr));
+        PLOGERR ( klogWarn,
+                  ( klogWarn, * rc, "Column: $(col)", "col=%.*s"
+                    , self -> dad . scol -> name -> name . size
+                    , self -> dad . scol -> name -> name . addr )
+            );
+        return false;
+    }
+
+    /* if the last column written was default,
+       there is an opportunity for simply incrementing the repeat count */
+    if ( USE_RLE && self -> dflt_last )
+    {
+        WColumnRowMap *rm = self -> rowmap . base;
+        assert ( self -> num_rows != 0 );
+        ++ rm [ self -> num_rows - 1 ] . cnt;
         return false;
     }
 
     /* write default data */
     * rc = WColumnWrite ( & self -> dad, self -> dflt . elem_bits,
         self -> dflt . base, 0, self -> dflt . elem_count );
-
-    return ( * rc != 0 ) ? true : false;
+    if ( * rc != 0 )
+        return true;
+    
+    /* record the fact that this was default */
+    self -> dflt_last = true;
+    return false;
 }
 
 /* CommitRow
@@ -590,166 +480,115 @@ bool CC WColumnRowDefaults ( void *item, void *data )
  *
  *  returns true if there was a memory error.
  */
-bool CC WColumnCommitRow ( void *item, void *data )
+static
+bool WColumnCommitRepeatedRow ( WColumn *self, WColumnRowMap *rm, int64_t end_id )
 {
-    WColumn *self = item;
-    int64_t *end_id = data;
+    /* if we've previously declared a cutoff id,
+       incorporate the repeated row into the range */
+    if ( ( self -> cutoff_id != self -> start_id ) && ( self -> cutoff_id + 1 == end_id ) )
+        self -> cutoff_id = end_id;
 
-    VDBMem *mem;
+    /* just account for the repeated row */
+    ++ rm -> cnt;
+
+    /* drop data */
+    self -> row_len = 0;
+
+    /* the row has been successfully committed */
+    self -> row_committed = true;
+
+    /* no error */
+    return false;
+}
+
+static
+bool WColumnCommitRowData ( WColumn *self, int64_t *end_id )
+{
+    size_t cur_size;
+    uint64_t row_len;
     bitsz_t elem_bits;
     WColumnRowMap *rm;
-    size_t rmoff, cur_size;
 
     /* if no data were written and that's okay, ignore */
     if ( ! self -> row_written )
     {
+        assert ( self -> row_len == 0 );
         self -> row_committed = true;
         return false;
     }
 
-    /* likely to need this later */
+    /* column's element size */
     elem_bits = VTypedescSizeof ( & self -> dad . desc );
+    assert ( self -> row_len % elem_bits == 0 );
+    row_len = self -> row_len / elem_bits;
 
-    /* last buffer */
-    mem = ( VDBMem* ) DLListTail ( & self -> rowmap );
-
-    /* detect a prior row */
-    if ( self -> num_rows != 0 )
+    /* detect repeated row */
+    if ( USE_RLE && self -> num_rows != 0 )
     {
-        /* byte offset to rowmap entry */
-        rmoff = ( self -> num_rows + self -> rowmap_off - 1 ) * sizeof * rm;
+        rm = self -> rowmap . base;
+        rm += self -> num_rows - 1;
 
-        assert ( mem != NULL );
-
-        /* point to prior row entry */
-        rm = ( void* ) & mem -> page [ rmoff & ( sizeof mem -> page - 1 ) ];
-
-        /* RLE comparison starts with lengths */
-        if ( USE_RLE && rm -> len == self -> row_len )
+        if ( rm -> len == row_len )
         {
-            /* two consecutive rows with same length */
-            if ( self -> row_len == 0 )
+            bitsz_t poff, coff;
+            const uint8_t *base;
+
+            if ( row_len == 0 )
+                return WColumnCommitRepeatedRow ( self, rm, * end_id );
+
+            base = ( const void* ) self -> data . base;
+            assert ( self -> bits_in_buffer >= self -> row_len );
+            coff = self -> bits_in_buffer;
+            poff = self -> bits_in_buffer - self -> row_len;
+
+            if ( ( ( poff | coff | self -> row_len ) & 7 ) != 0 )
             {
-                /* when the length is zero, there's nothing much to do */
-                ++ rm -> cnt;
-                self -> row_committed = true;
-                return false;
+                if ( bitcmp ( base, poff, base, coff, self -> row_len ) == 0 )
+                    return WColumnCommitRepeatedRow ( self, rm, * end_id );
             }
             else
             {
-                VDBMemBuffer cur, prior;
-                bitsz_t cnt, to_cmp, num_bits = ( bitsz_t ) elem_bits * self -> row_len;
-
-                /* create first view onto buffer at tail */
-                VDBMemBufferInitTail ( & cur, DLListTail ( & self -> data ),
-                    self -> data_off, elem_bits, self -> num_elems + self -> row_len );
-
-                /* back up to beginning of uncommitted row */
-                if ( ! VDBMemBufferAdvance ( & cur, num_bits - 1, true ) )
-                    return true;
-
-                /* "cur" points at the current row. prepare "prior" to point to
-                   the row before that which is the last committed row, which we
-                   know is the same length as the current row */
-                prior = cur;
-                assert ( self -> num_elems >= self -> row_len );
-                if ( ! VDBMemBufferAdvance ( & prior, num_bits, true ) )
-                    return true;
-
-                /* comparison loop */
-                for ( cnt = to_cmp = 0; cnt < num_bits; cnt += to_cmp )
-                {
-                    const void *p, *c;
-                    bitsz_t coff, cavail, poff, pavail;
-
-                    VDBMemBufferAdvance ( & prior, to_cmp, false );
-                    p = VDBMemBufferAccess ( & prior, & poff, & pavail );
-                    c = VDBMemBufferAccess ( & cur, & coff, & cavail );
-                    if ( p == NULL || c == NULL )
-                        return true;
-
-                    to_cmp = num_bits - cnt;
-                    if ( to_cmp > pavail )
-                        to_cmp = pavail;
-                    if ( to_cmp > cavail )
-                        to_cmp = cavail;
-
-                    /* compare bits */
-                    if ( bitcmp ( p, poff, c, coff, to_cmp ) != 0 )
-                        break;
-
-                    /* advance buffers */
-                    VDBMemBufferAdvance ( & cur, to_cmp, false );
-                }
-
-                /* if the rows were identical */
-                if ( cnt == num_bits )
-                {
-                    /* just bump the repeat count */
-                    ++ rm -> cnt;
-
-                    if ((self->cutoff_id != self->start_id) && (self->cutoff_id + 1 == *end_id))
-                        self->cutoff_id = *end_id;
-#if 1
-                    /* drop any extra buffers used during write */
-                    for ( mem = ( VDBMem* ) DLNodeNext ( & prior . mem -> n );
-                          mem != NULL;
-                          mem = ( VDBMem* ) DLNodeNext ( & prior . mem -> n ) )
-                    {
-                        DLListUnlink ( & self -> data, & mem -> n );
-                        VDBMemRelease ( & mem -> n, self -> mgr );
-                    }
-#else
-                    while ( DLListTail ( & self -> data ) != prior . mem -> n )
-                    {
-                        mem = ( VDBMem * ) DLListPopTail ( & self -> data );
-                        VDBMemRelease ( & mem -> n, self -> mgr );
-                    }
-#endif                    
-
-                    /* consider the row committed */
-                    self -> row_len = 0;
-                    self -> row_committed = true;
-                    goto check_size;
-                }
+                if ( memcmp ( & base [ poff >> 3 ], & base [ coff >> 3 ], self -> row_len >> 3 ) == 0 )
+                    return WColumnCommitRepeatedRow ( self, rm, * end_id );
             }
         }
     }
 
-    /* offset to next rowmap entry */
-    rmoff = ( self -> num_rows + self -> rowmap_off ) * sizeof * rm;
-
-    /* check for space */
-    if ( mem == NULL ||( rmoff & ( sizeof mem -> page - 1 ) ) == 0 )
+    /* need to add a new row */
+    if ( ( uint64_t ) self -> num_rows == self -> rowmap . elem_count )
     {
-        rc_t rc = VDBManagerMakeMem ( self -> mgr, & mem );
+        /* need more memory */
+        rc_t rc;
+        self -> rowmap . elem_bits = sizeof * rm * 8;
+        rc = KDataBufferResize ( & self -> rowmap, self -> rowmap . elem_count + 16 * 1024 );
         if ( rc != 0 )
+        {
+            PLOGERR ( klogErr,
+                      ( klogErr, rc, "Column: $(col) failed to resize row map", "col=%.*s"
+                        , self -> dad . scol -> name -> name . size
+                        , self -> dad . scol -> name -> name . addr )
+                );
             return true;
-        DLListPushTail ( & self -> rowmap, & mem -> n );
-        rmoff = 0;
+        }
     }
 
-    /* mem might not be initialized! */
-    /* new rowmap entry */
-    rm = ( void* ) & mem -> page [ rmoff & ( sizeof mem -> page - 1 ) ];
-#if _DEBUGGING
+    rm = self -> rowmap . base;
+    rm += self -> num_rows;
+
     rm -> start_id = self -> end_id;
-#endif
-    rm -> len = self -> row_len;
+    rm -> len = row_len;
     rm -> cnt = 1;
 
-    self -> num_elems += self -> row_len;
-    ++ self -> num_rows;
+    self -> bits_in_buffer += self -> row_len;
     self -> row_len = 0;
-    self -> row_committed = true;
-check_size:
-    /* current size in bytes */
-    cur_size = ( (size_t)self -> num_elems * elem_bits + 7 ) >> 3;
 
-    /* if the buffer is large enough */
+    ++ self -> num_rows;
+    self -> row_committed = true;
+
+    /* detect 1x blob cutoff */
+    cur_size = ( size_t ) ( self -> bits_in_buffer + 7 ) >> 3;
     if ( cur_size >= self -> trigger )
     {
-
         /* if size just crossed the trigger boundary and 
          * cutoff_id has not been advanced yet */
         if ( self -> cutoff_id == self -> start_id )
@@ -763,29 +602,98 @@ check_size:
             /* set to min of current end or our cutoff */
             if ( self -> cutoff_id < * end_id )
             {
+#if ROW_COUNT_CUTOFFS
+                /* the number of rows until our cutoff */
+                uint64_t row_count = self -> cutoff_id - self -> start_id;
+                if ( row_count != 0 )
+                {
+                    int64_t end;
+                    uint64_t msb = row_count;
+
+                    /* adjust id to nearest power of two size
+                       that does not exceed current id */
+                    while ( ( msb & ( msb - 1 ) ) != 0 )
+                        msb &= msb - 1;
+
+                    /* add in rounding factor to row_count */
+                    row_count += ( msb >> 1 );
+
+                    /* truncate */
+                    row_count &= ~ ( msb - 1 );
+
+                    if ( row_count >= 1024 )
+                    {
+                        /* limit to current row */
+                        while ( row_count > 1024 && self -> start_id + row_count > * end_id )
+                            row_count >>= 1;
+
+                        if ( self -> start_id + row_count <= * end_id )
+                            self -> cutoff_id = self -> start_id + row_count;
+                    }
+                }
+#endif
                 * end_id = self -> cutoff_id;
             }
         }
     }
 
-    /* if the row range is too great ( 3G rows ) */
-    else if ( ( self -> end_id - self -> start_id ) >= 0xC0000000 )
-    {
-        /* if row range has just crossed the boundary and 
-         * cutoff_id has not been advanced yet */
-        if ( self -> cutoff_id == self -> start_id )
-        {
-            self -> cutoff_id = * end_id;
-        }
+    return false;
+}
 
-        /* set to min of current end or our cutoff */
-        else if ( self -> cutoff_id < * end_id )
+bool CC WColumnCommitRow ( void *item, void *data )
+{
+    WColumn *self = item;
+    if ( self != NULL )
+    {
+        int64_t *end_id = data;
+
+        if ( WColumnCommitRowData ( self, end_id ) )
+            return true;
+
+        /* if the row range is too great */
+        if ( ( self -> end_id - self -> start_id ) >= MAX_ROW_COUNT )
         {
-            * end_id = self -> cutoff_id;
+            /* if row range has just crossed the boundary and 
+             * cutoff_id has not been advanced yet */
+            if ( self -> cutoff_id == self -> start_id )
+            {
+                self -> cutoff_id = * end_id;
+            }
+
+            /* set to min of current end or our cutoff */
+            else if ( self -> cutoff_id < * end_id )
+            {
+                * end_id = self -> cutoff_id;
+            }
         }
     }
 
     return false;
+}
+
+/* RepeatRow
+ *  go into the last row entry
+ *  extend the count by uint64_t
+ */
+void CC WColumnRepeatRow ( void *item, void *data )
+{
+    WColumn *self = item;
+    const WColumnRepeatRowData *pb = data;
+
+    if ( self != NULL && self -> num_rows != 0 )
+    {
+        WColumnRowMap *rm = self -> rowmap . base;
+        rm += self -> num_rows - 1;
+
+        /* if we've previously declared a cutoff id,
+           incorporate the repeated row into the range */
+        if ( ( self -> cutoff_id != self -> start_id ) && ( self -> cutoff_id + 1 == pb -> end_id ) )
+            self -> cutoff_id = pb -> end_id + pb -> count;
+
+        /* just account for the repeated row */
+        rm -> cnt += pb -> count;
+        self -> end_id += pb -> count;
+    }
 }
 
 /* CloseRow
@@ -795,42 +703,15 @@ check_size:
 void CC WColumnCloseRow ( void *item, void *ignore )
 {
     WColumn *self = item;
-
-    if ( self -> row_len != 0 )
+    if ( self != NULL )
     {
-        /* discard any extra buffers used */
-        VDBMem *mem;
-        bitsz_t elem_bits = VTypedescSizeof ( & self -> dad . desc );
-        bitsz_t boff = self -> data_off + self -> num_elems * elem_bits;
-        bitsz_t origin = boff + self -> row_len * elem_bits;
+        if ( self -> row_committed )
+            ++ self -> end_id;
 
-        /* set origin to the start of last buffer */
-        origin = ( origin - 1 ) & ~ ( bitsz_t ) ( sizeof mem -> page * 8 - 1 );
-
-        if ((boff == 0) && (origin == 0)) /* we got nothing */
-        {
-            /* delete all but it should only be one if any */
-            while ((mem = (VDBMem*)DLListPopTail (&self->data)) != NULL)
-                VDBMemRelease ( & mem -> n, self -> mgr );
-        }
-        else
-        {
-            /* not reached, not tested, not understood */
-            for ( ; origin >= boff ; origin -= sizeof mem -> page * 8 )
-            {
-                mem = ( VDBMem* ) DLListPopTail ( & self -> data );
-                assert ( mem != NULL );
-                VDBMemRelease ( & mem -> n, self -> mgr );
-            }
-        }
+        self -> row_len = 0;
+        self -> row_written = false;
+        self -> row_committed = false;
     }
-
-    if ( self -> row_committed )
-        ++ self -> end_id;
-
-    self -> row_len = 0;
-    self -> row_written = false;
-    self -> row_committed = false;
 }
 
 /* BufferPage
@@ -843,266 +724,316 @@ void CC WColumnCloseRow ( void *item, void *ignore )
  *  returns true if there was a memory error.
  */
 static
-rc_t WColumnMakePage ( WColumn *self, int64_t end_id,
-   bitsz_t elem_bits, uint64_t num_elems, uint64_t num_rows )
+bool WColumnSplitBuffer ( WColumn *self, int64_t end_id, size_t rm_idx )
 {
     rc_t rc;
+    int64_t id;
+    VBlob *vblob;
+    bool splitting;
+    size_t i, data_cur;
+    uint64_t sum_elems;
 
+    const WColumnRowMap *rm = self -> rowmap . base;
+
+    uint64_t num_rows = rm [ rm_idx ] . start_id + rm [ rm_idx ] . cnt - self -> start_id;
+    assert ( rm [ 0 ] . start_id == self -> start_id );
+
+    /* adjust end_id [ TAKES CARE OF THEORETICAL ERROR CONDITION
+       NOT KNOWN TO EXIST ] and num_rows ( when splitting repeat ) */
+    id = end_id;
+    splitting = false;
+    if ( self -> start_id + num_rows <= id )
+        id = self -> start_id + num_rows;
+    else
+    {
+        num_rows = id - self -> start_id;
+        splitting = true;
+    }
+
+    /* release previous ( but unexpected ) cache if there */
     if ( self -> page != NULL )
     {
-        TRACK_BLOB (VBlobRelease, self->page);
-        ( void ) VBlobRelease ( self -> page );
+        TRACK_BLOB ( VBlobRelease, self -> page );
+        VBlobRelease ( self -> page );
         self -> page = NULL;
     }
 
-    rc = VBlobNew ( & self -> page, self -> start_id, end_id - 1, self -> dad . scol -> name -> name . addr );
-    TRACK_BLOB (VBlobNew, self->page);
-
-    if ( rc == 0 )
-    {
-        VBlob *vblob = self -> page;
-        rc = KDataBufferMake ( & vblob -> data, elem_bits, num_elems );
-        if ( rc == 0 )
-        {
-            rc = PageMapNew ( & vblob -> pm, num_rows );
-            if ( rc == 0 )
-                return 0;
-        }
-
-        TRACK_BLOB (VBlobRelease, vblob);
-        (void)VBlobRelease ( vblob );
-        self -> page = NULL;
-    }
-    return rc;
-}
-
-#define ROWMAPS_PER_PAGE (sizeof(((const VDBMem *)0)->page) / sizeof(WColumnRowMap))
-#define ROWMAP_BITS (sizeof(WColumnRowMap) * 8)
-/* false return is good, true return is failure of some sort */
-bool CC WColumnBufferPage ( void *item, void *const_end_id )
-{
-    rc_t rc;
-    WColumn *self = item;
-    int64_t id, end_id = * ( const int64_t* ) const_end_id;
-
-    VDBMem *mem;
-    bool seek_ok;
-    const WColumnRowMap *rm = NULL;
-    VDBMemBuffer rowmap, data;
-    uint64_t num_elems, num_rows;
-    uint64_t rowmap_off;
-    bitsz_t cnt, num_bits, to_cpy, elem_bits;
-    bool advance = true;
-
-    /* initialize buffer onto rowmap */
-    VDBMemBufferInitHead ( & rowmap, DLListHead ( & self -> rowmap ),
-        self -> rowmap_off * ROWMAP_BITS, ROWMAP_BITS, self -> num_rows );
-
-    /* walk row map to count rows and elements through end_id not the whole list */
-    num_elems = num_rows = 0;
-    for ( id = self -> start_id;
-          id < end_id;
-          id += rm -> cnt )
-    {
-        rm = VDBMemBufferAccess ( & rowmap, NULL, NULL );
-        if ( rm == NULL )
-            return true;
-        if (advance)
-            advance  = VDBMemBufferAdvance ( & rowmap, ROWMAP_BITS, false );
-        else
-        {
-            /* assert (0); */
-            return true;
-        }
-        num_elems += rm -> len;
-        assert (rm->start_id == id);
-        ++ num_rows;
-    }
-
-    /* allocate page */
-    elem_bits = VTypedescSizeof ( & self -> dad . desc );
-    rc = WColumnMakePage ( self, end_id, elem_bits, num_elems, num_rows );
+    /* create new blob */
+    rc = VBlobNew ( & vblob,
+                    self -> start_id, id - 1,
+                    self -> dad . scol -> name -> name . addr );
+    TRACK_BLOB ( VBlobNew, vblob );
     if ( rc != 0 )
+    {
+        PLOGERR ( klogErr,
+                  ( klogErr, rc, "Column: $(col) failed to allocate page", "col=%.*s"
+                    , self -> dad . scol -> name -> name . size
+                    , self -> dad . scol -> name -> name . addr )
+            );
         return true;
-
-    /* initialize data buffer */
-    VDBMemBufferInitHead ( & data, DLListHead ( & self -> data ),
-          self -> data_off, elem_bits, self -> num_elems + self -> row_len );
-
-    /* copy data */
-    num_bits = KDataBufferBits ( & self -> page -> data );
-    for ( seek_ok = true, cnt = 0; cnt < num_bits; cnt += to_cpy )
-    {
-        bitsz_t avail, soff;
-        const void *src = VDBMemBufferAccess ( & data, & soff, & avail );
-        if ( src == NULL )
-            return true;
-
-        to_cpy = num_bits - cnt;
-        if ( to_cpy > avail )
-            to_cpy = avail;
-
-        bitcpy ( self -> page -> data . base, cnt, src, soff, to_cpy );
-
-        seek_ok = VDBMemBufferAdvance ( & data, to_cpy, false );
     }
 
-    /* if last seek failed, "to_cpy" represents the bits remaining */
-    if ( seek_ok )
-        to_cpy = 0;
-
-    /* capture left edge of data */
-    self -> data_off = data . marker + to_cpy;
-
-    /* if keeping the last row, back off by that amount:
-     * we could only "over shoot" by one in the loop above */
-    if ( id > end_id )
+    /* create blob page map */
+    rc = PageMapNew ( & vblob -> pm, rm_idx + 1 ); /*** rm_idx tells many WColumnRowMap need to be added to PageMap ***/
+    if ( rc != 0 )
     {
-        self -> data_off -= elem_bits * rm -> len;
-    }
-    /* drop data pages */
-#if 1
-    for ( ; ; ) {
-        bitsz_t to_drop = 0;
+        TRACK_BLOB ( VBlobRelease, vblob );
+        VBlobRelease ( vblob );
 
-        if (self->data_off >= sizeof(mem->page) * 8)
-            to_drop = sizeof(mem->page) * 8;
-        else if (self->data_off == data.end)
-            to_drop = data.end;
-        if (to_drop) {
-            mem = ( VDBMem* ) DLListPopHead ( & self -> data );
-            VDBMemRelease ( & mem -> n, self -> mgr );
-            self->data_off -= to_drop;
-            data.end -= to_drop;
-        }
-        else break;
+        PLOGERR ( klogErr,
+                  ( klogErr, rc, "Column: $(col) failed to create page map", "col=%.*s"
+                    , self -> dad . scol -> name -> name . size
+                    , self -> dad . scol -> name -> name . addr )
+            );
+        return true;
     }
-#else
-    for ( ; self -> data_off >= sizeof mem -> page * 8; self -> data_off -= sizeof mem -> page * 8 )
+
+    /* write page map up to ( but not including ) last entry */
+    for ( sum_elems = 0, i = 0; i < rm_idx; ++ i )
     {
-        mem = ( VDBMem* ) DLListPopHead ( & self -> data );
-        VDBMemRelease ( & mem -> n, self -> mgr );
-    }
-#endif
-
-    /* re-initialize rowmap buffer */
-    VDBMemBufferInitHead ( & rowmap, DLListHead ( & self -> rowmap ),
-        self -> rowmap_off * ROWMAP_BITS, ROWMAP_BITS, self -> num_rows );
-
-    /* copy row map */
-    for ( ; num_rows > 1; -- num_rows )
-    {
-        rm = VDBMemBufferAccess ( & rowmap, NULL, NULL );
-        assert ( rm != NULL );
-        rc = PageMapAppendSomeRows ( self -> page -> pm, rm -> len, rm -> cnt );
+        sum_elems += rm [ i ] . len;
+        rc = PageMapAppendSomeRows ( vblob -> pm, rm [ i ] . len, rm [ i ] . cnt );
         if ( rc != 0 )
-            return true;
-        VDBMemBufferAdvance ( & rowmap, ROWMAP_BITS, false );
-    }
-    for ( seek_ok = true; num_rows > 0; -- num_rows )
-    {
-        uint64_t row_count;
-        
-        rm = VDBMemBufferAccess ( & rowmap, NULL, NULL );
-        assert ( rm != NULL );
-        
-        row_count = rm -> cnt - ( id - end_id );
-        rc = PageMapAppendSomeRows ( self -> page -> pm, rm -> len, row_count);
-        if ( rc != 0 )
-            return true;
-#if _DEBUGGING
-        if (id - end_id)
         {
-            ((WColumnRowMap *)rm)->start_id += row_count;
+            TRACK_BLOB ( VBlobRelease, vblob );
+            VBlobRelease ( vblob );
+
+            PLOGERR ( klogErr,
+                      ( klogErr, rc, "Column: $(col) failed to write page map", "col=%.*s"
+                        , self -> dad . scol -> name -> name . size
+                        , self -> dad . scol -> name -> name . addr )
+                );
+            return true;
         }
-#endif
-        seek_ok = VDBMemBufferAdvance ( & rowmap, ROWMAP_BITS, false );
     }
 
-    /* capture left edge of rowmap:  that is capture the number of bits to the new
-     * offset to the first unwritten rowmap that might be a different page than the
-     * current rowmap offset */
-    rowmap_off = rowmap . marker / ROWMAP_BITS;
-
-    /* if last advance failed, incorporate bits */
-    if ( ! seek_ok )
-        ++rowmap_off;
-
-    /* if last rowmap entry needs to be preserved */
-    if ( id > end_id )
+    sum_elems += rm [ i ] . len;
+    rc = PageMapAppendSomeRows ( vblob -> pm, rm [ i ] . len, id - rm [ i ] . start_id );
+    if ( rc != 0 )
     {
-        /* back up to preserve row */
-        --rowmap_off;
-        /* adjust row count */
-        ( ( WColumnRowMap* ) rm ) -> cnt = id - end_id;
+        TRACK_BLOB ( VBlobRelease, vblob );
+        VBlobRelease ( vblob );
+
+        PLOGERR ( klogErr,
+                  ( klogErr, rc, "Column: $(col) failed to write page map", "col=%.*s"
+                    , self -> dad . scol -> name -> name . size
+                    , self -> dad . scol -> name -> name . addr )
+            );
+        return true;
     }
 
-    /* drop rowmap pages and fix up other fields
-     * this is less complex if we are clearing out all pages */
-    if (rowmap_off - self->rowmap_off == self->num_rows)
-    {
-        /* delete all */
-        while ((mem = (VDBMem*)DLListPopHead (&self->rowmap)) != NULL)
-            VDBMemRelease (&mem->n, self->mgr);
+    /* determine current data buffer usage */
+    data_cur = ( size_t ) ( ( ( self -> bits_in_buffer + 7 ) >> 3 )
+        + SINGLE_PAGE_SIZE - 1 ) & ~ ( size_t ) ( SINGLE_PAGE_SIZE - 1 );
 
-        self->num_elems = 0;
-        self->num_rows = 0;
-        self->rowmap_off = 0;
+    /* update peak history */
+    if ( self -> data_peak_hist [ self -> peak_hist_idx ] == self -> data_peak )
+    {
+        int j;
+        size_t data_peak = data_cur;
+
+        for ( j = ( self -> peak_hist_idx + 1 ) & 0xF;
+              j != self -> peak_hist_idx;
+              j = ( j + 1 ) & 0xF )
+        {
+            if ( self -> data_peak_hist [ j ] > data_peak )
+                data_peak = self -> data_peak_hist [ j ];
+        }
+
+        self -> data_peak = data_peak;
+    }
+    self -> data_peak_hist [ self -> peak_hist_idx ] = data_cur;
+    self -> peak_hist_idx = ( self -> peak_hist_idx + 1 ) & 0xF;
+    if ( data_cur > self -> data_peak )
+        self -> data_peak = data_cur;
+
+    /* hand data over to blob */
+    vblob -> data = self -> data;
+    vblob -> data . elem_bits = VTypedescSizeof ( & self -> dad . desc );
+    vblob -> data . elem_count = sum_elems;
+
+    /* handle residual data */
+    if ( splitting )
+        sum_elems -= rm [ rm_idx ] . len;
+    else
+        ++ rm_idx;
+
+    if ( rm_idx == self -> num_rows )
+    {
+        /* no residual data/rows */
+        memset ( & self -> data, 0, sizeof self -> data );
+        self -> bits_in_buffer = 0;
+        self -> num_rows = 0;
+        self -> start_id = self -> cutoff_id = end_id;
     }
     else
     {
-        uint64_t rowmaps_this_page;
+        KDataBuffer data;
+        bitsz_t boff, to_copy;
 
-        /* page must be exactly divisible by sizeof ( WColumnRowMap ) */
-        assert ( VDBMemBitsInPage () % sizeof ( WColumnRowMap ) == 0 );
-
-        /* Kind of ugly:  The first page might have less that the
-         * maximum number of rowmaps due to its having an offset
-         * to the first current rowmap.  When that page is dropped
-         * the number of rows needs to be reduced by that partial
-         * number of rowmaps.  But this seemed preferable to
-         * a more awkward check for a first partial page followed by
-         * a loop over full pages. */
-        for ( rowmaps_this_page = ROWMAPS_PER_PAGE - self->rowmap_off;
-              rowmap_off >= ROWMAPS_PER_PAGE;
-              rowmaps_this_page = ROWMAPS_PER_PAGE )
+        /* allocate a new data buffer */
+        rc = KDataBufferMakeBytes ( & data, self -> data_peak );
+        if ( rc != 0 )
         {
-            mem = ( VDBMem* ) DLListPopHead ( & self -> rowmap );
-            assert ( mem != NULL );
-            VDBMemRelease ( & mem -> n, self -> mgr );
-            rowmap_off -= ROWMAPS_PER_PAGE;
-            assert ( self->num_rows > rowmaps_this_page );
-            self->num_rows -= rowmaps_this_page;
-            self->rowmap_off = 0;     /* old rowmap_off is no longer on the same page */
+            /* forget transfer of blob */
+            memset ( & vblob -> data, 0, sizeof vblob -> data );
+
+            TRACK_BLOB ( VBlobRelease, vblob );
+            VBlobRelease ( vblob );
+
+            PLOGERR ( klogErr,
+                      ( klogErr, rc, "Column: $(col) failed to split page", "col=%.*s"
+                        , self -> dad . scol -> name -> name . size
+                        , self -> dad . scol -> name -> name . addr )
+                );
+            return true;
         }
-        /* new number of rows needs to lose the rows on this page that are done;
-         * that might be just the new rowmap_off or it might be new - old
-         * this expression assumes new is page decremented in the loop and
-         * the old is dropped in the loop or that the loop is not run
-         * and the new and old are both from the same page
-         */
-        assert ( self->num_rows > (rowmap_off - self->rowmap_off));
-        self->num_rows -= (rowmap_off - self->rowmap_off);
-        self->rowmap_off = rowmap_off;
 
-        /* reinitialize buffer onto rowmap */
-        VDBMemBufferInitHead ( & rowmap, DLListHead ( & self -> rowmap ),
-                               rowmap_off * ROWMAP_BITS, ROWMAP_BITS, self -> num_rows );
+        /* copy data */
+        boff = ( rm_idx > 0 ) ?
+            sum_elems * vblob -> data . elem_bits : 0;
+        to_copy = self -> bits_in_buffer - boff;
+        if ( ( ( boff | to_copy ) & 7 ) != 0 )
+            bitcpy ( data . base, 0, self -> data . base, boff, to_copy );
+        else
+            memcpy ( data . base, & ( ( const uint8_t* ) self -> data . base ) [ boff >> 3 ], to_copy >> 3 );
 
-        /* walk row map to count actual elements */
-        for ( num_elems = 0, num_rows = 0; num_rows != self -> num_rows; ++num_rows )
+        self -> data = data;
+        self -> bits_in_buffer = to_copy;
+
+        /* copy row map */
+        memmove ( self -> rowmap . base, & rm [ rm_idx ], ( self -> num_rows -= rm_idx ) * sizeof * rm );
+
+        /* adjust starting id and repeat count if splitting single row */
+        if ( splitting )
         {
-            rm = VDBMemBufferAccess ( & rowmap, NULL, NULL );
-            if ( rm == NULL )
-                return true;
-            VDBMemBufferAdvance ( & rowmap, ROWMAP_BITS, false );
-            num_elems += rm->len;
+            WColumnRowMap *split = self -> rowmap . base;
+            split -> cnt = split -> start_id + split -> cnt - id;
+            split -> start_id = id;
         }
-        self->num_elems = num_elems;
+
+        self -> start_id = self -> cutoff_id = id;
     }
 
-    self->start_id = self->cutoff_id = end_id;
+    self -> page = vblob;
+    self -> dflt_last = false;
+
     return false;
+}
+
+static
+int WColumnRowMapCompare ( const WColumnRowMap *self, int64_t id )
+{
+    /* id is right-edge exclusive */
+    if ( self -> start_id >= id )
+        return -1;
+    return id > self -> start_id + self -> cnt;
+}
+
+bool CC WColumnBufferPage ( void *item, void *const_end_id )
+{
+    WColumn *self = item;
+    if ( self != NULL )
+    {
+        int64_t end_id = * ( const int64_t* ) const_end_id;
+
+        int diff;
+        const WColumnRowMap *rm = self -> rowmap . base;
+        size_t i, left, right = self -> num_rows;
+
+        /* find the entry mentioned */
+        if ( self -> num_rows == 0 )
+        {
+            PLOGMSG ( klogWarn,
+                      ( klogWarn, "Column: $(col) has no rows to buffer", "col=%.*s"
+                        , self -> dad . scol -> name -> name . size
+                        , self -> dad . scol -> name -> name . addr )
+                );
+            return true;
+        }
+
+        /* check last entry */
+        i = right - 1;
+        diff = WColumnRowMapCompare ( & rm [ i ], end_id );
+        if ( diff >= 0 )
+            return WColumnSplitBuffer ( self, end_id, i );
+
+        /* check that the id is within our range at all */
+        assert ( self -> start_id == rm [ 0 ] . start_id );
+        if ( end_id < self -> start_id )
+        {
+            PLOGMSG ( klogWarn,
+                      ( klogWarn, "Column: $(col) cutoff id $(id) is not within range"
+                        , "col=%.*s,id=%ld"
+                        , self -> dad . scol -> name -> name . size
+                        , self -> dad . scol -> name -> name . addr
+                        , end_id )
+                );
+            return true;
+        }
+
+        /* search rails are left ( inclusive ) at 0, right ( exclusive ) at num_rows */
+        left = 0;
+
+        /* perform arithmetic search for initial portion */
+        if ( right > 1000 )
+        {
+            double p = ( double ) ( end_id - rm [ left ] . start_id ) /
+                ( rm [ right - 1 ] . start_id + rm [ right - 1 ] . cnt - rm [ left ] . start_id );
+            assert ( p >= 0.0 && p <= 1.0 );
+
+            i = left + p * ( right - left );
+
+            diff = WColumnRowMapCompare ( & rm [ i ], end_id );
+            if ( diff == 0 )
+                return WColumnSplitBuffer ( self, end_id, i );
+            if ( diff < 0 )
+                right = i;
+            else
+                left = i + 1;
+
+            if ( left < right )
+            {
+                p = ( double ) ( end_id - rm [ left ] . start_id ) /
+                    ( rm [ right - 1 ] . start_id + rm [ right - 1 ] . cnt - rm [ left ] . start_id );
+                assert ( p >= 0.0 && p <= 1.0 );
+
+                i = left + p * ( right - left );
+
+                diff = WColumnRowMapCompare ( & rm [ i ], end_id );
+                if ( diff == 0 )
+                    return WColumnSplitBuffer ( self, end_id, i );
+                if ( diff < 0 )
+                    right = i;
+                else
+                    left = i + 1;
+            }
+        }
+
+        /* normal binary search */
+        while ( left < right )
+        {
+            i = ( left + right ) >> 1;
+
+            diff = WColumnRowMapCompare ( & rm [ i ], end_id );
+            if ( diff == 0 )
+                return WColumnSplitBuffer ( self, end_id, i );
+            if ( diff < 0 )
+                right = i;
+            else
+                left = i + 1;
+        }
+
+        PLOGMSG ( klogErr,
+                  ( klogErr, "Column: $(col) cutoff id $(id) is not within range"
+                    , "col=%.*s,id=%ld"
+                    , self -> dad . scol -> name -> name . size
+                    , self -> dad . scol -> name -> name . addr
+                    , end_id )
+            );
+    }
+
+    return true;
 }
 
 /* ReadBlob
@@ -1117,8 +1048,8 @@ rc_t WColumnReadBlob ( WColumn *self, VBlob **vblob, int64_t id )
         return RC ( rcVDB, rcColumn, rcReading, rcRow, rcNotFound );
 
     * vblob = self -> page;
-    (void)VBlobAddRef ( self -> page );
-    TRACK_BLOB(VBlobAddRef, self->page);
+    VBlobAddRef ( self -> page );
+    TRACK_BLOB ( VBlobAddRef, self -> page );
 
     return 0;
 }
@@ -1129,10 +1060,10 @@ rc_t WColumnReadBlob ( WColumn *self, VBlob **vblob, int64_t id )
 void CC WColumnDropPage ( void *item, void *ignore )
 {
     WColumn *self = item;
-    if ( self -> page != NULL )
+    if ( self != NULL && self -> page != NULL )
     {
-        TRACK_BLOB(VBlobRelease,self->page);
-        (void)VBlobRelease ( self -> page );
+        TRACK_BLOB ( VBlobRelease, self -> page );
+        VBlobRelease ( self -> page );
         self -> page = NULL;
     }
 }

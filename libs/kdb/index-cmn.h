@@ -223,7 +223,7 @@ uint32_t KPTrieIndexID2Ord_v2 ( const KPTrieIndex_v2 *self, int64_t id );
 rc_t KPTrieIndexCheckConsistency_v2 ( const KPTrieIndex_v2 *self,
     int64_t *start_id, uint64_t *id_range, uint64_t *num_keys,
     uint64_t *num_rows, uint64_t *num_holes,
-    struct KIndex const *outer, bool key2id, bool id2key, bool all_ids );
+    struct KIndex const *outer, bool key2id, bool id2key, bool all_ids, bool convertFromV1 );
 
 
 /*--------------------------------------------------------------------------
@@ -244,7 +244,8 @@ rc_t KTrieIndexFind_v2 ( const KTrieIndex_v2 *self,
     uint32_t *span,
 #endif
     int ( CC * custom_cmp ) ( const void *item, struct PBSTNode const *n, void *data ),
-    void * data );
+    void * data,
+    bool convertFromV1);
 
 /* projection index id to key-string */
 #if V2FIND_RETURNS_SPAN
@@ -260,7 +261,7 @@ rc_t KTrieIndexProject_v2 ( const KTrieIndex_v2 *self,
 rc_t KTrieIndexCheckConsistency_v2 ( const KTrieIndex_v2 *self,
     int64_t *start_id, uint64_t *id_range, uint64_t *num_keys,
     uint64_t *num_rows, uint64_t *num_holes,
-    struct KIndex const *outer, bool key2id, bool id2key, bool all_ids );
+    struct KIndex const *outer, bool key2id, bool id2key, bool all_ids, bool convertFromV1 );
 
 
 /*--------------------------------------------------------------------------

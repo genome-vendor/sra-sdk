@@ -54,12 +54,20 @@ extern "C" {
 
 
 /*--------------------------------------------------------------------------
+ * forwards
+ */
+struct KFile;
+struct KDirectory;
+struct KNamelist;
+struct VPath;
+struct String;
+
+/*--------------------------------------------------------------------------
  * KConfig
  *  configuration paramter manager
  */
 typedef struct KConfig KConfig;
 
-struct KDirectory;
 
 /* Make
  *  create a process-global configuration manager
@@ -81,9 +89,90 @@ KFG_EXTERN rc_t CC KConfigRelease ( const KConfig *self );
 /* LoadFile
  * loads a configuration file
  */
-struct KFile;
 KFG_EXTERN rc_t CC KConfigLoadFile ( KConfig * self,
     const char * path, struct KFile const * file );
+
+
+/* Commit
+ *  commits changes to user's private configuration file
+ */
+KFG_EXTERN rc_t CC KConfigCommit ( KConfig *self );
+
+/* ReadBool
+ *  read a boolean node value
+ *
+ * self [ IN ] - KConfig object
+ * path [ IN ] - path to the node
+ * result [ OUT ] - return value (true if "TRUE", false if "FALSE"; rc != 0 if neither)
+ *
+ */
+KFG_EXTERN rc_t CC KConfigReadBool ( const KConfig* self, const char* path, bool* result );
+    
+/* ReadI64
+ *  read an integer node value
+ *
+ * self [ IN ] - KConfig object
+ * path [ IN ] - path to the node
+ * result [ OUT ] - return value (rc != 0 if cannot be converted)
+ *
+ */
+KFG_EXTERN rc_t CC KConfigReadI64 ( const KConfig* self, const char* path, int64_t* result );
+
+/* ReadU64
+ *  read an unsigned node value
+ *
+ * self [ IN ] - KConfig object
+ * path [ IN ] - path to the node
+ * result [ OUT ] - return value (rc != 0 if cannot be converted)
+ *
+ */
+KFG_EXTERN rc_t CC KConfigReadU64 ( const KConfig* self, const char* path, uint64_t* result );
+
+/* ReadF64
+ *  read an F64 node value
+ *
+ * self [ IN ] - KConfig object
+ * path [ IN ] - path to the node
+ * result [ OUT ] - return value (rc != 0 if cannot be converted)
+ *
+ */
+KFG_EXTERN rc_t CC KConfigReadF64( const KConfig* self, const char* path, double* result );
+
+#if 0
+/*** NB - temporarily lives in vfs due to library interdependencies ***/
+
+/* ReadVPath
+ *  read a VPath node value
+ *
+ * self [ IN ] - KConfig object
+ * path [ IN ] - path to the node
+ * result [ OUT ] - return value (rc != 0 if cannot be converted)
+ *
+ */
+KFG_EXTERN rc_t CC KConfigReadVPath ( const KConfig* self, const char* path, struct VPath** result );
+#endif
+
+/* ReadString
+ *  read a String node value
+ *
+ * self [ IN ] - KConfig object
+ * path [ IN ] - path to the node
+ * result [ OUT ] - return value; caller responsible for deallocation
+ *
+ */
+KFG_EXTERN rc_t CC KConfigReadString ( const KConfig* self, const char* path, struct String** result );
+
+
+/* Print
+ * print configuration to output handler (using OUTMSG)
+ */
+KFG_EXTERN rc_t CC KConfigPrint ( const KConfig * self );
+
+
+/* DisableUserSettings
+ *  for testing purposes
+ */
+KFG_EXTERN void CC KConfigDisableUserSettings ( void );
 
 
 /*--------------------------------------------------------------------------
@@ -163,12 +252,69 @@ KFG_EXTERN rc_t CC KConfigNodeRead ( const KConfigNode *self,
     size_t offset, char *buffer, size_t bsize,
     size_t *num_read, size_t *remaining );
 
+/* ReadBool
+ *  read a boolean node value
+ *
+ * self [ IN ] - KConfigNode object
+ * result [ OUT ] - return value (true if "TRUE", false if "FALSE"; rc != 0 if neither)
+ *
+ */
+KFG_EXTERN rc_t CC KConfigNodeReadBool ( const KConfigNode *self, bool* result );
+    
+/* ReadI64
+ *  read an integer node value
+ *
+ * self [ IN ] - KConfigNode object
+ * result [ OUT ] - return value (rc != 0 if cannot be converted)
+ *
+ */
+KFG_EXTERN rc_t CC KConfigNodeReadI64 ( const KConfigNode *self, int64_t* result );
 
-/* ListChild
+/* ReadU64
+ *  read an unsigned node value
+ *
+ * self [ IN ] - KConfigNode object
+ * result [ OUT ] - return value (rc != 0 if cannot be converted)
+ *
+ */
+KFG_EXTERN rc_t CC KConfigNodeReadU64 ( const KConfigNode *self, uint64_t* result );
+
+/* ReadF64
+ *  read an F64 node value
+ *
+ * self [ IN ] - KConfigNode object
+ * result [ OUT ] - return value (rc != 0 if cannot be converted)
+ *
+ */
+KFG_EXTERN rc_t CC KConfigNodeReadF64 ( const KConfigNode *self, double* result );
+
+#if 0
+/*** NB - temporarily lives in vfs due to library interdependencies ***/
+
+/* ReadVPath
+ *  read a VPath node value
+ *
+ * self [ IN ] - KConfigNode object
+ * result [ OUT ] - return value (rc != 0 if cannot be converted)
+ *
+ */
+KFG_EXTERN rc_t CC KConfigNodeReadVPath ( const KConfigNode *self, struct VPath** result );
+#endif
+
+/* ReadString
+ *  read a String node value
+ *
+ * self [ IN ] - KConfigNode object
+ * result [ OUT ] - return value; caller responsible for deallocation
+ *
+ */
+KFG_EXTERN rc_t CC KConfigNodeReadString ( const KConfigNode *self, struct String** result );
+
+/* ListChildren - nee ListChild
  *  list all named children
  */
-struct KNamelist;
-KFG_EXTERN rc_t CC KConfigNodeListChild ( const KConfigNode *self,
+#define KConfigNodeListChild KConfigNodeListChildren
+KFG_EXTERN rc_t CC KConfigNodeListChildren ( const KConfigNode *self,
     struct KNamelist **names );
 
 

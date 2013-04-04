@@ -48,8 +48,8 @@ typedef struct s_sequence_record {
     char *spotGroup;
     bool *aligned;
     char *cskey;
-    uint32_t *ti;
-    uint32_t keyId;
+    uint64_t *ti;
+    uint64_t keyId;
     unsigned spotGroupLen;
     KDataBuffer storage;
     uint8_t numreads;
@@ -73,7 +73,7 @@ rc_t SequenceWriteRecord(Sequence *self, SequenceRecord const *rec,
                          bool color, bool isDup, INSDC_SRA_platform_id platform);
 
 rc_t SequenceDoneWriting(Sequence *self);
-rc_t SequenceReadKey(const Sequence *self, int64_t row, uint32_t *key);
+rc_t SequenceReadKey(const Sequence *self, int64_t row, uint64_t *key);
 rc_t SequenceUpdateAlignData(Sequence *self, int64_t row, unsigned nreads,
                              const int64_t primeId[/* nreads */],
                              const uint8_t alignCount[/* nreads */]);

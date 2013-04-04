@@ -37,8 +37,11 @@
 #include <klib/out.h>
 #include <klib/status.h>
 #include <klib/debug.h>
+#include <kfg/config.h>
 #include <kapp/main.h>
 #include <kapp/args.h>
+
+#include "args_debug.h"
 
 #include <assert.h>
 #include <ctype.h>
@@ -47,9 +50,14 @@
 #include <string.h>
 #include <stdarg.h>
 
-#define USE_INLINING 0
+#define USE_INLINING   0
+#ifndef USE_OPTFILE
+#define USE_OPTFILE    0
+#endif
+#define USE_EARLY_HELP 1
+#define USE_EARLY_VERSION 1
 
-KAPP_EXTERN bool CC is_valid_name (const char * string)
+bool CC is_valid_name (const char * string)
 {
     /* we do not allow leading - or empty names */
     if ((*string == '\0') || (*string == '-'))
@@ -141,6 +149,7 @@ static
 rc_t CC OptionMake (Option ** pself, const char * name, size_t size, uint32_t max_count, bool needs_value, bool required)
 {
     Option *   self;
+    rc_t rc;
 
     assert (pself);
     assert (name);
@@ -150,20 +159,22 @@ rc_t CC OptionMake (Option ** pself, const char * name, size_t size, uint32_t ma
     self = malloc (sizeof (*self) + size);
     if (self == NULL)
     {
-        *pself = NULL;
-        return RC (rcRuntime, rcArgv, rcConstructing, rcMemory, rcExhausted);
+        rc = RC (rcRuntime, rcArgv, rcConstructing, rcMemory, rcExhausted);
+        PLOGERR (klogErr, (klogErr, rc, "Error adding option '$(O)'","O=%s",name));
     }
+    else 
+    {
+        if ((self->needs_value = needs_value) != false)
+            VectorInit (&self->values,0,4);
+        else
+            memset (&self->values, sizeof(self->values), 0);
 
-    if ((self->needs_value = needs_value) != false)
-        VectorInit (&self->values,0,4);
-    else
-        memset (&self->values, sizeof(self->values), 0);
-    self->required = required;
-
-    self->count = 0;
-    self->max_count = max_count;
-    self->size = size;
-    string_copy (self->name, size+1, name, size);
+        self->required = required;
+        self->count = 0;
+        self->max_count = max_count;
+        self->size = size;
+        string_copy (self->name, size+1, name, size);
+    }
     *pself = self;
     return 0;
 }
@@ -248,19 +259,23 @@ rc_t CC OptionGetValue (const Option * self, uint32_t number, const char ** valu
 static
 rc_t CC OptionAddValue (Option * self, const char * value, size_t size)
 {
-    rc_t rc = 0;
     ParamValue * pvalue;
+    rc_t rc = 0;
 
     assert (self);
 
     ++self->count;
+
+/*     KOutMsg ("%s: name %s count %u max_count %u value %s\n", __func__, self->name, self->count, self->max_count, value); */
     if (self->max_count && (self->count > self->max_count))
     {
         --self->count;
-        fprintf (stderr, "Too many occurances of %s option\n", self->name);
-        return RC (rcRuntime, rcArgv, rcInserting, rcData, rcExcessive);
+        rc = RC (rcRuntime, rcArgv, rcInserting, rcData, rcExcessive);
+        PLOGERR (klogErr,
+                 (klogErr, rc, "Too many occurances of option '$(O)'",
+                  "O=%s", self->name));
     }
-    if (self->needs_value)
+    else if (self->needs_value)
     {
         assert (value);     /* gotta have a value */
         assert (size);      /* value can't be a NUL string */
@@ -273,8 +288,14 @@ rc_t CC OptionAddValue (Option * self, const char * value, size_t size)
             rc = VectorAppend (&self->values, NULL, pvalue);
             if (rc)
             {
-                fprintf (stderr, "error capturing parameter %s\n", self->name);
+                PLOGERR (klogErr,
+                         (klogErr, rc, "error capturing parameter '$(O)'",
+                          "O=%s", self->name));
                 ParamValueWhack (pvalue);
+            }
+            else
+            {
+                ARGS_DBG( "added option-value %s", self->name );
             }
         }
     }
@@ -328,8 +349,12 @@ rc_t CC OptAliasMake (OptAlias ** pself, const char * name, size_t size,
     self = malloc (sizeof (*self) + size);
     if (self == NULL)
     {
+        rc_t rc = RC (rcRuntime, rcArgv, rcConstructing, rcMemory, rcExhausted);
+        PLOGERR (klogErr,
+                 (klogErr, rc, "Error creating structure for alias '$(A)' for parameter '$(B)", 
+                  "A=%s,B=%s", name, option->name));
         *pself = NULL;
-        return RC (rcRuntime, rcArgv, rcConstructing, rcMemory, rcExhausted);
+        return rc;
     }
     self->option = option;
     self->size = size;
@@ -529,7 +554,7 @@ struct Args
 #endif
 };
 
-KAPP_EXTERN rc_t CC ArgsMake (Args ** pself)
+rc_t CC ArgsMake (Args ** pself)
 {
     rc_t rc;
     Args * self;
@@ -570,7 +595,7 @@ KAPP_EXTERN rc_t CC ArgsMake (Args ** pself)
     return rc;
 }
 
-KAPP_EXTERN rc_t CC ArgsWhack (Args * self)
+rc_t CC ArgsWhack (Args * self)
 {
     if (self)
     {
@@ -597,27 +622,27 @@ rc_t CC ArgsAddOption (Args * self, const OptDef * option)
 
     if (self == NULL)
     {
-        fprintf (stderr, "Error calling %s with NULL first parameter\n", __func__);
-        return RC (rcRuntime, rcArgv, rcConstructing, rcSelf, rcNull);
+        rc = RC (rcRuntime, rcArgv, rcConstructing, rcSelf, rcNull);
+        LOGERR (klogInt, rc, "Error adding an opion with no object");
+        return rc;
     }
     if (option == NULL)
     {
-        fprintf (stderr, "Error calling %s with NULL second parameter\n", __func__);
-        return RC (rcRuntime, rcArgv, rcConstructing, rcParam, rcNull);
+        rc = RC (rcRuntime, rcArgv, rcConstructing, rcParam, rcNull);
+        LOGERR (klogInt, rc, "Error adding an option with no option name");
+        return rc;
     }
     name = option->name;
     if (! is_valid_name (name))
     {
-        fprintf (stderr, "Error using illegal option name %s\n", name);
-        return RC (rcRuntime, rcArgv, rcConstructing, rcName, rcInvalid);
+        rc = RC (rcRuntime, rcArgv, rcConstructing, rcName, rcInvalid);
+        PLOGERR (klogInt, (klogInt, rc, "Error using illegal option name '$(O)'", "O=%s", name));
+        return rc;
     }
     size = string_size (name);
     rc = OptionMake (&node, name, size, option->max_count, option->needs_value, option->required);
     if (rc)
-    {
-        fprintf (stderr, "Error initializing structures to parase parameters\n");
         return rc;
-    }
     size ++;
 
     prev = NULL;
@@ -627,20 +652,21 @@ rc_t CC ArgsAddOption (Args * self, const OptDef * option)
         if (GetRCState(rc) == rcBusy)
         {
             rc = RC (rcRuntime, rcArgv, rcConstructing, rcName, rcBusy);
-            fprintf (stderr, "duplicate option name %s\n", name);
+            PLOGERR (klogInt,
+                     (klogInt, rc, "duplicate option name '$(O)'", "O=%s", name));
         }
         else
-            fprintf (stderr, "unknown error inserting %s\n", name);
+            PLOGERR (klogInt,
+                     (klogInt, rc, "unknown error inserting option name '$(O)'", "O=%s", name));
 
         OptionWhack (node);
         return rc;
-
     }
     if (option->aliases)     /* any single character aliases? */
     {
         const char * startc;
         const char * endc;
-        size_t incr;
+        int incr;
 
         for ((startc = option->aliases),(endc = startc + string_size (startc));
              startc < endc; startc += incr)
@@ -654,54 +680,56 @@ rc_t CC ArgsAddOption (Args * self, const OptDef * option)
             if (incr < 0)
             {
                 rc = RC (rcRuntime, rcArgv, rcConstructing, rcName, rcCorrupt);
-                fprintf (stderr, "Error parsing alias string %s from %s for %s\n",
-                         startc, option->aliases, name);
+                PLOGERR (klogInt,
+                         (klogInt, rc, "Error parsing alias string '$(A)' from '$(B)' for '$(C)'",
+                          "A=%s,B=%s,C=%s", startc, option->aliases, name));
                 break;
             }
             if (incr > 4)
             {
                 rc = RC (rcRuntime, rcArgv, rcConstructing, rcName, rcCorrupt);
-                fprintf (stderr, "Error parsing UTF-8 string %s\n", startc);
+                PLOGERR (klogInt,
+                         (klogInt, rc,"Error parsing UTF-8 string '$(S)'",
+                          "S=%s", startc));
                 break;
             }
             string_copy (alias_name, sizeof (alias_name), startc, incr);
             if (! is_valid_name (alias_name))
             {
                 rc = RC (rcRuntime, rcArgv, rcConstructing, rcName, rcInvalid);
-                fprintf (stderr, "Error using invalid alias name %s", alias_name);
+                PLOGERR (klogInt,
+                         (klogInt, rc, "Error using invalid alias name '$(S)'",
+                          "S=%s", alias_name));
                 break;
             }
             size += incr + 1;
             rc = OptAliasMake (&snode, alias_name, incr, node);
             if (rc)
-            {
-                fprintf (stderr, "Error creating structure for alias %s for parameter %s\n", 
-                         alias_name, node->name);
                 break;
-            }
             rc = BSTreeInsertUnique (&self->aliases, &snode->n, (BSTNode**)&sprev, OptAliasSort);
             if (rc)
             {
                 if (GetRCState(rc) == rcExists)
                 {
                     rc = RC (rcRuntime, rcArgv, rcConstructing, rcName, rcExists);
-                    fprintf (stderr, "duplicate alias name %s\n", alias_name);
+                    PLOGERR (klogInt,
+                             (klogInt, rc, "duplicate alias name '$(S)'",
+                              "S=%s\n", alias_name));
                 }
                 else
-                    fprintf (stderr, "%d unknown error inserting alias %s\n", rc, alias_name);
+                    PLOGERR (klogErr,
+                             (klogErr, rc, "unknown error inserting alias '$(S)'",
+                              "S=%s\n", alias_name));
 
                 OptAliasWhack (snode);
                 break;
             }
         }
     }
-    if (rc == 0)
-    {
-    }
     return rc;
 }
 
-KAPP_EXTERN rc_t CC ArgsAddOptionArray (Args * self, const OptDef * option, uint32_t count /*, 
+rc_t CC ArgsAddOptionArray (Args * self, const OptDef * option, uint32_t count /*, 
                                                                                              rc_t (*header_fmt)(Args * args, const char * header),
                                                                                              const char * header */)
 {
@@ -741,7 +769,7 @@ KAPP_EXTERN rc_t CC ArgsAddOptionArray (Args * self, const OptDef * option, uint
 
 /*
  */
-KAPP_EXTERN rc_t CC next_arg (const Args * self, int * pix, int max, const char ** pvalue)
+rc_t CC next_arg (const Args * self, int * pix, int max, const char ** pvalue)
 {
     int ix;
 
@@ -758,32 +786,49 @@ KAPP_EXTERN rc_t CC next_arg (const Args * self, int * pix, int max, const char 
 typedef struct ArgsReqCheckData
 {
     Option * missing_option;
+    rc_t rc;
 } ArgsReqCheckData;
 
 static
-bool CC ArgsCheckRequired (BSTNode * n, void * _data)
+void CC ArgsCheckRequiredInt (BSTNode * n, void * _data)
 {
-#if 0
-/* Need to rethink this. If help is asked for this shouldn't fail */
+#if 1
     ArgsReqCheckData * data;
     Option * opt;
+    rc_t rc;
 
     data = _data;
     opt = (Option*)n;
-
     if (opt->required && ! opt->count)
     {
-        data->missing_option = opt;
-        return true;
+        rc = RC( rcRuntime, rcArgv, rcParsing, rcParam, rcNotFound );
+        PLOGERR (klogWarn, (klogWarn, rc, "Error missing required parameter '$(P)'",
+                            "P=%s", opt->name));
+        if (data->missing_option == NULL)
+        {
+            data->missing_option = opt;
+            data->rc = rc;
+        }
     }
 #endif
-    return false;
 }
 
-KAPP_EXTERN rc_t CC ArgsParse (Args * self, int argc, char *argv[])
+/* check for required parameters */
+rc_t CC ArgsCheckRequired (Args * self)
 {
-    rc_t rc = 0;
-    int ix;
+    ArgsReqCheckData r = { NULL, false };
+
+    BSTreeForEach ( &self->names, false, ArgsCheckRequiredInt, &r );
+
+    return r.rc;
+}
+
+rc_t CC ArgsParse (Args * self, int argc, char *argv[])
+{
+    rc_t rc = 0;        /* hard fail - quit processing */
+    rc_t orc = 0;       /* soft fail - keep processing but we'll fail in the end */
+    rc_t qrc = 0;       /* transient - if set will move to a previously unset orc */
+    int ix, ix_from, ix_to;
     size_t jx;
     Option * node;
     const char * parg;
@@ -793,84 +838,115 @@ KAPP_EXTERN rc_t CC ArgsParse (Args * self, int argc, char *argv[])
     const char * value = NULL;
     size_t value_len;
     bool needs_value;
+    uint32_t n_in_argv_before;
+
+    n_in_argv_before = VectorLength( &self->argv );
 
     /* first capture original argument list and store in our format */
-    for (ix = 0; ix < argc; ++ix)
+    for ( ix = 0; ix < argc; ++ix )
     {
         size_t len;
 
         parg = argv[ix];
-        len = strlen (parg);
+        len = strlen ( parg );
 
-        rc = ParamValueMake (&arg, parg, len);
-        if (rc == 0)
-            rc = VectorAppend (&self->argv, NULL, arg);
-        if (rc)
+        rc = ParamValueMake ( &arg, parg, len );
+        if ( rc == 0 )
+            rc = VectorAppend ( &self->argv, NULL, arg );
+        if ( rc )
             break;
+        else
+            ARGS_DBG( "ArgsParse: inserted '%s' into self->argv", parg );
     }
     
-    if (rc)
+    if ( rc )
         return rc;
 
-    for (ix = 1; ix < argc; ++ix)
+    if ( n_in_argv_before == 0 )
     {
-        parg = (const char *)VectorGet (&self->argv, ix);
-        if (parg[0] != '-')
+        ix_from = 1;
+        ix_to = argc;
+    }
+    else
+    {
+        ix_from = n_in_argv_before;
+        ix_to = n_in_argv_before + argc;
+    }
+
+    for ( ix = ix_from; ix < ix_to; ++ix )
+    {
+        parg = ( const char * )VectorGet( &self->argv, ix );
+
+        ARGS_DBG( "ArgsParse: parsing '%s' from self->argv", parg );
+
+        if ( parg[ 0 ] != '-' )
         {
             /* we can do this because it is already a (const char *)
              * and (ParamValue *) after the first loop */
-            rc = VectorAppend (&self->params, NULL, parg);
-            if (rc)
+            rc = VectorAppend ( &self->params, NULL, parg );
+            if ( rc )
                 break;
+            ARGS_DBG( "ArgsParse: appending to params '%s'", parg );
         }
         else
         {
             node = NULL;
-            if (parg[1] == '-')
+            if ( parg[ 1 ] == '-' )
             {
-                size_t nlen=string_copy (name, sizeof (name), parg+2, string_size (parg+2));
-                equal_sign = string_chr (name, nlen, '=');
-                if (equal_sign)
+                size_t nlen = string_copy( name, sizeof( name ), parg + 2, string_size( parg + 2 ) );
+                ARGS_DBG( "ArgsParse: '%s' is a '--' parameter!", parg );
+                equal_sign = string_chr( name, nlen, '=' );
+                if ( equal_sign )
                     *equal_sign = '\0';
 
-                node = (Option*)BSTreeFind (&self->names, name, OptionCmp);
-                if (node == NULL)
+                node = ( Option* )BSTreeFind( &self->names, name, OptionCmp );
+                if ( node == NULL )
                 {
-                    rc = RC (rcApp, rcArgv, rcParsing, rcParam, rcUnknown);
-                    fprintf (stderr, "Unknown argument %s\n", name);
-                    break;
+                    qrc = RC( rcApp, rcArgv, rcParsing, rcParam, rcUnknown );
+                    PLOGERR (klogErr,
+                             (klogErr, qrc,
+                              "Unknown argument '$(O)'", "O=%s", name ));
+/*                     break; */
+                    if (orc == 0) /* non-fatal */
+                        orc = qrc;
                 }
                 else
                 {
-                    needs_value = OptionNeedsValue (node);
-                    if (needs_value)
+                    needs_value = OptionNeedsValue( node );
+                    ARGS_DBG( "ArgsParse: found node for parameter '%s'", parg );
+                    if ( needs_value )
                     {
-                        if (equal_sign != NULL)
-                            value = parg + 2 + ((equal_sign+1) - name);
-                        else if( ix + 1 >= argc ) {
-                            rc = RC (rcRuntime, rcArgv, rcParsing, rcParam, rcExhausted);
-                            fprintf (stderr, "Option '%s' is missing a value\n", node->name);
+                        ARGS_DBG( "ArgsParse: parameter '%s' needs value", parg );
+                        if ( equal_sign != NULL )
+                            value = parg + 2 + ( ( equal_sign + 1 ) - name );
+
+                        else if ( ix + 1 >= ix_to )
+                        {
+                            rc = RC( rcRuntime, rcArgv, rcParsing, rcParam, rcExhausted );
+                            PLOGERR (klogErr,
+                                     (klogErr, qrc,"Option '$(O)' is missing a value", "O=%s", node->name ));
                         }
                         else
-                            rc = next_arg (self, &ix, argc, &value);
-
-                        if (rc)
-                            break;
-
-                        assert (value != NULL);
-
-                        value_len = string_size (value);
-
-                        rc = OptionAddValue (node, value, value_len);
-                        if (rc)
                         {
-                            break;
+                            ARGS_DBG( "ArgsParse: calling next_arg()", 0 );
+                            rc = next_arg( self, &ix, ix_to, &value );
                         }
+
+                        if ( rc )
+                            break;
+
+                        assert ( value != NULL );
+
+                        value_len = string_size( value );
+
+                        rc = OptionAddValue( node, value, value_len );
+                        if ( rc )
+                            break;
                     }
                     else
                     {
-                        rc = OptionAddValue (node, NULL, 0);
-                        if (rc)
+                        rc = OptionAddValue( node, NULL, 0 );
+                        if ( rc )
                         {
                             break;
                         }
@@ -882,54 +958,73 @@ KAPP_EXTERN rc_t CC ArgsParse (Args * self, int argc, char *argv[])
                 const char * end;
                 uint32_t name_len;
 
-                end = parg + string_size (parg);
-                for (jx = 1; parg[jx]; jx += name_len)
+                end = parg + string_size( parg );
+                ARGS_DBG( "ArgsParse: '%s' is a '-' parameter!", parg );
+                for ( jx = 1; parg[ jx ]; jx += name_len )
                 {
                     OptAlias *alias;
                     uint32_t c;
 
-                    name_len = utf8_utf32 ( &c, parg+jx, end); 
-                    string_copy (name, sizeof (name), parg+jx, name_len);
+                    name_len = utf8_utf32( &c, parg + jx, end ); 
+                    string_copy( name, sizeof( name ), parg + jx, name_len );
 
-                    alias = (OptAlias*)BSTreeFind (&self->aliases, name, OptAliasCmp);
-                    if (alias == NULL)
+                    alias = ( OptAlias* )BSTreeFind( &self->aliases, name, OptAliasCmp );
+                    if ( alias == NULL )
                     {
-                        rc = RC (rcApp, rcArgv, rcParsing, rcParam, rcUnknown);
-                        fprintf (stderr, "Unknown argument %s\n", name);
+                        qrc = RC( rcApp, rcArgv, rcParsing, rcParam, rcUnknown );
+                        PLOGERR (klogErr,
+                                 (klogErr, qrc,
+                                  "Unknown argument '$(O)'", "O=%s", name ));
+
+                        if (orc == 0)
+                            orc = qrc;
                     }
                     else
                     {
-                        node = OptAliasOption (alias);
-                        if (OptionNeedsValue(node))
+                        node = OptAliasOption( alias );
+                        if ( OptionNeedsValue( node ) )
                         {
-                            if (parg[jx+name_len] == '=')
+                            if ( parg[ jx + name_len ] == '=' )
                             {
                                 ++jx;
-                                if (parg[jx+name_len])
+                                if ( parg[ jx + name_len ] )
                                     value = parg + jx + name_len;
                                 else
                                 {
-                                    rc = RC (rcRuntime, rcArgv, rcParsing, rcParam, rcExhausted);
-                                    fprintf (stderr, "Value missing with alias followed by =\n");
+                                    qrc = RC( rcRuntime, rcArgv, rcParsing, rcParam, rcExhausted );
+                                    LOGERR (klogErr, qrc,
+                                            "Value missing with alias followed by =" );
+                                    if (orc == 0)
+                                        orc = qrc;
+                                    break;
                                 }
                             }
-                            else if(parg[jx+name_len])
+                            else if ( parg[ jx + name_len ] )
                             {
                                 value = parg + jx + name_len;
                             }
-                            else if( ix + 1 >= argc ) {
-                                rc = RC (rcRuntime, rcArgv, rcParsing, rcParam, rcExhausted);
-                                fprintf (stderr, "Option '%s' is missing a value\n", node->name);
+                            else if ( ix + 1 >= ix_to )
+                            {
+                                rc = RC( rcRuntime, rcArgv, rcParsing, rcParam, rcExhausted );
+                                PLOGERR (klogErr,
+                                         (klogErr, rc,
+                                          "Option '$(O)' is missing a value",
+                                          "O=%s", node->name ));
+                                break;
                             }
                             else
-                                value = argv [++ix];
-                            if (rc == 0)
-                                rc = OptionAddValue (node, value, string_size (value));
+                            {
+                                value = ( const char * )VectorGet( &self->argv, ++ix );
+                            }
+                            ARGS_DBG( "ArgsParse: the value of '%s' is '%s'", name, value );
+
+                            if ( rc == 0 )
+                                rc = OptionAddValue( node, value, string_size( value ) );
                             break;
                         }
                         else
                         {
-                            rc = OptionAddValue (node, NULL, 0);
+                            rc = OptionAddValue( node, NULL, 0 );
                             if (rc)
                                 break;
                         }
@@ -937,34 +1032,43 @@ KAPP_EXTERN rc_t CC ArgsParse (Args * self, int argc, char *argv[])
                 }
             }
         }
-        if (rc)
+        if ( rc )
             break;
     }
 
-    /* check for required parameters */
+#if _DEBUGGING
+    (void)ArgsHandleDebug (self);
+#endif
+#if USE_EARLY_HELP
     if (rc == 0)
     {
-        bool b;
-        ArgsReqCheckData r;
-
-
-        b = BSTreeDoUntil (&self->names, false, ArgsCheckRequired, &r);
-        if (b)
-        {
-            fprintf (stderr, "Error missing required parameter %.*s\n",
-                     (int)r.missing_option->size, r.missing_option->name);
-            rc = RC (rcRuntime, rcArgv, rcParsing, rcParam, rcNotFound);
-        }
+        rc = ArgsHandleHelp (self);
+        /* if "help" wasn't found we aren't using standard arguments so don't
+         * call it an error: if OptionGout changes this might have to as well */
+        if (rc == SILENT_RC (rcRuntime, rcArgv, rcAccessing, rcName, rcNotFound))
+            rc = 0;
     }
+#endif
+#if USE_EARLY_VERSION
+    if (rc == 0)
+    {
+        rc = ArgsHandleVersion (self);
+        if (rc == SILENT_RC (rcRuntime, rcArgv, rcAccessing, rcName, rcNotFound))
+            rc = 0;
+    }
+#endif
+    /* now recovery non-fatal errors into final rc */
+    if (rc == 0)
+        rc = orc;
 
-    if (rc) {
+    if ( rc )
+    {
         ReportSilence();
     }
-
     return rc;
 }
 
-KAPP_EXTERN rc_t CC ArgsOptionCount (const Args * self, const char * option_name, uint32_t * count)
+rc_t CC ArgsOptionCount (const Args * self, const char * option_name, uint32_t * count)
 {
     rc_t rc;
 
@@ -980,7 +1084,9 @@ KAPP_EXTERN rc_t CC ArgsOptionCount (const Args * self, const char * option_name
         if (node == NULL)
         {
             rc = RC (rcRuntime, rcArgv, rcAccessing, rcName, rcNotFound);
-            PLOGERR (klogWarn, (klogWarn, rc, "Option name not found '%s'", option_name));
+/* this was removed to shut up about "help" not being found during tests
+            PLOGERR (klogWarn, (klogWarn, rc, "Option name not found '$(S)'", "S=%s", option_name));
+ */
             return rc;
         }
 
@@ -989,7 +1095,7 @@ KAPP_EXTERN rc_t CC ArgsOptionCount (const Args * self, const char * option_name
     }
 }
 
-KAPP_EXTERN rc_t CC ArgsOptionValue (const Args * self, const char * option_name, uint32_t iteration,
+rc_t CC ArgsOptionValue (const Args * self, const char * option_name, uint32_t iteration,
                                      const char ** value_string)
 {
     const Option * node;
@@ -1009,7 +1115,7 @@ KAPP_EXTERN rc_t CC ArgsOptionValue (const Args * self, const char * option_name
         return  OptionGetValue (node, iteration, value_string);
 }
 
-KAPP_EXTERN rc_t CC ArgsParamCount (const Args * self, uint32_t * count)
+rc_t CC ArgsParamCount (const Args * self, uint32_t * count)
 {
     if (self == NULL)
         return RC (rcRuntime, rcArgv, rcAccessing, rcSelf, rcNull);
@@ -1020,7 +1126,7 @@ KAPP_EXTERN rc_t CC ArgsParamCount (const Args * self, uint32_t * count)
     return 0;
 }
 
-KAPP_EXTERN rc_t CC ArgsParamValue (const Args * self, uint32_t iteration, const char ** value_string)
+rc_t CC ArgsParamValue (const Args * self, uint32_t iteration, const char ** value_string)
 {
     if (self == NULL)
         return RC (rcRuntime, rcArgv, rcAccessing, rcSelf, rcNull);
@@ -1038,7 +1144,7 @@ KAPP_EXTERN rc_t CC ArgsParamValue (const Args * self, uint32_t iteration, const
     return 0;
 }
 
-KAPP_EXTERN rc_t CC ArgsArgvCount (const Args * self, uint32_t * count)
+rc_t CC ArgsArgvCount (const Args * self, uint32_t * count)
 {
     if (self == NULL)
         return RC (rcRuntime, rcArgv, rcAccessing, rcSelf, rcNull);
@@ -1052,12 +1158,12 @@ KAPP_EXTERN rc_t CC ArgsArgvCount (const Args * self, uint32_t * count)
 #undef ArgsArgc
 #endif
 
-KAPP_EXTERN rc_t CC ArgsArgc (const Args * self, uint32_t * count)
+rc_t CC ArgsArgc (const Args * self, uint32_t * count)
 {
     return ArgsArgvCount (self, count);
 }
 
-KAPP_EXTERN rc_t CC ArgsArgvValue (const Args * self, uint32_t iteration, const char ** value_string)
+rc_t CC ArgsArgvValue (const Args * self, uint32_t iteration, const char ** value_string)
 {
     if (self == NULL)
         return RC (rcRuntime, rcArgv, rcAccessing, rcSelf, rcNull);
@@ -1078,7 +1184,7 @@ KAPP_EXTERN rc_t CC ArgsArgvValue (const Args * self, uint32_t iteration, const 
 #define USAGE_MAX_SIZE 81
 static
 const char * verbose_usage[] = 
-{ "Increase the verbosity level of the program.",
+{ "Increase the verbosity of the program status messages.",
   "Use multiple times for more verbosity.", NULL };
 static
 const char * debug_usage[] = 
@@ -1086,7 +1192,7 @@ const char * debug_usage[] =
   "All flags if not specified.", NULL };
 static
 const char * help_usage[] = 
-{ "Output a brief explantion for the program.", NULL };
+{ "Output a brief explanation for the program.", NULL };
 static
 const char * report_usage[] = 
 { "Control program execution environment report generation (if implemented).",
@@ -1094,6 +1200,9 @@ const char * report_usage[] =
 static
 const char * version_usage[] = 
 { "Display the version of the program then quit.", NULL };
+static
+const char * optfile_usage[] = 
+{ "Read more options and parameters from the file.", NULL};
 static 
 char log0 [USAGE_MAX_SIZE];
 static 
@@ -1101,6 +1210,9 @@ char log1 [USAGE_MAX_SIZE];
 static
 const char * log_usage[] = 
 { "Logging level as number or enum string.", log0, log1, NULL };
+static
+const char * no_user_settings_usage[] = 
+{ "Turn off user-specific configuration.", NULL };
 
 static
 void CC gen_log_usage (const char ** _buffers)
@@ -1198,11 +1310,26 @@ OptDef StandardOptions[]  =
         verbose_usage,
         OPT_UNLIM, false, false
     },
+#if USE_OPTFILE
+    {
+        OPTION_OPTFILE, ALIAS_OPTFILE, NULL,
+        optfile_usage,
+        OPT_UNLIM, true, false
+    },
+#endif
     {
         OPTION_DEBUG, ALIAS_DEBUG, NULL,
         debug_usage, 
         OPT_UNLIM, true, false
     },
+    {
+        OPTION_NO_USER_SETTINGS, NULL, NULL,
+        no_user_settings_usage,
+        OPT_UNLIM, false, false
+    }
+};
+OptDef ReportOptions[]  =
+{
     {   /* OPTION_REPORT is used in klib/report.c */
         OPTION_REPORT, NULL, NULL,
         report_usage, 
@@ -1210,14 +1337,14 @@ OptDef StandardOptions[]  =
     }
 };
 
-KAPP_EXTERN rc_t CC ArgsAddStandardOptions(Args * self)
+rc_t CC ArgsAddStandardOptions(Args * self)
 {
     return ArgsAddOptionArray (self, StandardOptions,
                                sizeof (StandardOptions) / sizeof (OptDef)
                                /*, NULL, NULL */ );
 }
 
-KAPP_EXTERN rc_t CC ArgsMakeStandardOptions (Args** pself)
+rc_t CC ArgsMakeStandardOptions (Args** pself)
 {
     Args * self;
     rc_t rc;
@@ -1233,7 +1360,7 @@ KAPP_EXTERN rc_t CC ArgsMakeStandardOptions (Args** pself)
     return rc;
 }
 
-KAPP_EXTERN rc_t CC ArgsHandleHelp (Args * self)
+rc_t CC ArgsHandleHelp (Args * self)
 {
     uint32_t count;
     rc_t rc;
@@ -1253,7 +1380,7 @@ KAPP_EXTERN rc_t CC ArgsHandleHelp (Args * self)
 }
 
 
-KAPP_EXTERN rc_t CC ArgsHandleVersion (Args * self)
+rc_t CC ArgsHandleVersion (Args * self)
 {
     uint32_t count;
     rc_t rc;
@@ -1279,7 +1406,7 @@ KAPP_EXTERN rc_t CC ArgsHandleVersion (Args * self)
 }
 
 
-KAPP_EXTERN rc_t CC ArgsHandleLogLevel (const Args * self)
+rc_t CC ArgsHandleLogLevel (const Args * self)
 {
     uint32_t count;
     rc_t rc;
@@ -1309,7 +1436,7 @@ KAPP_EXTERN rc_t CC ArgsHandleLogLevel (const Args * self)
     return rc;
 }
 
-KAPP_EXTERN rc_t CC ArgsHandleStatusLevel (const Args * self)
+rc_t CC ArgsHandleStatusLevel (const Args * self)
 {
     uint32_t count;
     rc_t rc;
@@ -1320,6 +1447,25 @@ KAPP_EXTERN rc_t CC ArgsHandleStatusLevel (const Args * self)
     }
     return rc;
 }
+
+rc_t CC ArgsHandleNoUserSettings (const Args * self)
+{
+    uint32_t count = 0;
+    rc_t rc = ArgsOptionCount (self, OPTION_NO_USER_SETTINGS, &count);
+    if (rc == 0 && count != 0)
+        KConfigDisableUserSettings ();
+    return rc;
+}
+
+
+#if USE_OPTFILE
+rc_t CC ArgsHandleOptfile (Args * self)
+{
+    return Args_parse_inf_file (self, OPTION_OPTFILE);
+}
+#endif
+
+
 #if _DEBUGGING
 rc_t CC ArgsHandleDebug (const Args * self)
 {
@@ -1352,7 +1498,7 @@ rc_t CC ArgsHandleDebug (const Args * self)
 }
 #endif
 
-KAPP_EXTERN rc_t CC ArgsHandleStandardOptions (Args * self)
+rc_t CC ArgsHandleStandardOptions (Args * self)
 {
     rc_t rc;
 
@@ -1361,11 +1507,9 @@ KAPP_EXTERN rc_t CC ArgsHandleStandardOptions (Args * self)
         rc = ArgsHandleHelp (self);
         if (rc)
             break;
-
         rc = ArgsHandleVersion (self);
         if (rc)
             break;
-
         rc = ArgsHandleLogLevel (self);
         if (rc)
             break;
@@ -1374,14 +1518,19 @@ KAPP_EXTERN rc_t CC ArgsHandleStandardOptions (Args * self)
         if (rc)
             break;
 
-#if _DEBUGGING
+        rc = ArgsHandleNoUserSettings (self);
+        if (rc)
+            break;
+
+#if _DEBUGGING 
+	/* called a second time in case more symbols in in files */
         rc = ArgsHandleDebug (self);
 #endif
     } while (0); /* not a real loop */
     return rc;
 }
 
-KAPP_EXTERN rc_t CC ArgsMakeAndHandle (Args ** pself, int argc, char ** argv, uint32_t table_count, ...)
+rc_t CC ArgsMakeAndHandle (Args ** pself, int argc, char ** argv, uint32_t table_count, ...)
 {
     rc_t rc;
     Args * self;
@@ -1390,15 +1539,16 @@ KAPP_EXTERN rc_t CC ArgsMakeAndHandle (Args ** pself, int argc, char ** argv, ui
     rc = ArgsMakeStandardOptions (&self);
     if (rc == 0)
     {
-        do
+        for (;;)
         {
+            /* load added OptDef tables */
             if (table_count)
             {
                 va_list ap;
 
                 va_start (ap, table_count);
 
-                while (table_count-- && (rc == 0))
+                while (table_count--)
                 {
                     OptDef * options;
                     uint32_t opt_count;
@@ -1407,8 +1557,12 @@ KAPP_EXTERN rc_t CC ArgsMakeAndHandle (Args ** pself, int argc, char ** argv, ui
                     opt_count = va_arg (ap, uint32_t);
 
                     rc = ArgsAddOptionArray (self, options, opt_count /* , NULL, NULL */);
+                    if (rc)
+                        break;
                 }
+
                 va_end (ap);
+
                 if (rc)
                     break;
             }
@@ -1417,15 +1571,35 @@ KAPP_EXTERN rc_t CC ArgsMakeAndHandle (Args ** pself, int argc, char ** argv, ui
             if (rc)
                 break;
 
+#if USE_OPTFILE
+            /*
+             * recursively check for files full of options
+             * we want this done before flagging missing arguments
+             */
+            rc = ArgsHandleOptfile (self);
+            if (rc)
+                break;
+#endif
+            /*
+             * now handle (maybe even rehandle except the optfile
+             * the standard arguments all applications/tools support
+             */
             rc = ArgsHandleStandardOptions (self);
             if (rc)
                 break;
 
-            *pself = self;
+            rc = ArgsCheckRequired (self);
+            if (rc)
+            {
+                MiniUsage(self);
+                break;
+            }
 
+            *pself = self;
             return 0;
 
-        } while (0);
+            break;
+        }
     
         ArgsWhack (self);
     }
@@ -1440,7 +1614,7 @@ KAPP_EXTERN rc_t CC ArgsMakeAndHandle (Args ** pself, int argc, char ** argv, ui
  * and quite probably outside of args.
  */
 
-KAPP_EXTERN const char * CC trim_path (const char * full_name)
+const char * CC trim_path (const char * full_name)
 {
     const char * name;
 
@@ -1453,7 +1627,7 @@ KAPP_EXTERN const char * CC trim_path (const char * full_name)
 }
 
 
-KAPP_EXTERN rc_t CC ArgsProgram (const Args * args, const char ** fullpath, const char ** progname)
+rc_t CC ArgsProgram (const Args * args, const char ** fullpath, const char ** progname)
 {
     const char * defaultname = UsageDefaultName;
     const char * f;
@@ -1560,7 +1734,6 @@ static void print_indented( const size_t first_indent, const size_t indent,
 
 void CC HelpOptionLine(const char * alias, const char * option, const char * param, const char ** msgs)
 {
-    int n, msgc;
 /*    const char * msg; */
 #define INDENT 2
 #define MSG_INDENT 35
@@ -1569,25 +1742,36 @@ void CC HelpOptionLine(const char * alias, const char * option, const char * par
     bool has_alias = (alias != NULL && alias[0] != '\0');
     bool has_opt = (option != NULL && option[0] != '\0');
 
-    if( has_alias || has_opt ) {
-        OUTMSG(("%*s%n", INDENT, " ", &n));
-        msgc = n;
-        if( has_alias ) {
+    if( has_alias || has_opt )
+    {
+        int n, msgc;
+
+        OUTMSG(("%*s%n", INDENT, " ", & msgc ));
+
+        if( has_alias )
+        {
             OUTMSG(("-%s%n", alias, &n));
             msgc += n;
         }
-        if( has_alias && has_opt ) {
+
+        if( has_alias && has_opt )
+        {
             OUTMSG(("|"));
             msgc++;
         }
-        if( has_opt ) {
+
+        if( has_opt )
+        {
             OUTMSG(("--%s%n", option, &n));
             msgc += n;
         }
-        if( param != NULL) {
+
+        if( param != NULL)
+        {
             OUTMSG((" <%s>%n", param, &n));
             msgc += n;
         }
+
         print_indented( msgc, MSG_INDENT, MSG_MAXLEN, msgs );
     }
 }
@@ -1624,10 +1808,18 @@ void CC HelpOptionsStandard (void)
     HelpOptionLine (ALIAS_LOG_LEVEL, OPTION_LOG_LEVEL, "level", log_usage);
 
     HelpOptionLine (ALIAS_VERBOSE, OPTION_VERBOSE, NULL, verbose_usage);
-    HelpOptionLine (NULL, OPTION_REPORT, "type", report_usage);
+#if USE_OPTFILE
+    HelpOptionLine (ALIAS_OPTFILE, OPTION_OPTFILE, "file", optfile_usage);
+#endif
 #if _DEBUGGING
     HelpOptionLine (ALIAS_DEBUG, OPTION_DEBUG, "Module[-Flag]", debug_usage); 
 #endif
+}
+
+
+void CC HelpOptionsReport (void)
+{
+    HelpOptionLine (ALIAS_REPORT, OPTION_REPORT, "type", report_usage);
 }
 
 

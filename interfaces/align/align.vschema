@@ -83,7 +83,7 @@ extern function U32 NCBI:align:edit_distance #1
     ( bool has_mismatch, bool has_ref_offset, I32 ref_offset );
     
 extern function U32 NCBI:align:edit_distance #2
-    ( bool has_mismatch, bool has_ref_offset, I32 ref_offset, INSDC:coord:len ref_len )
+    ( bool has_mismatch, bool has_ref_offset, I32 ref_offset, INSDC:coord:len ref_len, *INSDC:coord:len read_len)
   = NCBI:align:edit_distance_2;
 
 /* project_from_sequence
@@ -388,6 +388,12 @@ extern function INSDC:quality:phred NCBI:align:decompress_quality #1
     < INSDC:quality:phred restored_qual_value >
     ( INSDC:quality:phred cmp_quality, bool preserved );
 
+/* make_cmp_read_start
+ *
+ */
+extern function INSDC:coord:zero NCBI:align:make_read_start #1
+    (INSDC:coord:len read_len);
+
 /* make_cmp_read_desc
  *  determines whether an element of "operand" is aligned
  *  by looking at the corresponding element of "align_id"
@@ -414,7 +420,6 @@ extern function < type T >
 T NCBI:align:seq_construct_read #1 (
     T aligned, INSDC:coord:len aligned_read_len,
     T unaligned, INSDC:coord:len unaligned_read_len );
-    
     
 extern function I64 NCBI:align:get_mate_align_id #1 ( I64 spot_id );
 
@@ -446,8 +451,6 @@ table NCBI:align:tbl:ref_block_cmn #1.0.0
         = out_global_ref_start;
 
     // REF_LEN the length of a read projection on reference
-    // extern column < INSDC:coord:len > izip_encoding REF_LEN;
-
     INSDC:coord:len out_ref_len_internal
         = NCBI:align:get_ref_len ( out_has_ref_offset, out_ref_offset );
 
@@ -621,17 +624,22 @@ table NCBI:align:tbl:align_cmn #2
     INSDC:quality:phred out_raw_qual = < INSDC:quality:phred >
         NCBI:align:project_from_sequence < '( INSDC:quality:phred ) QUALITY'> ( .SEQ_SPOT_ID, .SEQ_READ_ID );
     INSDC:quality:phred out_qual_phred
-        = NCBI:align:raw_restore_qual ( out_raw_qual, .REF_ORIENTATION );
-    readonly column INSDC:quality:text:phred_33 SAM_QUALITY = QUALITY; // simple alias
+        = NCBI:align:raw_restore_qual ( out_raw_qual, .REF_ORIENTATION )
+        | < INSDC:quality:phred > echo < 30 > ( out_4na_bin );
+    readonly column INSDC:quality:text:phred_33 SAM_QUALITY = QUALITY ;
 
     // project read group and name
     ascii out_spot_group = < ascii > simple_sub_select < 'SEQUENCE','SPOT_GROUP'> (.SEQ_SPOT_ID);
 
+
+    INSDC:SRA:spotid_t tmp_seq_spot_id
+        = cast ( .SEQ_SPOT_ID )
+        ;
     physical <ascii> zip_encoding .SEQ_NAME = SEQ_NAME;
     extern column ascii SEQ_NAME
         = .SEQ_NAME
         | < ascii > simple_sub_select < 'SEQUENCE','NAME'> (.SEQ_SPOT_ID)
-        | sprintf < "%u" > ( .SEQ_SPOT_ID );
+        | sprintf < "%u" > ( tmp_seq_spot_id );
 
     // compute sam flags
     /* blows up parser: starts at schema-tbl.c:2138
@@ -678,6 +686,7 @@ table NCBI:align:tbl:align_cmn #2
         | < INSDC:SRA:platform_id > simple_sub_select < 'SEQUENCE','PLATFORM'> (.SEQ_SPOT_ID)
         | < INSDC:SRA:platform_id > echo < SRA_PLATFORM_UNDEFINED > ();
 
+    U8 out_alignment_count = <U8> NCBI:align:project_from_sequence < 'ALIGNMENT_COUNT' > ( .SEQ_SPOT_ID, .SEQ_READ_ID );
 
     /* out_read_type
      *  set to SRA_READ_TYPE_FORWARD + SRA_READ_TYPE_BIOLOGICAL
@@ -704,7 +713,7 @@ table NCBI:align:tbl:align_cmn #2
 
     // MAPQ - single value quality of the mapping; the scale is submitter specific
     extern column < I32 > izip_encoding MAPQ;
-    
+
     extern column INSDC:coord:zero MATE_REF_POS = out_mate_ref_pos;
     extern column INSDC:coord:len MATE_REF_LEN = out_mate_ref_len;
     extern column I64 MATE_REF_ID = out_mate_ref_id;
@@ -712,6 +721,7 @@ table NCBI:align:tbl:align_cmn #2
     extern column bool MATE_REF_ORIENTATION = out_mate_ref_orientation;
     readonly column ascii MATE_REF_NAME = NCBI:align:ref_name ( out_mate_ref_id );
     readonly column ascii MATE_REF_SEQ_ID = NCBI:align:ref_seq_id( out_mate_ref_id );
+    readonly column U8 ALIGNMENT_COUNT  = out_alignment_count;
 
 
 /********************************
@@ -773,7 +783,8 @@ table NCBI:align:tbl:align_cmn #2
         | < INSDC:coord:len > NCBI:align:cigar #2 < 0 > (out_has_mismatch, out_has_ref_offset, out_ref_offset, out_read_len);
 
     readonly column U32 EDIT_DISTANCE
-        = NCBI:align:edit_distance #2 (out_has_mismatch, out_has_ref_offset, out_ref_offset, out_ref_len)
+        = NCBI:align:edit_distance #2 (out_has_mismatch, out_has_ref_offset, out_ref_offset, out_ref_len, out_read_len)
+        | NCBI:align:edit_distance #2 (out_has_mismatch, out_has_ref_offset, out_ref_offset, out_ref_len)
         | NCBI:align:edit_distance #1 (out_has_mismatch, out_has_ref_offset, out_ref_offset);
 
     readonly column ascii HAS_MISMATCH = < U8 , ascii > map < [ 0 , 1 ] , '01'  > ( out_has_mismatch );
@@ -807,20 +818,30 @@ table NCBI:align:tbl:align_full #1.0.0
 {
     bool out_is_secondary = <bool> echo < true > ();
     // restore reads to its raw form (orientation is restored)
+
     INSDC:4na:bin out_raw_read
-        = < INSDC:4na:bin > simple_sub_select  < 'PRIMARY_ALIGNMENT', '( INSDC:4na:bin ) RAW_READ' > (PRIMARY_ALIGNMENT_ID)
+        = < INSDC:4na:bin > simple_sub_select  < 'PRIMARY_ALIGNMENT', '( INSDC:4na:bin ) RAW_READ' > (.PRIMARY_ALIGNMENT_ID)
         | < INSDC:4na:bin > NCBI:align:project_from_sequence < '( INSDC:4na:bin ) READ'> ( .SEQ_SPOT_ID, .SEQ_READ_ID );
         
-    INSDC:4na:bin out_4na_bin = NCBI:align:raw_restore_read ( out_raw_read, .REF_ORIENTATION );
+    INSDC:4na:bin out_4na_bin 
+	    = NCBI:align:align_restore_read ( ref_read_internal, out_has_mismatch, tmp_out_mismatch_4na_bin, out_has_ref_offset, out_ref_offset, .READ_LEN )
+	    | NCBI:align:align_restore_read ( ref_read_internal, out_has_mismatch, tmp_out_mismatch_4na_bin, out_has_ref_offset, out_ref_offset )
+    	    | NCBI:align:raw_restore_read ( out_raw_read, .REF_ORIENTATION );
 	
 
     // flags mismatches with the reference
     // produced by actual comparison of REF_READ and READ
+    // TMP_HAS_MISMATCH is a hack to speed up retrieval during coverage recalculation
+    column bool_encoding TMP_HAS_MISMATCH;
     bool out_has_mismatch
-        = NCBI:align:generate_has_mismatch ( REF_READ, READ, out_has_ref_offset, out_ref_offset );
+        = .TMP_HAS_MISMATCH 
+	| NCBI:align:generate_has_mismatch ( REF_READ, READ, out_has_ref_offset, out_ref_offset );
+    readonly column bool HAS_MISMATCH = out_has_mismatch;
 
     INSDC:4na:bin out_mismatch_4na_bin
         = NCBI:align:generate_mismatch ( REF_READ, READ, out_has_ref_offset, out_ref_offset );
+
+    INSDC:4na:bin tmp_out_mismatch_4na_bin =  < INSDC:dna:text, INSDC:4na:bin > map < INSDC:4na:map:CHARSET, INSDC:4na:map:BINSET > ( .TMP_MISMATCH );
 
     // temporary column for reference coverage calculation        
     column < INSDC:dna:text> zip_encoding TMP_MISMATCH;
@@ -868,7 +889,7 @@ table NCBI:align:tbl:align_full #1.0.0
  *  alignment transcript is stored
  *  original sequence is reconstructed
  */
-table NCBI:align:tbl:compressed_by_reference #1.0.0
+table NCBI:align:tbl:compressed_by_reference #1.1.0
     = NCBI:align:tbl:align_cmn #2
 {
     bool out_is_secondary = <bool> echo < false > ();
@@ -891,6 +912,8 @@ table NCBI:align:tbl:compressed_by_reference #1.0.0
 
     INSDC:4na:bin in_mismatch_4na_bin
         = < INSDC:dna:text, INSDC:4na:bin > map < INSDC:4na:map:CHARSET, INSDC:4na:map:BINSET > ( in_mismatch_dna_text );
+
+    extern column < ascii > zip_encoding ALIGN_GROUP;
 
     physical column < INSDC:4na:bin > zip_encoding .MISMATCH = in_mismatch_4na_bin;
     
@@ -932,8 +955,8 @@ table NCBI:align:tbl:compressed_by_reference #1.0.0
 /* align_sorted
  *  deflated alignment data sorted against reference
  */
-table NCBI:align:tbl:align_sorted #1.0.1
-    = NCBI:align:tbl:compressed_by_reference #1.0.0
+table NCBI:align:tbl:align_sorted #1.1.0
+    = NCBI:align:tbl:compressed_by_reference #1.1.0
     , NCBI:align:tbl:global_ref_block #1.0.0
 {
     // 128K
@@ -944,8 +967,8 @@ table NCBI:align:tbl:align_sorted #1.0.1
 /* align_unsorted
  *  deflated alignment unsorted data
  */
-table NCBI:align:tbl:align_unsorted #1.0.1
-    = NCBI:align:tbl:compressed_by_reference #1.0.0
+table NCBI:align:tbl:align_unsorted #1.1.0
+    = NCBI:align:tbl:compressed_by_reference #1.1.0
     , NCBI:align:tbl:local_ref_block #1.0.0
 {
     // 128K
@@ -974,6 +997,19 @@ table NCBI:align:tbl:align_mate_unsorted #1.0.1
     column default limit = 131072;
 };
 
+/* align_allele
+ *  alleles coverage extension
+ */
+table NCBI:align:tbl:align_allele #1.1.0
+    = NCBI:align:tbl:align_unsorted #1.1.0
+{
+    extern column < I64 > izip_encoding EVIDENCE_ALIGNMENT_IDS;
+
+    /*
+    INSDC:quality:phred out_qual_phred
+        = < INSDC:quality:phred > echo < 30 > ( out_4na_bin );
+    */
+};
 
 /*--------------------------------------------------------------------------
  * seq
@@ -1003,6 +1039,9 @@ table NCBI:align:tbl:seq #1.0.0 =
     NCBI:SRA:tbl:spotdesc #1.0.2,
     NCBI:SRA:tbl:stats #1.2.0
 {
+    // 128K
+    column default limit = 131072;
+
     // gets primary record in alignment table (size of column is NREADS)
     // if sorted - should used special encoding
     extern column <I64> izip_encoding PRIMARY_ALIGNMENT_ID;
@@ -1017,69 +1056,273 @@ table NCBI:align:tbl:seq #1.0.0 =
     ascii out_name_fmt = < ascii > echo < '$R' > ();
 
     // temparary column
-    extern column < U32 > izip_encoding TMP_KEY_ID;
+    extern column < U64 > izip_encoding TMP_KEY_ID;
 
     // restored  READ
     INSDC:4na:bin out_dcmp_4na_bin
         = NCBI:align:seq_restore_read (out_cmp_4na_bin, .PRIMARY_ALIGNMENT_ID, .READ_LEN, .READ_TYPE);
     
-    extern column < U32 > izip_encoding TI;
+    extern column < U64 > izip_encoding TI;
 };
 
 
-table NCBI:align:tbl:cs_seq #1.0.0 =
-    NCBI:tbl:color_space #2.1,
-    NCBI:tbl:phred_quality #2.0.4,
-    NCBI:align:tbl:cmp_color_space #1,
-    NCBI:SRA:tbl:spotdesc #1.0.2,
-    NCBI:SRA:tbl:stats #1.2.0
+table NCBI:align:tbl:cs_seq #1.1
 {
-    // gets primary record in alignment table (size of column is NREADS)
-    // if sorted - should used special encoding
-    extern column <I64> izip_encoding PRIMARY_ALIGNMENT_ID;
+    /* writable columns */
+    extern column INSDC:color:text CMP_CSREAD
+        = out_cmp_color_text
+        ;
 
-    INSDC:coord:zero trim_start = < INSDC:coord:zero > echo < 0 > ();
-    INSDC:coord:len trim_len = _spot_len;
+    extern column < INSDC:dna:text > zip_encoding CS_KEY;
 
-    // size is NREADS
+    extern default column < INSDC:quality:phred > zip_encoding QUALITY;
+
+    extern column < I64 > izip_encoding PRIMARY_ALIGNMENT_ID;
+
     extern column < U8 > zip_encoding ALIGNMENT_COUNT;
 
-    // auto-generate name from row-id
-    ascii out_name_fmt = < ascii > echo < '$R' > ();
+    extern column < INSDC:SRA:platform_id > zip_encoding PLATFORM;
 
-    // temparary column
-    extern column < U32 > izip_encoding TMP_KEY_ID;
+    extern column < ascii > zip_encoding LABEL;
+    extern column < INSDC:coord:zero > izip_encoding LABEL_START;
+    extern column < INSDC:coord:len > izip_encoding LABEL_LEN;
 
-    // aligned read start
-    INSDC:coord:zero out_aligned_read_start
-        = < INSDC:coord:zero > NCBI:align:make_cmp_read_desc < false > ( .READ_START, .PRIMARY_ALIGNMENT_ID );
+    extern column < INSDC:SRA:xread_type > zip_encoding READ_TYPE;
+    extern column < INSDC:coord:zero > izip_encoding READ_START;
+    extern column < INSDC:coord:len > izip_encoding READ_LEN;
+    extern column < INSDC:SRA:read_filter > zip_encoding READ_FILTER;
 
-    // aligned read length
-    INSDC:coord:len out_aligned_read_len
-        = < INSDC:coord:len > NCBI:align:make_cmp_read_desc < false > ( .READ_LEN, .PRIMARY_ALIGNMENT_ID );
+    extern column < U64 > izip_encoding TMP_KEY_ID;
 
-    // aligned dna
-    INSDC:4na:bin dummy_cmp_4na_bin = < INSDC:4na:bin > echo < 0 > ();
-    INSDC:4na:bin out_aligned_4na_bin
-        = NCBI:align:seq_restore_read (dummy_cmp_4na_bin, .PRIMARY_ALIGNMENT_ID, out_aligned_read_len, .READ_TYPE);
+    extern column < ascii > zip_encoding SPOT_GROUP;
 
-    // aligned x2na
-    INSDC:x2na:bin out_aligned_x2na_bin
-        = < INSDC:4na:bin, INSDC:x2na:bin > map < INSDC:4na:map:BINSET, [ 4,0,1,4,2,4,4,4,3,4,4,4,4,4,4,4 ] > ( out_aligned_4na_bin );
+    extern column < U64 > izip_encoding TI;
 
-    // aligned color
-    INSDC:x2cs:bin out_aligned_x2cs_bin
-        = NCBI:color_from_dna ( out_aligned_x2na_bin, out_aligned_read_start, out_aligned_read_len, out_cs_key, out_color_matrix );
+    /* writing rules */
+    INSDC:x2cs:bin in_cmp_x2cs_bin
+        = < INSDC:color:text, INSDC:x2cs:bin > map < INSDC:x2cs:map:CHARSET, INSDC:x2cs:map:BINSET > ( CMP_CSREAD )
+        ;
+    INSDC:2cs:bin in_cmp_2cs_bin
+        = < INSDC:x2cs:bin, INSDC:2cs:bin > map < INSDC:x2cs:map:BINSET, [ 0, 1, 2, 3, 0 ] > ( in_cmp_x2cs_bin )
+        ;
+    INSDC:x2cs:bin in_cmp_alt_x2cs_bin
+        = < INSDC:x2cs:bin, INSDC:x2cs:bin > map < INSDC:x2cs:map:BINSET, [ 0, 0, 0, 0, 4 ] > ( in_cmp_x2cs_bin )
+        ;
+    physical column INSDC:2cs:packed .CMP_CSREAD
+        = ( INSDC:2cs:packed ) pack ( in_cmp_2cs_bin )
+        ;
+    physical column < INSDC:x2cs:bin > zip_encoding .CMP_ALTCSREAD
+        = < INSDC:x2cs:bin > trim < ALIGN_LEFT, 0 > ( in_cmp_alt_x2cs_bin )
+        ;
 
-    // unaligned read length
-    INSDC:coord:len out_unaligned_read_len
-        = < INSDC:coord:len > NCBI:align:make_cmp_read_desc < true > ( .READ_LEN, .PRIMARY_ALIGNMENT_ID );
+    /* reading rules */
+    INSDC:2cs:packed phys_cmp_2cs_packed
+        = .CMP_CSREAD
+        ;
+    INSDC:x2cs:bin phys_cmp_alt_x2cs_bin
+        = .CMP_ALTCSREAD
+        ;
+    INSDC:2cs:packed phys_2cs_packed
+        = .CSREAD
+        ;
+    INSDC:x2cs:bin phys_alt_x2cs_bin
+        = .ALTCSREAD
+        ;
+    INSDC:2cs:bin out_cmp_2cs_bin
+        = ( INSDC:2cs:bin ) unpack ( phys_cmp_2cs_packed )
+        ;
+    INSDC:2cs:bin out_2cs_bin
+        = ( INSDC:2cs:bin ) unpack ( phys_2cs_packed )
+        ;
+    INSDC:x2cs:bin out_cmp_x2cs_bin
+        = ( INSDC:x2cs:bin ) < U8 > bit_or < ALIGN_RIGHT > ( out_cmp_2cs_bin, phys_cmp_alt_x2cs_bin )
+        | ( INSDC:x2cs:bin ) out_cmp_2cs_bin
+        ;
+    INSDC:x2cs:bin out_x2cs_bin
+        = ( INSDC:x2cs:bin ) < U8 > bit_or < ALIGN_RIGHT > ( out_2cs_bin, phys_alt_x2cs_bin )
+        | ( INSDC:x2cs:bin ) out_2cs_bin
+        ;
+     INSDC:color:text out_cmp_color_text
+        = < INSDC:x2cs:bin, INSDC:color:text > map <  INSDC:x2cs:map:BINSET, INSDC:x2cs:map:CHARSET > ( out_cmp_x2cs_bin )
+        ;
+     INSDC:color:text out_color_text
+        = < INSDC:x2cs:bin, INSDC:color:text > map <  INSDC:x2cs:map:BINSET, INSDC:x2cs:map:CHARSET > ( out_x2cs_bin )
+        ;
 
-    // restored CSREAD
+    /* triggers from stats */
+    INSDC:quality:phred in_qual_phred
+        = QUALITY
+        ;
+    INSDC:coord:len in_read_len
+        = READ_LEN
+        ;
+    INSDC:SRA:xread_type in_read_type
+        = READ_TYPE
+        ;
+    ascii in_spot_group
+        = SPOT_GROUP
+        ;
+    trigger meta_stats
+        = NCBI:SRA:cmp_stats_trigger ( in_cmp_x2cs_bin, in_qual_phred, in_read_len, in_read_type, in_spot_group )
+        | NCBI:SRA:cmp_stats_trigger ( in_cmp_x2cs_bin, in_qual_phred, in_read_len, in_read_type )
+        ;
+    trigger qual_stats
+        = NCBI:SRA:phred_stats_trigger #1 ( in_qual_phred )
+        ;
+};
+
+table NCBI:align:view:cs_seq #1.1 = NCBI:align:tbl:cs_seq #1.1
+{
+    // various READ columns
+    default readonly column INSDC:dna:text READ
+        = < INSDC:4na:bin, INSDC:dna:text > map < INSDC:4na:map:BINSET, INSDC:4na:map:CHARSET > ( out_dcmp_4na_bin )
+        | < INSDC:4na:bin, INSDC:dna:text > map < INSDC:4na:map:BINSET, INSDC:4na:map:CHARSET > ( out_4na_bin )
+        ;
+    readonly column INSDC:4na:bin READ = out_dcmp_4na_bin | out_4na_bin;
+    readonly column INSDC:4na:packed READ = pack ( out_dcmp_4na_bin ) | pack ( out_4na_bin );
+    readonly column INSDC:x2na:bin READ = out_dcmp_x2na_bin | out_x2na_bin;
+    readonly column INSDC:2na:bin READ = out_dcmp_2na_bin | out_2na_bin;
+    INSDC:2na:bin out_dcmp_2na_bin
+        = < INSDC:x2na:bin, INSDC:2na:bin > map < INSDC:x2na:map:BINSET, [ 0, 1, 2, 3, 0 ] > ( out_dcmp_x2na_bin )
+        ;
+    INSDC:2na:bin out_2na_bin
+        = < INSDC:x2na:bin, INSDC:2na:bin > map < INSDC:x2na:map:BINSET, [ 0, 1, 2, 3, 0 ] > ( out_x2na_bin )
+        ;
+    readonly column INSDC:2na:packed READ = pack ( out_dcmp_2na_bin ) | pack ( out_2na_bin );
+
+    // decompression in base space
+    INSDC:coord:len cmp_read_len
+        = < INSDC:coord:len > NCBI:align:make_cmp_read_desc #1 < true > ( .READ_LEN, .PRIMARY_ALIGNMENT_ID )
+        ;
+    INSDC:coord:zero cmp_read_start
+        = NCBI:align:make_read_start #1 ( cmp_read_len )
+        ; 
+    INSDC:x2na:bin out_cmp_x2na_bin
+        = NCBI:dna_from_color #1 ( out_cmp_x2cs_bin, cmp_read_start, cmp_read_len, .CS_KEY, color_matrix )
+        ;
+    INSDC:x2na:bin out_x2na_bin
+        = NCBI:dna_from_color #1 ( out_x2cs_bin, .READ_START, .READ_LEN, .CS_KEY, color_matrix )
+        ;
+    INSDC:4na:bin out_cmp_4na_bin
+        = < INSDC:x2na:bin, INSDC:4na:bin > map < INSDC:x2na:map:BINSET, [ 1, 2, 4, 8, 15 ] > ( out_cmp_x2na_bin )
+        ;
+    INSDC:4na:bin out_4na_bin
+        = < INSDC:x2na:bin, INSDC:4na:bin > map < INSDC:x2na:map:BINSET, [ 1, 2, 4, 8, 15 ] > ( out_x2na_bin )
+        ;
+    INSDC:4na:bin out_dcmp_4na_bin
+        = NCBI:align:seq_restore_read ( out_cmp_4na_bin, .PRIMARY_ALIGNMENT_ID, .READ_LEN, .READ_TYPE )
+        ;
+
+
+    // various CSREAD columns
+    default readonly column INSDC:color:text CSREAD
+        = < INSDC:x2cs:bin, INSDC:color:text > map <  INSDC:x2cs:map:BINSET, INSDC:x2cs:map:CHARSET > ( out_dcmp_x2cs_bin )
+        | out_color_text;
+    readonly column INSDC:x2cs:bin CSREAD = out_dcmp_x2cs_bin | out_x2cs_bin;
+    readonly column INSDC:2cs:bin CSREAD = out_dcmp_2cs_bin | out_2cs_bin;
+    INSDC:2cs:bin out_dcmp_2cs_bin
+        = < INSDC:x2cs:bin, INSDC:2cs:bin > map < INSDC:x2cs:map:BINSET, [ 0, 1, 2, 3, 0 ] > ( out_dcmp_x2cs_bin )
+        ;
+    readonly column INSDC:2cs:packed CSREAD = pack ( out_dcmp_2cs_bin ) | out_2cs_bin;
+
+
+    // decompression in color space
+    INSDC:x2na:bin out_dcmp_x2na_bin
+        = < INSDC:4na:bin, INSDC:x2na:bin > map < INSDC:4na:map:BINSET, [ 4,0,1,4,2,4,4,4,3,4,4,4,4,4,4,4 ] > ( out_dcmp_4na_bin )
+        ;
+    INSDC:x2cs:bin out_dcmp_x2na_x2cs_bin
+        = NCBI:color_from_dna #1 ( out_dcmp_x2na_bin, .READ_START, .READ_LEN, .CS_KEY, color_matrix )
+        ;
+    INSDC:coord:len aligned_read_len
+        = < INSDC:coord:len > NCBI:align:make_cmp_read_desc #1 < false > ( .READ_LEN, .PRIMARY_ALIGNMENT_ID )
+        ; 
     INSDC:x2cs:bin out_dcmp_x2cs_bin
-        = < INSDC:x2cs:bin > NCBI:align:seq_construct_read (out_aligned_x2cs_bin, out_aligned_read_len, out_cmp_x2cs_bin, out_unaligned_read_len);
-    
-    extern column < U32 > izip_encoding TI;
+        = < INSDC:x2cs:bin > NCBI:align:seq_construct_read #1 ( out_dcmp_x2na_x2cs_bin, .READ_LEN, out_cmp_x2cs_bin, cmp_read_len )
+        ;
+
+    // CS_NATIVE - dynamic
+    U32 cmp_csread_row_len
+        = row_len #1 ( phys_cmp_2cs_packed )
+        ;
+    U32 cmp_csread_not_zero
+        = < U32 > clip < 0, 1 > ( cmp_csread_row_len )
+        ;
+    readonly column bool CS_NATIVE
+        = < U32, bool > map < [ 0, 1 ], [ false, true ] > ( cmp_cs_read_not_zero )
+        ;
+
+    // COLOR_MATRIX
+    readonly column U8 COLOR_MATRIX
+        = color_matrix
+        ;
+    U8 color_matrix
+        = < U8 > echo < INSDC:color:default_matrix > ()
+        ;
+
+    // various QUALITY types
+    readonly column INSDC:quality:text:phred_33 QUALITY
+        = out_qual_text_phred_33
+        | ( INSDC:quality:text:phred_33 ) < B8 > sum < 33 > ( .QUALITY );
+    readonly column INSDC:quality:text:phred_64 QUALITY
+        = out_qual_text_phred_64
+        | ( INSDC:quality:text:phred_64 ) < B8 > sum < 64 > ( .QUALITY );
+
+    // SPOT_LEN
+    INSDC:coord:len spot_len
+        = ( INSDC:coord:len ) row_len ( out_dcmp_4na_bin )
+        ;
+    readonly column INSDC:coord:len SPOT_LEN = spot_len;
+
+    // TRIM_START
+    readonly column INSDC:coord:zero TRIM_START
+        = < INSDC:coord:zero > echo < 0 > ()
+        ;
+    readonly column INSDC:coord:one TRIM_START
+        = < INSDC:coord:one > echo < 1 > ()
+        ;
+    // TRIM_LEN
+    readonly column INSDC:coord:len TRIM_LEN = spot_len;
+
+    // MIN_SPOT_ID
+    readonly column INSDC:SRA:spotid_t MIN_SPOT_ID
+        = < INSDC:SRA:spotid_t > meta:value < "STATS/TABLE/SPOT_MIN" > ()
+        ;
+    // MAX_SPOT_ID
+    readonly column INSDC:SRA:spotid_t MAX_SPOT_ID
+        = < INSDC:SRA:spotid_t > meta:value < "STATS/TABLE/SPOT_MAX" > ()
+        ;
+    // SPOT_COUNT
+    readonly column U64 SPOT_COUNT
+        = < U64 > meta:value < "STATS/TABLE/SPOT_COUNT" > ()
+        ;
+    // BASE_COUNT
+    U64 base_count
+        = < U64 > meta:value < "STATS/TABLE/BASE_COUNT" > ()
+        ;
+    readonly column U64 BASE_COUNT = base_count;
+    // BIO_BASE_COUNT
+    readonly column U64 BIO_BASE_COUNT
+        = < U64 > meta:value < "STATS/TABLE/BIO_BASE_COUNT" > ()
+        ;
+    // CMP_BASE_COUNT
+    readonly column U64 CMP_BASE_COUNT
+        = < U64 > meta:value < "STATS/TABLE/CMP_BASE_COUNT" > ()
+        | base_count
+        ;
+
+    // various PLATFORM
+    // TBD
+
+    // SPOT_ID
+    I64 rowid_64 = row_id ();
+    readonly column INSDC:SRA:spotid_t SPOT_ID
+        = cast ( rowid_64 )
+        ;
+        
+    readonly column ascii NAME
+        = sprintf < "%u" > ( SPOT_ID )
+        ;
+
 };
 
 
@@ -1180,18 +1423,18 @@ table NCBI:align:tbl:reference #2 =
     // List of row ids from alignment tables
     extern column < I64 > izip_encoding PRIMARY_ALIGNMENT_IDS;
     extern column < I64 > izip_encoding SECONDARY_ALIGNMENT_IDS;
-    extern column < I64 > izip_encoding EVIDENCE_ALIGNMENT_IDS;
+    extern column < I64 > izip_encoding EVIDENCE_INTERVAL_IDS;
+
+    // both OVERLAP_REF_* columns are array of three elements, matching number of *_IDS columns above.
+    // points back to an offset where the alignments to this chunk start
+    extern column < INSDC:coord:zero > izip_encoding OVERLAP_REF_POS;
+    // indicates the length of the longest tail of the alignmnent to this chunk which start in previous chunks
+    // if value of an element in this col is zero corresponding value of OVERLAP_REF_POS is meaningless
+    extern column < INSDC:coord:len > izip_encoding OVERLAP_REF_LEN;
 
     // Mechanism to seach for NAME 
     readonly column vdb:row_id_range NAME_RANGE
         = idx:text:lookup < 'i_name', 'QUERY_SEQ_NAME' > ();
-
-    // both OVERLAP_REF_* columns are array of three elements, matching number of *_ALIGNMENT_IDS columns above.
-    // points back to an offset where the alignments to this chunk start
-    extern column < INSDC:coord:zero > izip_encoding OVERLAP_REF_POS;
-    // indicates the length of the tail of the longest alignmnent to this chunk
-    // if value of an element in this col is zero corresponding value of OVERLAP_REF_POS is meaningless
-    extern column < INSDC:coord:len > izip_encoding OVERLAP_REF_LEN;
 
     // Fully instantiates READ
     INSDC:4na:bin out_dcmp_4na_bin
@@ -1199,34 +1442,46 @@ table NCBI:align:tbl:reference #2 =
 }
 
 // THE DATABASES
-database NCBI:align:db:alignment_sorted #1.1
+database NCBI:align:db:alignment_sorted #1.2.1
 {
     table NCBI:align:tbl:reference #2 REFERENCE;
-    table NCBI:align:tbl:align_sorted #1.0 PRIMARY_ALIGNMENT;
+    table NCBI:align:tbl:align_sorted #1.1 PRIMARY_ALIGNMENT;
     table NCBI:align:tbl:align_mate_sorted #1.0 SECONDARY_ALIGNMENT;
     table NCBI:align:tbl:seq #1.0 SEQUENCE;
-    table NCBI:align:tbl:cs_seq #1.0 CS_SEQUENCE;
+    table NCBI:align:view:cs_seq #1.1 CS_SEQUENCE;
     table NCBI:align:tbl:qstat #1.0 QUAL_STAT;
 };
 
-database NCBI:align:db:alignment_unsorted #1.1
+database NCBI:align:db:alignment_unsorted #1.2.1
 {
     table NCBI:align:tbl:reference #2 REFERENCE;
-    table NCBI:align:tbl:align_unsorted #1.0 PRIMARY_ALIGNMENT;
+    table NCBI:align:tbl:align_unsorted #1.1 PRIMARY_ALIGNMENT;
     table NCBI:align:tbl:align_mate_unsorted #1.0 SECONDARY_ALIGNMENT;
     table NCBI:align:tbl:seq #1.0 SEQUENCE;
-    table NCBI:align:tbl:cs_seq #1.0 CS_SEQUENCE;
+    table NCBI:align:view:cs_seq #1.1 CS_SEQUENCE;
     table NCBI:align:tbl:qstat #1.0 QUAL_STAT;
 };
 
-database NCBI:align:db:alignment_evidence #1.1
+database NCBI:align:db:alignment_evidence #1.2.1
 {
     table NCBI:align:tbl:reference #2 REFERENCE;
-    table NCBI:align:tbl:align_unsorted #1.0 PRIMARY_ALIGNMENT;
+    table NCBI:align:tbl:align_unsorted #1.1 PRIMARY_ALIGNMENT;
     table NCBI:align:tbl:align_mate_unsorted #1.0 SECONDARY_ALIGNMENT;
-    table NCBI:align:tbl:align_unsorted #1.0 EVIDENCE_INTERVAL;
+    table NCBI:align:tbl:align_allele #1.1 EVIDENCE_INTERVAL;
     table NCBI:align:tbl:align_mate_unsorted #1.0 EVIDENCE_ALIGNMENT;
     table NCBI:align:tbl:seq #1.0 SEQUENCE;
-    table NCBI:align:tbl:cs_seq #1.0 CS_SEQUENCE;
+    table NCBI:align:view:cs_seq #1.1 CS_SEQUENCE;
+    table NCBI:align:tbl:qstat #1.0 QUAL_STAT;
+};
+
+database NCBI:align:db:alignment_evidence_sorted #1.0.1
+{
+    table NCBI:align:tbl:reference #2 REFERENCE;
+    table NCBI:align:tbl:align_sorted #1.1 PRIMARY_ALIGNMENT;
+    table NCBI:align:tbl:align_mate_sorted #1.0 SECONDARY_ALIGNMENT;
+    table NCBI:align:tbl:align_allele #1.1 EVIDENCE_INTERVAL;
+    table NCBI:align:tbl:align_mate_unsorted #1.0 EVIDENCE_ALIGNMENT;
+    table NCBI:align:tbl:seq #1.0 SEQUENCE;
+    table NCBI:align:view:cs_seq #1.1 CS_SEQUENCE;
     table NCBI:align:tbl:qstat #1.0 QUAL_STAT;
 };

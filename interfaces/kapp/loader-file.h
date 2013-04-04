@@ -36,6 +36,8 @@
 
 #include <stdarg.h>
 
+#include <klib/log.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif

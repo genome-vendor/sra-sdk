@@ -63,6 +63,11 @@
 #include <os-native.h>
 #include <sysalloc.h>
 
+#include <kproc/lock.h>
+#include <kproc/cond.h>
+#include <kproc/thread.h>
+
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -188,77 +193,45 @@ int CC NamedParamNodeComp ( const BSTNode *A, const BSTNode *B )
 
     return StringOrderNoNullCheck ( & a -> name, & b -> name );
 }
-
-
 /*--------------------------------------------------------------------------
- * VBlobCache
+ * LinkedCursorNode
  */
-typedef struct VBlobCache VBlobCache;
-struct VBlobCache
+
+typedef struct LinkedCursorNode LinkedCursorNode;
+struct LinkedCursorNode
 {
-    BSTNode bn;
-    DLNode ln;
-    size_t size;
-    const VBlob *blob;
-    uint32_t col_idx;
+    BSTNode n;
+    char tbl[64];
+    VCursor *curs;
 };
 
 static
-void CC VBlobCacheWhack ( BSTNode *n, void *ignore )
+void CC LinkedCursorNodeWhack ( BSTNode *n, void *ignore )
 {
-    VBlobCache *self = ( VBlobCache* ) n;
-    VBlobRelease ( ( VBlob* ) self -> blob );
+    LinkedCursorNode *self = ( LinkedCursorNode* ) n;
+    VCursorRelease (  self -> curs );
     free ( self );
 }
 
 static
-rc_t VBlobCacheMake ( VBlobCache **bcp, const VBlob *blob, uint32_t col_idx, size_t blob_size )
+int CC LinkedCursorComp ( const void *item, const BSTNode *n )
 {
-    VBlobCache *bc = malloc ( sizeof * bc );
-    if ( bc == NULL )
-        return RC ( rcVDB, rcCursor, rcReading, rcMemory, rcExhausted );
+    const char *tbl = item;
+    const LinkedCursorNode *node = ( const LinkedCursorNode* ) n;
 
-    bc -> size = blob_size;
-    bc -> blob = blob;
-    bc -> col_idx = col_idx;
-    * bcp = bc;
-    return 0;
-}
-
-typedef struct VBlobCacheKey VBlobCacheKey;
-struct VBlobCacheKey
-{
-    int64_t row_id;
-    uint32_t col_idx;
-};
-
-static
-int CC VBlobCacheCmp ( const void *a, const BSTNode *b )
-{
-    const VBlobCacheKey * key = a;
-    const VBlobCache * node = ( const VBlobCache* ) b;
-
-    if ( key -> col_idx != node -> col_idx )
-        return ( int ) key -> col_idx - ( int ) node -> col_idx;
-
-    if ( key -> row_id < node -> blob -> start_id )
-        return -1;
-    return key -> row_id > node -> blob -> stop_id;
+    return strncmp ( tbl, node -> tbl, sizeof(node -> tbl) );
 }
 
 static
-int CC VBlobCacheSort ( const BSTNode *a, const BSTNode *b )
+int CC LinkedCursorNodeComp ( const BSTNode *A, const BSTNode *B )
 {
-    const VBlobCache * item = ( const VBlobCache* ) a;
-    const VBlobCache * node = ( const VBlobCache* ) b;
+    const LinkedCursorNode *a = (const LinkedCursorNode *) A;
+    const LinkedCursorNode *b = (const LinkedCursorNode *) B;
 
-    if ( item -> col_idx != node -> col_idx )
-        return ( int ) item -> col_idx - ( int ) node -> col_idx;
-
-    if ( item -> blob -> stop_id < node -> blob -> start_id )
-        return -1;
-    return item -> blob -> start_id > node -> blob -> stop_id;
+    return strncmp ( a -> tbl, b -> tbl,sizeof(a->tbl) );
 }
+
+
 
 /*--------------------------------------------------------------------------
  * VCursor
@@ -275,22 +248,12 @@ static void CC VCursorVColumnWhack_checked( void *item, void *data )
  */
 rc_t VCursorDestroy ( VCursor *self )
 {
-    int i;
     KRefcountWhack ( & self -> refcount, "VCursor" );
-
-    BSTreeWhack ( & self -> blob_cache, VBlobCacheWhack, NULL );
-    DLListInit ( & self -> blob_lru );
-    for(i=0;i<LAST_BLOB_CACHE_SIZE;i++){
-        if(self -> last_blob_cache[i]) {
-            VBlobRelease(self -> last_blob_cache[i]);
-            self->last_blob_cache[i] = NULL;
-        }
-    }
-
+    VBlobMRUCacheDestroy ( self->blob_mru_cache);
     if ( self -> user_whack != NULL )
         ( * self -> user_whack ) ( self -> user );
-
     BSTreeWhack ( & self -> named_params, NamedParamNodeWhack, NULL );
+    BSTreeWhack ( & self -> linked_cursors, LinkedCursorNodeWhack, NULL );
     VCursorCacheWhack ( & self -> col, NULL, NULL );
     VCursorCacheWhack ( & self -> phys, VPhysicalWhack, NULL );
     VCursorCacheWhack ( & self -> prod, NULL, NULL );
@@ -356,7 +319,7 @@ rc_t VCursorMake ( VCursor **cursp, const VTable *tbl )
 
     /* create a structure */
     curs = calloc ( 1, sizeof * curs );
-    if ( tbl == NULL )
+    if ( curs == NULL )
         rc = RC ( rcVDB, rcCursor, rcConstructing, rcMemory, rcExhausted );
     else
     {
@@ -378,6 +341,7 @@ rc_t VCursorMake ( VCursor **cursp, const VTable *tbl )
                 KRefcountInit ( & curs -> refcount, 1, "VCursor", "make", "vcurs" );
                 curs -> state = vcConstruct;
                 curs -> permit_add_column = true;
+		curs -> suspend_triggers  = false;
                 * cursp = curs;
                 return 0;
             }
@@ -536,48 +500,61 @@ rc_t VCursorSupplementSchema ( const VCursor *self )
  *  "capacity" [ IN ] - the maximum bytes to cache on the cursor before
  *  dropping least recently used blobs
  */
+static rc_t VTableCreateCachedCursorReadImpl(const VTable *self, const VCursor **cursp, size_t capacity,bool create_pagemap_thread);
 LIB_EXPORT rc_t CC VTableCreateCachedCursorRead ( const VTable *self,
     const VCursor **cursp, size_t capacity )
 {
+	return VTableCreateCachedCursorReadImpl(self,cursp,capacity,true);
+}
+/**
+*** VTableCreateCursorReadInternal is only visible in vdb and needed for schema resolutions
+****/
+rc_t  VTableCreateCursorReadInternal(const VTable *self, const VCursor **cursp)
+{
+	return VTableCreateCachedCursorReadImpl(self,cursp,0,false);
+}
+static rc_t VTableCreateCachedCursorReadImpl ( const VTable *self,
+    const VCursor **cursp, size_t capacity, bool create_pagemap_thread  )
+{
     rc_t rc;
-
 #if DISABLE_READ_CACHE
     capacity = 0;
 #endif
-
     if ( cursp == NULL )
         rc = RC ( rcVDB, rcTable, rcOpening, rcParam, rcNull );
-    else
-    {
+    else {
         if ( self == NULL )
             rc = RC ( rcVDB, rcTable, rcOpening, rcSelf, rcNull );
-        else
-        {
+        else {
             VCursor *curs;
-
 #if LAZY_OPEN_COL_NODE
             if ( self -> col_node == NULL )
                 KMetadataOpenNodeRead ( self -> meta, & ( ( VTable* ) self ) -> col_node, "col" );
 #endif
             rc = VCursorMake ( & curs, self );
-            if ( rc == 0 )
-            {
-                curs -> blob_cache_capacity = capacity;
+            if ( rc == 0 ) {
+		curs -> blob_mru_cache = VBlobMRUCacheMake(capacity);
                 curs -> read_only = true;
                 rc = VCursorSupplementSchema ( curs );
+               
+#if 0  
+		if(create_pagemap_thread && capacity > 0 && rc == 0 )
+			rc = VCursorLaunchPagemapThread ( curs );
+#endif
                 if ( rc == 0 )
                 {
+		    if(capacity > 0)
+			curs->launch_cnt = 5;
+		    else
+			curs->launch_cnt=200;
                     * cursp = curs;
                     return 0;
                 }
-
                 VCursorRelease ( curs );
             }
         }
-
         * cursp = NULL;
     }
-
     return rc;
 }
 
@@ -612,6 +589,25 @@ LIB_EXPORT rc_t CC VCursorPermitPostOpenAdd ( const VCursor *cself )
     else
     {
         self -> permit_post_open_add = true;
+        rc = 0;
+    }
+
+    return rc;
+}
+/*  SuspendTriggers
+ *  blocks resolution of schema-based triggers
+ *  
+ */
+LIB_EXPORT rc_t CC VCursorSuspendTriggers ( const VCursor *cself )
+{
+    rc_t rc;
+    VCursor *self = ( VCursor* ) cself;
+
+    if ( self == NULL )
+        rc = RC ( rcVDB, rcCursor, rcUpdating, rcSelf, rcNull );
+    else
+    {
+        self -> suspend_triggers = true;
         rc = 0;
     }
 
@@ -988,21 +984,24 @@ struct VCursorIdRangeData
 static
 bool CC column_id_range ( void *item, void *data )
 {
-    int64_t first, last;
-    VCursorIdRangeData *pb = data;
+    if ( ( size_t ) item > 8 )
+    {
+        int64_t first, last;
+        VCursorIdRangeData *pb = data;
 
-    rc_t rc = VColumnIdRange ( ( const void* ) item, & first, & last );
+        rc_t rc = VColumnIdRange ( ( const void* ) item, & first, & last );
 
-    if ( GetRCState ( rc ) == rcEmpty )
-        return false;
+        if ( GetRCState ( rc ) == rcEmpty )
+            return false;
 
-    if ( ( pb -> rc = rc ) != 0 )
-        return true;
+        if ( ( pb -> rc = rc ) != 0 )
+            return true;
 
-    if ( first < pb -> first )
-        pb -> first = first;
-    if ( last > pb -> last )
-        pb -> last = last;
+        if ( first < pb -> first )
+            pb -> first = first;
+        if ( last > pb -> last )
+            pb -> last = last;
+    }
 
     return false;
 }
@@ -1122,54 +1121,58 @@ struct VProdResolveData
 static
 bool CC VCursorResolveColumn ( void *item, void *data )
 {
-    void *ignore;
-    VCursor *self;
-
-    VColumn *col = item;
-    VProdResolveData *pb = data;
-    SColumn *scol = ( SColumn* ) col -> scol;
-
-    VProduction *src = NULL;
-    pb -> rc = VProdResolveColumnRoot ( & pb -> pr, & src, scol );
-    if ( pb -> rc == 0 )
+    if ( item != NULL )
     {
-        if ( src > FAILED_PRODUCTION )
-        {
-            /* repair for incomplete implicit column decl */
-            if ( scol -> td . type_id == 0 )
-                scol -> td = src -> fd . td;
+        void *ignore;
+        VCursor *self;
 
-            return false;
+        VColumn *col = item;
+        VProdResolveData *pb = data;
+        SColumn *scol = ( SColumn* ) col -> scol;
+
+        VProduction *src = NULL;
+        pb -> rc = VProdResolveColumnRoot ( & pb -> pr, & src, scol );
+        if ( pb -> rc == 0 )
+        {
+            if ( src > FAILED_PRODUCTION )
+            {
+                /* repair for incomplete implicit column decl */
+                if ( scol -> td . type_id == 0 )
+                    scol -> td = src -> fd . td;
+
+                return false;
+            }
+
+            pb -> rc = RC ( rcVDB, rcCursor, rcOpening, rcColumn, rcUndefined );
         }
 
-        pb -> rc = RC ( rcVDB, rcCursor, rcOpening, rcColumn, rcUndefined );
-    }
-
-    /* check for tolerance */
-    self = pb -> pr . curs;
-    if ( ! pb -> pr . ignore_column_errors )
-    {
-        if ( ! self -> permit_post_open_add )
+        /* check for tolerance */
+        self = pb -> pr . curs;
+        if ( ! pb -> pr . ignore_column_errors )
         {
-            PLOGERR ( klogErr, ( klogErr, pb -> rc, "failed to resolve column '$(name)' idx '$(idx)'",
-                       "name=%.*s,idx=%u"
-                       , ( int ) scol -> name -> name . size
-                       , scol -> name -> name . addr
-                       , col -> ord ));
+            if ( ! self -> permit_post_open_add )
+            {
+                PLOGERR ( klogErr, ( klogErr, pb -> rc, "failed to resolve column '$(name)' idx '$(idx)'",
+                                     "name=%.*s,idx=%u"
+                                     , ( int ) scol -> name -> name . size
+                                     , scol -> name -> name . addr
+                                     , col -> ord ));
+            }
+
+            return true;
         }
 
-        return true;
+        /* remove from row and cache */
+        VectorSwap ( & self -> row, col -> ord, NULL, & ignore );
+        VCursorCacheSwap ( & self -> col, & scol -> cid, NULL, & ignore );
+
+        /* dump the VColumn */
+        VColumnWhack ( col, NULL );
+
+        /* return no-error */
+        pb -> rc = 0;
     }
 
-    /* remove from row and cache */
-    VectorSwap ( & self -> row, col -> ord, NULL, & ignore );
-    VCursorCacheSwap ( & self -> col, & scol -> cid, NULL, & ignore );
-
-    /* dump the VColumn */
-    VColumnWhack ( col, NULL );
-
-    /* return no-error */
-    pb -> rc = 0;
     return false;
 }
 
@@ -1363,121 +1366,152 @@ rc_t VCursorCloseRowRead ( VCursor *self )
  */
 static
 rc_t VCursorReadColumnDirectInt ( const VCursor *cself, int64_t row_id, uint32_t col_idx,
-    uint32_t *elem_bits, const void **base, uint32_t *boff, uint32_t *row_len )
+    uint32_t *elem_bits, const void **base, uint32_t *boff, uint32_t *row_len,
+    const VBlob **rslt )
 {
-    rc_t rc;
-    VBlobCache *bc;
-    VBlobCacheKey bck;
-    const VBlob *blob;
+    rc_t rc,rc_cache=0;
     const VColumn *col;
-    size_t blob_size =sizeof(VBlobCache) + sizeof(VBlob);
+    const VBlob *blob;
 
     col = ( const void* ) VectorGet ( & cself -> row, col_idx );
     if ( col == NULL )
         return RC ( rcVDB, rcCursor, rcReading, rcColumn, rcInvalid );
 
     /* 2.0 behavior if not caching */
-    if ( cself -> blob_cache_capacity == 0 )
-        return VColumnRead ( col, row_id, elem_bits, base, boff, row_len );
+    if ( cself -> blob_mru_cache == NULL )
+        return VColumnRead ( col, row_id, elem_bits, base, boff, row_len, (VBlob**) rslt );
 
     /* check MRU blob */
-    if(col_idx <= LAST_BLOB_CACHE_SIZE){
-	blob = cself->last_blob_cache[col_idx-1];
-	if(blob && row_id >= blob->start_id && row_id <= blob->stop_id){
-		return VColumnReadCachedBlob ( col, blob, row_id, elem_bits, base, boff, row_len );
-	}
-    }
-
-
-    /* check cache for entry */
-
-    bck . row_id = row_id;
-    bck . col_idx = col_idx;
-    bc = ( VBlobCache* ) BSTreeFind ( & cself -> blob_cache, & bck, VBlobCacheCmp );
-    if ( bc != NULL )
-    {
-	/* save in MRU */
-	VCursor *self=(VCursor *)cself;
-	if(col_idx <= LAST_BLOB_CACHE_SIZE){
-		if(self->last_blob_cache[col_idx-1])
-			VBlobRelease(self->last_blob_cache[col_idx-1]);
-		self->last_blob_cache[col_idx-1] = (VBlob*)bc->blob;
-		rc = VBlobAddRef (self->last_blob_cache[col_idx-1]);
-		if(rc != 0) return rc;
-	}
-	/* maintain LRU */
-	DLListUnlink(& self -> blob_lru,&bc->ln);
-	DLListPushHead(&self->blob_lru,&bc->ln);
-	
+    blob = VBlobMRUCacheFind(cself->blob_mru_cache,col_idx,row_id);
+    if(blob){
         /* ask column to read from blob */
-        return VColumnReadCachedBlob ( col, bc -> blob, bck . row_id, elem_bits, base, boff, row_len );
+	assert(row_id >= blob->start_id && row_id <= blob->stop_id);
+        return VColumnReadCachedBlob ( col, blob, row_id, elem_bits, base, boff, row_len);
     }
-
-    /* ask column to produce a blob to be cached */
-    rc = VColumnReadBlob ( col, & blob, bck . row_id, elem_bits, base, boff, row_len );
-    if ( rc != 0 || blob == NULL )
+    { /* ask column to produce a blob to be cached */
+	VBlobMRUCacheCursorContext cctx;
+	cctx.cache=cself -> blob_mru_cache;
+	cctx.col_idx = col_idx;
+	rc = VColumnReadBlob(col,&blob,row_id,elem_bits,base,boff,row_len,&cctx);
+    }
+    if ( rc != 0 || blob == NULL ){
+	if(rslt) *rslt = NULL;
         return rc;
-
-     blob_size += KDataBufferBytes(&blob->data)
-                + KDataBufferBytes(&blob->pm->cstorage)
-                + KDataBufferBytes(&blob->pm->dstorage)
-                + KDataBufferBytes(&blob->pm->istorage);
-
-    if(   blob -> no_cache 
-       || blob_size <= 4*1024 /*** do not cache very small blobs ****/
-       || blob_size > cself->blob_cache_capacity ){
-	VBlobRelease ( ( VBlob* ) blob );
-	return 0;
     }
+    if(blob->stop_id > blob->start_id + 4)
+	    rc_cache=VBlobMRUCacheSave(cself->blob_mru_cache, col_idx, blob);
+    if(rslt==NULL){ /** user does not care about the blob ***/
+	if( rc_cache == 0){
+		VBlobRelease((VBlob*)blob);
+	} /** else the memory will leak **/
+    } else {
+	*rslt=blob;
+    }
+    return 0;
+}
 
-    /* now cache the blob */
-    rc = VBlobCacheMake ( & bc, blob, col_idx, blob_size );
-    if ( rc != 0 )
-        VBlobRelease ( ( VBlob* ) blob );
+/* GetBlob
+ *  retrieve a blob of data containing the current row id
+ * GetBlobDirect
+ *  retrieve a blob of data containing the requested row id
+ *
+ *  "blob" [ OUT ] - return parameter for a new reference
+ *  to VBlob containing requested cell. NB - must be released
+ *  via VBlobRelease when no longer needed.
+ *
+ *  "row_id" [ IN ] - allows ReadDirect random access to any cell
+ *  in column
+ *
+ *  "col_idx" [ IN ] - index of column to be read, returned by "AddColumn"
+ */
+LIB_EXPORT rc_t CC VCursorGetBlob ( const VCursor *self,
+    const VBlob **blob, uint32_t col_idx )
+{
+    rc_t rc;
+
+    if ( blob == NULL )
+        rc = RC ( rcVDB, rcCursor, rcAccessing, rcParam, rcNull );
     else
     {
-        /* mutable cache object */
-        VCursor *self = ( VCursor* ) cself;
-
-        /* attempt an unique insertion */
-        VBlobCache *existing;
-        rc = BSTreeInsertUnique ( & self -> blob_cache,
-            & bc -> bn, ( BSTNode** ) & existing, VBlobCacheSort );
-        if ( rc != 0 )
-            VBlobCacheWhack ( & bc -> bn, NULL );
+        if ( self == NULL )
+            rc = RC ( rcVDB, rcCursor, rcAccessing, rcSelf, rcNull );
+        else if ( ! self -> read_only )
+            rc = RC ( rcVDB, rcCursor, rcReading, rcCursor, rcWriteonly );
         else
         {
-	    /* remember in col_idx - specific MRU **/
-	    if(col_idx <= LAST_BLOB_CACHE_SIZE){
-		if(self->last_blob_cache[col_idx-1])
-			VBlobRelease(self->last_blob_cache[col_idx-1]);
-		self->last_blob_cache[col_idx-1] = (VBlob*)blob;
-		rc = VBlobAddRef (self->last_blob_cache[col_idx-1]);
-		if(rc != 0) return rc;
-	    }
-            /* perform accounting */
-            self -> blob_cache_contents += blob_size;
-            while ( self -> blob_cache_contents > self -> blob_cache_capacity )
+            const void *base;
+            uint32_t elem_bits, boff, row_len;
+
+            switch ( self -> state )
             {
-                /* get least recently used */
-                DLNode *last = DLListPopTail ( & self -> blob_lru );
-                if ( last == NULL )
-                    break;
-
-                /* drop blob */
-                existing = ( VBlobCache* ) ( ( char* ) last - sizeof existing -> bn );
-		
-                BSTreeUnlink ( & self -> blob_cache, & existing -> bn );
-                self -> blob_cache_contents -= existing -> size;
-                VBlobCacheWhack ( & existing -> bn, NULL );
+            case vcConstruct:
+                rc = RC ( rcVDB, rcCursor, rcReading, rcCursor, rcNotOpen );
+                break;
+            case vcReady:
+                rc = RC ( rcVDB, rcCursor, rcReading, rcRow, rcNotOpen );
+                break;
+            case vcRowOpen:
+                rc = VCursorReadColumnDirectInt
+                    ( self, self -> row_id, col_idx, &elem_bits, &base, &boff, &row_len, blob );
+                if ( rc == 0 )
+                {
+                    rc = VBlobAddRef ( ( VBlob* ) *blob );
+                    if ( rc == 0 )
+                        return 0;
+                }
+                break;
+            default:
+                rc = RC ( rcVDB, rcCursor, rcReading, rcCursor, rcInvalid );
             }
-
-            /* insert at head of list */
-            DLListPushHead ( & self -> blob_lru, & bc -> ln );
         }
-    }
 
-    return 0;
+        * blob = NULL;
+    }
+    return rc;
+}
+
+LIB_EXPORT rc_t CC VCursorGetBlobDirect ( const VCursor *self,
+    const VBlob **blob, int64_t row_id, uint32_t col_idx )
+{
+    rc_t rc;
+
+    if ( blob == NULL )
+        rc = RC ( rcVDB, rcCursor, rcAccessing, rcParam, rcNull );
+    else
+    {
+        if ( self == NULL )
+            rc = RC ( rcVDB, rcCursor, rcAccessing, rcSelf, rcNull );
+        else if ( ! self -> read_only )
+            rc = RC ( rcVDB, rcCursor, rcReading, rcCursor, rcWriteonly );
+        else
+        {
+            const void *base;
+            uint32_t elem_bits, boff, row_len;
+
+            switch ( self -> state )
+            {
+            case vcConstruct:
+                rc = RC ( rcVDB, rcCursor, rcReading, rcCursor, rcNotOpen );
+                break;
+            case vcReady:
+            case vcRowOpen:
+                rc = VCursorReadColumnDirectInt
+                    ( self, row_id, col_idx, &elem_bits, &base, &boff, &row_len, blob );
+                if ( rc == 0 )
+                {
+                    rc = VBlobAddRef ( ( VBlob* ) *blob );
+                    if ( rc == 0 )
+                        return 0;
+                }
+                break;
+            default:
+                rc = RC ( rcVDB, rcCursor, rcReading, rcCursor, rcInvalid );
+            }
+        }
+
+        * blob = NULL;
+    }
+    return rc;
 }
 
 static
@@ -1498,7 +1532,8 @@ rc_t VCursorReadColumnDirect ( const VCursor *self, int64_t row_id, uint32_t col
         return RC ( rcVDB, rcCursor, rcReading, rcCursor, rcInvalid );
     }
 
-    return VCursorReadColumnDirectInt ( self, row_id, col_idx, elem_bits, base, boff, row_len );
+    return VCursorReadColumnDirectInt
+        ( self, row_id, col_idx, elem_bits, base, boff, row_len, NULL );
 }
 
 
@@ -1509,17 +1544,32 @@ rc_t VCursorReadColumn ( const VCursor *self, uint32_t col_idx,
     if ( ! self -> read_only )
         return RC ( rcVDB, rcCursor, rcReading, rcCursor, rcWriteonly );
 
-    if ( self -> state != vcRowOpen ) switch ( self -> state )
+    switch ( self -> state )
     {
     case vcConstruct:
         return RC ( rcVDB, rcCursor, rcReading, rcCursor, rcNotOpen );
     case vcReady:
         return RC ( rcVDB, rcCursor, rcReading, rcRow, rcNotOpen );
+    case vcRowOpen:
+        break;
     default:
         return RC ( rcVDB, rcCursor, rcReading, rcCursor, rcInvalid );
     }
 
-    return VCursorReadColumnDirectInt ( self, self -> row_id, col_idx, elem_bits, base, boff, row_len );
+    return VCursorReadColumnDirectInt
+        ( self, self -> row_id, col_idx, elem_bits, base, boff, row_len, NULL );
+}
+
+static __inline__
+bool bad_elem_bits ( uint32_t elem_size, uint32_t elem_bits )
+{
+    if ( elem_size != elem_bits )
+    {
+        if ( elem_size < elem_bits && elem_bits % elem_size != 0 )
+            return true;
+        return ( elem_size % elem_bits != 0 );
+    }
+    return false;
 }
 
 LIB_EXPORT rc_t CC VCursorRead ( const VCursor *self, uint32_t col_idx,
@@ -1542,9 +1592,7 @@ LIB_EXPORT rc_t CC VCursorRead ( const VCursor *self, uint32_t col_idx,
                 & base, & boff, row_len );
             if ( rc == 0 )
             {
-                if ( elem_size < elem_bits && elem_bits % elem_size != 0 )
-                    rc = RC ( rcVDB, rcCursor, rcReading, rcType, rcInconsistent );
-                else if ( elem_size > elem_bits && elem_size % elem_bits != 0 )
+                if ( bad_elem_bits ( elem_size, elem_bits ) )
                     rc = RC ( rcVDB, rcCursor, rcReading, rcType, rcInconsistent );
                 else if ( * row_len != 0 )
                 {
@@ -1603,9 +1651,7 @@ LIB_EXPORT rc_t CC VCursorReadDirect ( const VCursor *self, int64_t row_id, uint
                 & elem_size, & base, & boff, row_len );
             if ( rc == 0 )
             {
-                if ( elem_size < elem_bits && elem_bits % elem_size != 0 )
-                    rc = RC ( rcVDB, rcCursor, rcReading, rcType, rcInconsistent );
-                else if ( elem_size > elem_bits && elem_size % elem_bits != 0 )
+                if ( bad_elem_bits ( elem_size, elem_bits ) )
                     rc = RC ( rcVDB, rcCursor, rcReading, rcType, rcInconsistent );
                 else if ( * row_len != 0 )
                 {
@@ -1694,13 +1740,13 @@ LIB_EXPORT rc_t CC VCursorReadBits ( const VCursor *self, uint32_t col_idx,
                 & base, & boff, num_read );
             if ( rc == 0 )
             {
-                if ( elem_size < elem_bits && elem_bits % elem_size != 0 )
-                    rc = RC ( rcVDB, rcCursor, rcReading, rcType, rcInconsistent );
-                else if ( elem_size > elem_bits && elem_size % elem_bits != 0 )
+                if ( bad_elem_bits ( elem_size, elem_bits ) )
                     rc = RC ( rcVDB, rcCursor, rcReading, rcType, rcInconsistent );
                 else if ( * num_read != 0 )
                 {
                     uint64_t to_read = * num_read * elem_size;
+                    uint64_t doff = start * elem_bits;
+                    to_read = to_read > doff ? to_read - doff : 0;
                     if ( blen == 0 )
                     {
                         * num_read = 0;
@@ -1720,7 +1766,7 @@ LIB_EXPORT rc_t CC VCursorReadBits ( const VCursor *self, uint32_t col_idx,
                             * remaining = (uint32_t)( ( to_read - bsize ) / elem_bits );
                             to_read = bsize;
                         }
-                        bitcpy ( buffer, off, base, boff, ( bitsz_t ) to_read );
+                        bitcpy ( buffer, off, base, boff + doff, ( bitsz_t ) to_read );
                         * num_read = ( uint32_t ) ( to_read / elem_bits );
                         return 0;
                     }
@@ -1761,13 +1807,13 @@ LIB_EXPORT rc_t CC VCursorReadBitsDirect ( const VCursor *self, int64_t row_id, 
                 & elem_size, & base, & boff, num_read );
             if ( rc == 0 )
             {
-                if ( elem_size < elem_bits && elem_bits % elem_size != 0 )
-                    rc = RC ( rcVDB, rcCursor, rcReading, rcType, rcInconsistent );
-                else if ( elem_size > elem_bits && elem_size % elem_bits != 0 )
+                if ( bad_elem_bits ( elem_size, elem_bits ) )
                     rc = RC ( rcVDB, rcCursor, rcReading, rcType, rcInconsistent );
                 else if ( * num_read != 0 )
                 {
                     uint64_t to_read = * num_read * elem_size;
+                    uint64_t doff = start * elem_bits;
+                    to_read = to_read > doff ? to_read - doff : 0;
                     if ( blen == 0 )
                     {
                         * num_read = 0;
@@ -1787,7 +1833,7 @@ LIB_EXPORT rc_t CC VCursorReadBitsDirect ( const VCursor *self, int64_t row_id, 
                             * remaining = (uint32_t)( ( to_read - bsize ) / elem_bits );
                             to_read = bsize;
                         }
-                        bitcpy ( buffer, off, base, boff, ( bitsz_t ) to_read );
+                        bitcpy ( buffer, off, base, boff + doff, ( bitsz_t ) to_read );
                         * num_read = ( uint32_t ) ( to_read / elem_bits );
                         return 0;
                     }
@@ -2042,6 +2088,51 @@ LIB_EXPORT rc_t CC VCursorSetUserData ( const VCursor *cself,
     return 0;
 }
 
+LIB_EXPORT rc_t CC VCursorLinkedCursorGet(const VCursor *cself,const char *tbl,VCursor const **curs)
+{
+    LinkedCursorNode *node;
+    VCursor *self = (VCursor *)cself;
+
+    if(cself == NULL)
+        return RC(rcVDB, rcCursor, rcAccessing, rcSelf, rcNull);
+    if(tbl == NULL)
+        return RC(rcVDB, rcCursor, rcAccessing, rcName, rcNull);
+    if(tbl[0] == '\0')
+        return RC(rcVDB, rcCursor, rcAccessing, rcName, rcEmpty);
+    node = (LinkedCursorNode *)BSTreeFind(&self->linked_cursors, tbl, LinkedCursorComp);
+    if (node == NULL)
+        return RC(rcVDB, rcCursor, rcAccessing, rcName, rcNotFound);
+
+    *curs = node->curs;
+    return 0;
+}
+LIB_EXPORT rc_t CC VCursorLinkedCursorSet(const VCursor *cself,const char *tbl,VCursor const *curs)
+{
+    LinkedCursorNode *node;
+    VCursor *self = (VCursor *)cself;
+    rc_t rc;
+
+    if(cself == NULL)
+        return RC(rcVDB, rcCursor, rcAccessing, rcSelf, rcNull);
+    if(tbl == NULL)
+        return RC(rcVDB, rcCursor, rcAccessing, rcName, rcNull);
+    if(tbl[0] == '\0')
+        return RC(rcVDB, rcCursor, rcAccessing, rcName, rcEmpty);
+
+    node = malloc(sizeof(*node));
+    if (node == NULL)
+            return RC(rcVDB, rcCursor, rcAccessing, rcMemory, rcExhausted);
+    strncpy(node->tbl,tbl,sizeof(node->tbl));
+    node->curs=(VCursor*)curs;
+    rc = BSTreeInsertUnique(&self->linked_cursors, (BSTNode *)node, NULL, LinkedCursorNodeComp);
+    if (rc)
+       free(node); 
+    else 
+	VCursorAddRef(curs);
+    return rc;
+}
+
+
 /* private */
 LIB_EXPORT rc_t CC VCursorParamsGet( struct VCursorParams const *cself,
     const char *Name, KDataBuffer **value )
@@ -2183,4 +2274,84 @@ LIB_EXPORT rc_t CC VCursorParamsUnset( struct VCursorParams const *cself, const 
 LIB_EXPORT struct VSchema const * CC VCursorGetSchema ( struct VCursor const *self )
 {
     return self ? self->schema : NULL;
+}
+
+
+static rc_t run_pagemap_thread ( const KThread *t, void *data )
+{
+    rc_t rc;
+    VCursor *self = data;
+    /* acquire lock */
+    MTCURSOR_DBG (( "run_pagemap_thread: acquiring lock\n" ));
+    while((rc = KLockAcquire ( self -> pmpr.lock ))==0){
+CHECK_AGAIN:
+	switch(self->pmpr.state){
+	 case ePMPR_STATE_NONE: 		/* wait for new request */
+	 case ePMPR_STATE_SERIALIZE_DONE: 	/* wait for result pickup **/
+	 case ePMPR_STATE_DESERIALIZE_DONE:	/* wait for result pickup **/
+		MTCURSOR_DBG (( "run_pagemap_thread: waiting for new request\n" ));
+		rc = KConditionWait ( self -> pmpr.cond, self -> pmpr.lock );
+		goto CHECK_AGAIN;
+	 case ePMPR_STATE_EXIT: /** exit requested ***/
+		MTCURSOR_DBG (( "run_pagemap_thread: exit by request\n" ));
+		KLockUnlock(self -> pmpr.lock);
+		return 0;
+	 case ePMPR_STATE_DESERIALIZE_REQUESTED:
+		MTCURSOR_DBG (( "run_pagemap_thread: request to deserialize\n" ));
+		self->pmpr.rc = PageMapDeserialize(&self->pmpr.pm,self->pmpr.data.base,self->pmpr.data.elem_count,self->pmpr.row_count);
+		if(self->pmpr.rc == 0){
+			self->pmpr.rc=PageMapExpandFull(self->pmpr.pm);
+			/*self->pmpr.rc=PageMapExpand(self->pmpr.pm,self->pmpr.row_count<2048?self->pmpr.row_count-1:2048);*/
+			assert(self->pmpr.rc == 0);
+		}
+		self->pmpr.state = ePMPR_STATE_DESERIALIZE_DONE;
+		/*fprintf(stderr,"Pagemap %p Done R:%6d|DR:%d|LR:%d\n",self->pmpr.lock, self->pmpr.pm->row_count,self->pmpr.pm->data_recs,self->pmpr.pm->leng_recs);*/
+		KLockUnlock(self -> pmpr.lock);
+		KConditionSignal ( self -> pmpr.cond );
+		break;
+	 case ePMPR_STATE_SERIALIZE_REQUESTED:
+		MTCURSOR_DBG (( "run_pagemap_thread: request to serialize\n" ));
+		self->pmpr.rc = PageMapSerialize(self->pmpr.pm,&self->pmpr.data,0,&self->pmpr.elem_count);
+		self->pmpr.state = ePMPR_STATE_SERIALIZE_DONE;
+		KLockUnlock(self -> pmpr.lock);
+		KConditionSignal ( self -> pmpr.cond );
+		break;
+	 default:
+		assert(0);
+		KLockUnlock(self -> pmpr.lock);
+		return RC(rcVDB, rcPagemap, rcConverting, rcParam, rcInvalid );
+	 
+	}
+    }
+    MTCURSOR_DBG (( "run_pagemap_thread: exit\n" ));
+    return rc;
+}
+
+rc_t CC VCursorLaunchPagemapThread(VCursor *curs)
+{
+	rc_t rc;
+	curs -> pagemap_thread = NULL; /** if fails - will not use **/
+	rc = KLockMake ( & curs -> pmpr.lock );
+	if(rc == 0)
+		rc = KConditionMake ( & curs -> pmpr.cond );
+	if(rc == 0)
+		rc = KThreadMake ( & curs -> pagemap_thread, run_pagemap_thread, curs );
+	return rc;
+}
+rc_t CC VCursorTerminatePagemapThread(VCursor *self)
+{
+	rc_t rc=0;
+	if(self -> pagemap_thread != NULL){
+		rc = KLockAcquire ( self -> pmpr.lock );
+		if ( rc == 0 ){
+			self -> pmpr.state = ePMPR_STATE_EXIT;
+			KConditionSignal ( self -> pmpr.cond );
+			KLockUnlock ( self -> pmpr.lock );
+		}
+		KThreadWait ( self -> pagemap_thread, NULL );
+	}
+	KThreadRelease ( self -> pagemap_thread );
+	KConditionRelease ( self -> pmpr.cond );
+	KLockRelease ( self -> pmpr.lock );
+	return rc;
 }

@@ -42,16 +42,16 @@ ALL_LIBS = \
 #-------------------------------------------------------------------------------
 # outer targets
 #
-std: makedirs download-$(OS)
+std: makedirs download
 	@ $(MAKE_CMD) $(TARGDIR)/$@
 
 all: makedirs download
 	@ $(MAKE_CMD) $(TARGDIR)/$@
 
-$(INT_LIBS): makedirs download-$(OS)
+$(INT_LIBS): makedirs download
 	@ $(MAKE_CMD) $(ILIBDIR)/$@
 
-$(EXT_LIBS): makedirs download-$(OS)
+$(EXT_LIBS): makedirs download
 	@ $(MAKE_CMD) $(LIBDIR)/$@
 
 .PHONY: all std $(ALL_LIBS)
@@ -66,7 +66,7 @@ $(TARGDIR)/all: $(LIBDIR)/libbz2
 #-------------------------------------------------------------------------------
 # std
 #
-$(TARGDIR)/std: $(LIBDIR)/libbz2-$(OS)
+$(TARGDIR)/std: $(LIBDIR)/libbz2
 
 .PHONY: $(TARGDIR)/std
 
@@ -74,43 +74,18 @@ $(TARGDIR)/std: $(LIBDIR)/libbz2-$(OS)
 # clean
 #
 clean: stdclean
+	@ rm -f libbz2.vers
 
-deep-clean: clean
-	rm -f *.[ch] *.def *.vers *.gz
-
-.PHONY: clean deep-clean
-
-#-------------------------------------------------------------------------------
-# libbz2-$(OS)
-#
-$(LIBDIR)/libbz2-linux: $(LIBDIR)/libbz2-linux-$(BITS)
-
-NORMALLY_HAVE = \
-	unix \
-	linux-64 \
-	mac \
-	sun
-
-DONT_HAVE = \
-	linux-32 \
-	win
-
-LIBBZ2_SYS_HAS_LIB = \
-	$(addprefix $(LIBDIR)/libbz2-,$(NORMALLY_HAVE))
-
-$(LIBBZ2_SYS_HAS_LIB):
-	@ true
-
-LIBBZ2_SYS_NEEDS_LIB = \
-	$(addprefix $(LIBDIR)/libbz2-,$(DONT_HAVE))
-
-$(LIBBZ2_SYS_NEEDS_LIB): $(LIBDIR)/libbz2
-
+.PHONY: clean
 
 #-------------------------------------------------------------------------------
 # libbz2
 #
+ifeq (win,$(OS))
 $(LIBDIR)/libbz2: $(addprefix $(LIBDIR)/libbz2.,$(LIBEXT))
+else
+$(LIBDIR)/libbz2: $(addprefix $(LIBDIR)/libbz2.,$(LIBX))
+endif
 
 LIBBZ2_SRC = \
 	blocksort \
@@ -134,40 +109,52 @@ $(LIBDIR)/libbz2.$(LIBX): $(LIBBZ2_OBJ)
 
 
 #-------------------------------------------------------------------------------
-# download-$(OS)
-#
-download-linux: download-linux-$(BITS)
-
-LIBBZ2_SYS_HAS_SRC = \
-	$(addprefix download-,$(NORMALLY_HAVE))
-
-$(LIBBZ2_SYS_HAS_SRC):
-	@ true
-
-LIBBZ2_SYS_NEEDS_SRC = \
-	$(addprefix download-,$(DONT_HAVE))
-
-$(LIBBZ2_SYS_NEEDS_SRC): download
-
-
-#-------------------------------------------------------------------------------
 # libbz2 download
 #
 BZIP2_VERS := \
 	1.0.6
 
-bzip2-$(BZIP2_VERS).tar.gz:
+BZIP2_TAR = \
+	bzip2-$(BZIP2_VERS).tar
+
+BZIP2_TAR_GZ = \
+	$(BZIP2_TAR).gz
+
+ifeq (win,$(OS))
+ECHO_VERS = echo -ne $(BZIP2_VERS) "\n"
+else
+ECHO_VERS = echo $(BZIP2_VERS)
+endif
+
+ifeq (sun,$(OS))
+	BZIP2_TAR_GET = $(BZIP2_TAR)
+	TAR_CMD = tar -xf
+else
+	BZIP2_TAR_GET = $(BZIP2_TAR_GZ)
+	TAR_CMD = tar --no-same-owner -x -z -f
+endif
+
+ifeq (mac,$(OS))
+RETRIEVE = curl -O
+else
+RETRIEVE = wget
+endif
+
+$(BZIP2_TAR_GZ):
 	@ echo downloading the sources
-	wget http://bzip.org/$(BZIP2_VERS)/bzip2-$(BZIP2_VERS).tar.gz
+	$(RETRIEVE) http://bzip.org/$(BZIP2_VERS)/bzip2-$(BZIP2_VERS).tar.gz
 	@ touch $@
 
-libbz2.vers: bzip2-$(BZIP2_VERS).tar.gz
+$(BZIP2_TAR): $(BZIP2_TAR_GZ)
+	gzcat $^ > $@
+
+libbz2.vers: $(BZIP2_TAR_GET)
 	@ echo unpacking the sources
-	tar --no-same-owner -x -z -f $^
+	$(TAR_CMD) $^
 	mv bzip2-$(BZIP2_VERS)/*.[ch] .
 	mv bzip2-$(BZIP2_VERS)/*.def .
-	rm -rf bzip2-$(BZIP2_VERS)
-	@ echo -ne $(BZIP2_VERS)"\n" > $@
+	-rm -rf bzip2-$(BZIP2_VERS)
+	@ $(ECHO_VERS) > $@
 
 download: libbz2.vers
 

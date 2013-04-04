@@ -126,7 +126,7 @@ LIB_EXPORT rc_t CC TableReaderRefSeq_MakeTable(const TableReaderRefSeq** cself, 
     }
     if( rc == 0 ) {
         *cself = self;
-        ALIGN_DBG("table 0x%p opened 0x%p", table, self);
+        /* ALIGN_DBG("table 0x%p opened 0x%p", table, self); */
     } else {
         TableReaderRefSeq_Whack(self);
         ALIGN_DBGERRP("table for 0x%p", rc, table);
@@ -147,7 +147,7 @@ LIB_EXPORT rc_t CC TableReaderRefSeq_MakePath(const TableReaderRefSeq** cself, c
         VTableRelease(tbl);
     }
     if( rc == 0 ) {
-        ALIGN_DBG("table %s opened 0x%p", path, *cself);
+        /* ALIGN_DBG("table %s opened 0x%p", path, *cself); */
     } else {
         ALIGN_DBGERRP("table for %s", rc, path);
     }
@@ -157,7 +157,7 @@ LIB_EXPORT rc_t CC TableReaderRefSeq_MakePath(const TableReaderRefSeq** cself, c
 LIB_EXPORT void CC TableReaderRefSeq_Whack(const TableReaderRefSeq* cself)
 {
     if( cself != NULL ) {
-        ALIGN_DBG("table 0x%p closed", cself);
+        /* ALIGN_DBG("table 0x%p closed", cself); */
         TableReader_Whack(cself->base);
         free((TableReaderRefSeq*)cself);
     }

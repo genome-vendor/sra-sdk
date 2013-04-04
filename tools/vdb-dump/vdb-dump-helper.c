@@ -275,13 +275,12 @@ bool vdh_take_this_table_from_db( dump_context *ctx, const VDatabase *my_databas
 }
 
 
-static void vdh_print_full_col_info( dump_context *ctx,
+static rc_t vdh_print_full_col_info( dump_context *ctx,
                                      const p_col_def col_def,
                                      const VSchema *my_schema )
 {
-    char *s_domain;
-
-    s_domain = vdcd_make_domain_txt( col_def->type_desc.domain );
+    rc_t rc = 0;
+    char * s_domain = vdcd_make_domain_txt( col_def->type_desc.domain );
     if ( s_domain != NULL )
     {
         if ( ctx->table == NULL )
@@ -291,81 +290,82 @@ static void vdh_print_full_col_info( dump_context *ctx,
 
         if ( ( ctx->table != NULL )&&( col_def->name != NULL ) )
         {
-            OUTMSG ( ( "%s.%.02d : (%.3d bits [%.02d], %8s)  %s",
+            rc = KOutMsg( "%s.%.02d : (%.3d bits [%.02d], %8s)  %s",
                     ctx->table,
                     ctx->generic_idx++,
                     col_def->type_desc.intrinsic_bits,
                     col_def->type_desc.intrinsic_dim,
                     s_domain,
-                    col_def->name ) );
-            if ( my_schema )
+                    col_def->name );
+            if ( rc == 0 && my_schema )
             {
                 char buf[64];
-                rc_t rc = VTypedeclToText( &(col_def->type_decl), my_schema,
-                                           buf, sizeof(buf) );
+                rc = VTypedeclToText( &(col_def->type_decl), my_schema,
+                                      buf, sizeof(buf) );
                 DISP_RC( rc, "VTypedeclToText() failed" );
                 if ( rc == 0 )
-                {
-                    OUTMSG ( ( "\n      (%s)", buf ) );
-                }
+                    rc = KOutMsg( "\n      (%s)", buf );
             }
-            OUTMSG ( ( "\n" ) );
+            if ( rc == 0 )
+                rc = KOutMsg( "\n" );
         }
         else
         {
             if ( ctx->table == NULL )
             {
-                puts( "error: no table-name in print_column_info()" );
+                rc = KOutMsg( "error: no table-name in print_column_info()" );
             }
             if ( col_def->name == NULL )
             {
-                puts( "error: no column-name in print_column_info()" );
+                rc = KOutMsg( "error: no column-name in print_column_info()" );
             }
         }
         free( s_domain );
     }
     else
     {
-        puts( "error: making domain-text in print_column_info()" );
+        rc = KOutMsg( "error: making domain-text in print_column_info()" );
     }
+    return rc;
 }
 
 
-static void vdh_print_short_col_info( const p_col_def col_def,
+static rc_t vdh_print_short_col_info( const p_col_def col_def,
                                       const VSchema *my_schema )
 {
+    rc_t rc = 0;
     if ( col_def->name != NULL )
     {
-        OUTMSG ( ( "%s", col_def->name ) );
+        rc = KOutMsg( "%s", col_def->name );
         if ( my_schema )
         {
             char buf[64];
-            rc_t rc = VTypedeclToText( &(col_def->type_decl), my_schema,
-                                       buf, sizeof(buf) );
+            rc = VTypedeclToText( &(col_def->type_decl), my_schema,
+                                  buf, sizeof(buf) );
             DISP_RC( rc, "VTypedeclToText() failed" );
             if ( rc == 0 )
             {
-                OUTMSG ( ( " (%s)", buf ) );
+                rc = KOutMsg( " (%s)", buf );
             }
         }
-        OUTMSG ( ( "\n" ) );
+        if ( rc == 0 )
+            rc = KOutMsg( "\n" );
     }
+    return rc;
 }
 
 
-void vdh_print_col_info( dump_context *ctx,
+rc_t vdh_print_col_info( dump_context *ctx,
                          const p_col_def col_def,
                          const VSchema *my_schema )
 {
-    if ( ctx == NULL ) return;
-    if ( col_def == NULL ) return;
-
-    if ( ctx->column_enum_requested )
+    rc_t rc = 0;
+    if ( ctx != NULL && col_def != NULL )
     {
-        vdh_print_full_col_info( ctx, col_def, my_schema );
+        if ( ctx->column_enum_requested )
+            rc = vdh_print_full_col_info( ctx, col_def, my_schema );
+        else
+            rc = vdh_print_short_col_info( col_def, my_schema );
     }
-    else
-    {
-        vdh_print_short_col_info( col_def, my_schema );
-    }
+    return rc;
 }

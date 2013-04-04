@@ -33,6 +33,7 @@
 #include <kdb/kdb-priv.h>
 #include <klib/checksum.h>
 #include <klib/rc.h>
+#include <klib/printf.h>
 #include <atomic32.h>
 #include <sysalloc.h>
 #undef KONST
@@ -235,35 +236,40 @@ rc_t KColumnMakeRead ( KColumn **colp, const KDirectory *dir, const char *path )
  */
 static
 rc_t KDBManagerVOpenColumnReadInt ( const KDBManager *self,
-    const KColumn **colp, const KDirectory *wd,
+    const KColumn **colp, const KDirectory *wd, bool try_srapath,
     const char *path, va_list args )
 {
     char colpath [ 4096 ];
-    rc_t rc = KDirectoryVResolvePath ( wd, 1,
-        colpath, sizeof colpath, path, args );
+    rc_t rc;
+    size_t z;
+
+/*    rc = KDirectoryVResolvePath ( wd, 1,
+        colpath, sizeof colpath, path, args ); */
+    rc = string_vprintf( colpath, sizeof colpath, &z, path, args );
     if ( rc == 0 )
     {
         KColumn *col;
         const KDirectory *dir;
 
         /* open table directory */
-	rc = KDBOpenPathTypeRead ( wd, colpath, &dir, kptColumn, NULL );
+        rc = KDBOpenPathTypeRead ( self, wd, colpath, &dir, kptColumn, NULL, try_srapath );
         if ( rc == 0 )
         {
             rc = KColumnMakeRead ( & col, dir, colpath );
-            if ( rc != 0 )
-                KDirectoryRelease ( dir );
-            else
+            if ( rc == 0 )
             {
                 col -> mgr = KDBManagerAttach ( self );
                 * colp = col;
                 return 0;
             }
+
+            KDirectoryRelease ( dir );
         }
     }
     
     return rc;
 }
+
 
 LIB_EXPORT rc_t CC KDBManagerOpenColumnRead ( const KDBManager *self,
     const KColumn **col, const char *path, ... )
@@ -278,6 +284,7 @@ LIB_EXPORT rc_t CC KDBManagerOpenColumnRead ( const KDBManager *self,
     return rc;
 }
 
+
 LIB_EXPORT rc_t CC KDBManagerVOpenColumnRead ( const KDBManager *self,
     const KColumn **col, const char *path, va_list args )
 {
@@ -290,8 +297,9 @@ LIB_EXPORT rc_t CC KDBManagerVOpenColumnRead ( const KDBManager *self,
         return RC ( rcDB, rcMgr, rcOpening, rcSelf, rcNull );
 
     return KDBManagerVOpenColumnReadInt
-        ( self, col, self -> wd, path, args );
+        ( self, col, self -> wd, true, path, args );
 }
+
 
 LIB_EXPORT rc_t CC KTableOpenColumnRead ( const KTable *self,
     const KColumn **col, const char *path, ... )
@@ -325,7 +333,7 @@ LIB_EXPORT rc_t CC KTableVOpenColumnRead ( const KTable *self,
     if ( rc == 0 )
     {
         rc = KDBManagerVOpenColumnReadInt ( self -> mgr,
-            colp, self -> dir, path, NULL );
+            colp, self -> dir, false, path, NULL );
         if ( rc == 0 )
         {
             KColumn *col = ( KColumn* ) * colp;

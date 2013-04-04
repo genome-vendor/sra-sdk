@@ -34,6 +34,9 @@
 #include <insdc/insdc.h>
 #include <align/manager.h>
 #include <align/iterator.h>
+#include <sysalloc.h>
+
+#include "debug.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -44,7 +47,6 @@
 typedef struct window
 {
     INSDC_coord_zero first;
-    INSDC_coord_zero last;
     INSDC_coord_len len;
 } window;
 
@@ -54,20 +56,25 @@ typedef struct pi_entry
     DLNode n;                       /* to have it in a DLList */
     PlacementIterator *pi;          /* the placement-iterator we have added */
     window nxt_avail;               /* the next available position of the placement-iterator */
-    window w;                       /* the window of the placement-iterator */
 } pi_entry;
+
+
+typedef struct pi_window
+{
+    DLNode n;                       /* to have it in a DLList */
+    window w;                       /* the window of the placement-iterator */
+    DLList pi_entries;              /* it has a DLList of pi_entry-struct's */
+    uint32_t count;                 /* how many entries do we have */
+} pi_window;
 
 
 typedef struct pi_ref
 {
     DLNode n;                       /* to have it in a DLList */
-    const char * name;              /* the name of the reference it referes to */
-    DLList pi_entries;              /* it has a DLList of pi_entry-struct's */
-    pi_entry * current_entry;       /* the current entry to walk pi_entries, one !!record!! at a time */
-    INSDC_coord_zero first_pos;     /* where do we have to start? */
-    INSDC_coord_zero last_pos;      /* where do we have to stop? */
-    bool first_pos_initialized;     /* is the start-position initialized */
-    struct ReferenceObj const *refobj;
+    char * name;                    /* the name of the reference it referes to */
+    window outer;                   /* the sum of all windows it has... */
+    bool outer_initialized;         /* has the outer-window been initialized */
+    DLList pi_windows;              /* it has a DLList of pi_window-struct's */
 } pi_ref;
 
 
@@ -76,8 +83,13 @@ struct PlacementSetIterator
     KRefcount refcount;
     struct AlignMgr const *amgr;    /* the alignment-manager... ( right now: we store it, but that's it )*/
     DLList pi_refs;                 /* a list of references we have to iterate over... */
-    pi_ref * current_pi_ref;        /* what is the current pi_ref, we are handling ? */
+    pi_ref * current_ref;           /* what is the current reference, we are handling ? */
+    pi_window * current_window;     /* what is the current window, we are handling ? */
+    pi_entry * current_entry;       /* what is the current pi-entry, we are handling ? */
 };
+
+
+/* =================================================================================================== */
 
 
 LIB_EXPORT rc_t CC AlignMgrMakePlacementSetIterator ( struct AlignMgr const *self,
@@ -102,11 +114,12 @@ LIB_EXPORT rc_t CC AlignMgrMakePlacementSetIterator ( struct AlignMgr const *sel
                 {
                     KRefcountInit( &psi->refcount, 1, "PlacementSetIterator", "Make", "align" );
                     psi->amgr = self;
-                    psi->current_pi_ref = NULL;          /* we don't know that yet */
+                    psi->current_ref = NULL;          /* we don't know that yet */
+                    psi->current_window = NULL;
+                    psi->current_entry = NULL;
                     DLListInit( &psi->pi_refs );
                 }
             }
-
             if ( rc == 0 )
                 *iter = psi;
             else
@@ -116,6 +129,9 @@ LIB_EXPORT rc_t CC AlignMgrMakePlacementSetIterator ( struct AlignMgr const *sel
 
     return rc;
 }
+
+
+/* =================================================================================================== */
 
 
 static int cmp_pchar( const char * a, const char * b )
@@ -131,25 +147,26 @@ static int cmp_pchar( const char * a, const char * b )
 }
 
 
+/* =================================================================================================== */
+
+
 typedef struct pi_ref_cb_ctx
 {
     const char * name;
     pi_ref *res;
 } pi_ref_cb_ctx;
 
+
 static bool CC find_pi_ref_callback( DLNode *n, void *data )
 {
     pi_ref_cb_ctx *ctx = ( pi_ref_cb_ctx * )data;
     pi_ref * pr = ( pi_ref * ) n;
-    if ( cmp_pchar( ctx->name, pr->name ) == 0 )
+    bool res = ( cmp_pchar( ctx->name, pr->name ) == 0 );
+    if ( res )
     {
         ctx->res = pr;
-        return true;
     }
-    else
-    {
-        return false;
-    }
+    return res;
 }
 
 
@@ -163,7 +180,85 @@ static pi_ref * find_pi_ref( const DLList * list, const char * name )
 }
 
 
-static rc_t make_pi_ref( pi_ref ** pr, const char * name )
+/* =================================================================================================== */
+
+typedef struct pi_window_cb_ctx
+{
+    window *w;
+    pi_window *res;
+} pi_window_cb_ctx;
+
+
+static bool CC find_pi_window_callback( DLNode *n, void *data )
+{
+    pi_window_cb_ctx *ctx = ( pi_window_cb_ctx * )data;
+    pi_window * pw = ( pi_window * ) n;
+    bool res = ( pw->w.first == ctx->w->first && pw->w.len == ctx->w->len );
+    if ( res )
+        ctx->res = pw;
+    return res;
+}
+
+
+static pi_window * find_pi_window( const DLList * list, window * w )
+{
+    pi_window_cb_ctx ctx;
+    ctx.res = NULL;
+    ctx.w = w;
+    DLListDoUntil ( list, false, find_pi_window_callback, &ctx );
+    return ctx.res;
+}
+
+
+/* =================================================================================================== */
+
+
+static rc_t make_pi_window( pi_window ** pw, DLList * list, window * w )
+{
+    rc_t rc = 0;
+    *pw = calloc( 1, sizeof ** pw );
+    if ( *pw == NULL )
+        rc = RC( rcAlign, rcIterator, rcConstructing, rcMemory, rcExhausted );
+    else
+    {
+        (*pw)->w.first = w->first;
+        (*pw)->w.len = w->len;
+        DLListInit( &( (*pw)->pi_entries ) );
+        DLListPushTail ( list, ( DLNode * )(*pw) );
+    }
+    return rc;
+}
+
+
+static rc_t add_to_pi_window( pi_window * pw, PlacementIterator *pi )
+{
+    rc_t rc = 0;
+    pi_entry * pie = calloc( 1, sizeof *pie );
+    if ( pie == NULL )
+        rc = RC( rcAlign, rcIterator, rcConstructing, rcMemory, rcExhausted );
+    else
+    {
+        pie->pi = pi;       /* store the placement-iterator in it's entry-struct */
+        rc = PlacementIteratorNextAvailPos ( pi, &(pie->nxt_avail.first), &(pie->nxt_avail.len) );
+        if ( rc == 0 )
+        {
+            PlacementIteratorAddRef ( pi );
+            DLListPushTail ( &pw->pi_entries, ( DLNode * )pie );
+        }
+        else
+        {
+            free( pie );
+            ALIGN_DBG( "PlacementIter has no placements...", 0 );
+        }
+    }
+    return rc;
+}
+
+
+/* =================================================================================================== */
+
+
+static rc_t make_pi_ref( pi_ref ** pr, DLList * list, const char * name )
 {
     rc_t rc = 0;
     *pr = calloc( 1, sizeof ** pr );
@@ -171,8 +266,9 @@ static rc_t make_pi_ref( pi_ref ** pr, const char * name )
         rc = RC( rcAlign, rcIterator, rcConstructing, rcMemory, rcExhausted );
     else
     {
-        (*pr)->name = name;
-        DLListInit( &( (*pr)->pi_entries ) );
+        (*pr)->name = string_dup_measure ( name, NULL );
+        DLListInit( &( (*pr)->pi_windows ) );
+        DLListPushTail ( list, ( DLNode * )(*pr) );
     }
     return rc;
 }
@@ -181,37 +277,35 @@ static rc_t make_pi_ref( pi_ref ** pr, const char * name )
 static rc_t add_to_pi_ref( pi_ref * pr, window * w, PlacementIterator *pi )
 {
     rc_t rc = 0;
-    bool added = false;
-    pi_entry * pie = calloc( 1, sizeof *pie );
-    if ( pie == NULL )
-        rc = RC( rcAlign, rcIterator, rcConstructing, rcMemory, rcExhausted );
-    else
-    {
-        pie->pi = pi;       /* store the placement-iterator in it's entry-struct */
-        pie->w.first = w->first;
-        pie->w.last = w->last;
-        pie->w.len = w->len;
+    pi_window * pw = find_pi_window( &pr->pi_windows, w );
 
-        rc = PlacementIteratorNextAvailPos ( pi, &(pie->nxt_avail.first), &(pie->nxt_avail.len) );
-        if ( ( rc == 0 ) || ( GetRCState( rc ) == rcDone ) )
+    if ( pw == NULL )
+        rc = make_pi_window( &pw, &pr->pi_windows, w );
+    if ( rc == 0 )
+        rc = add_to_pi_window( pw, pi );
+
+    if ( rc == 0 )
+    {
+        /* keep track of the outer window... */
+        if ( DLListHead( &pr->pi_windows ) == NULL )
         {
-            pie->nxt_avail.last = pie->nxt_avail.first + pie->nxt_avail.len - 1;
-            if ( pie->nxt_avail.last >= w->first && pie->nxt_avail.first <= w->last )
-            {
-                /* finally add the iterator to our list */
-                DLListPushTail ( &pr->pi_entries, ( DLNode * )pie );
-                added = true;
-            }
-            rc = 0;
+            /* first window ?*/
+            pr->outer.first = w->first;
+            pr->outer.len = w->len;
         }
-        if ( !added )
+        else
         {
-            PlacementIteratorRelease ( pi );
-            free( pie );
+            if ( w->first < pr->outer.first )
+                pr->outer.first = w->first;
+            if ( w->first + w->len > pr->outer.first + pr->outer.len )
+                pr->outer.len = ( ( w->first + w->len ) - pr->outer.first ) + 1;
         }
     }
     return rc;
 }
+
+
+/* =================================================================================================== */
 
 
 LIB_EXPORT rc_t CC PlacementSetIteratorAddPlacementIterator ( PlacementSetIterator *self,
@@ -234,37 +328,12 @@ LIB_EXPORT rc_t CC PlacementSetIteratorAddPlacementIterator ( PlacementSetIterat
             if ( rc == 0 )
             {
                 pi_ref * pr = find_pi_ref( &self->pi_refs, name );
-                w.last = w.first + w.len - 1;
+                /* if we do not have a pi_ref yet with this name: make one! */
                 if ( pr == NULL )
-                {
-                    /* we do not have a pi_ref yet with this name: make one! */
-                    rc = make_pi_ref( &pr, name );
-                    if ( rc == 0 )
-                    {
-                        DLListPushTail ( &self->pi_refs, ( DLNode * )pr );
-                    }
-                }
+                    rc = make_pi_ref( &pr, &self->pi_refs, name );
+                /* add the placement-iterator to the newly-made or existing pi_ref! */
                 if ( rc == 0 )
-                {
-                    /* add the placement-iterator to the newly-made or existing pi_ref! */
                     rc = add_to_pi_ref( pr, &w, pi );
-                }
-                if ( rc == 0 )
-                {
-                    if ( pr->first_pos_initialized )
-                    {
-                        if ( w.first < pr->first_pos )
-                            pr->first_pos = w.first;
-                        if ( w.last > pr->last_pos )
-                            pr->last_pos = w.last;
-                    }
-                    else
-                    {
-                        pr->first_pos = w.first;
-                        pr->last_pos = w.last;
-                        pr->first_pos_initialized = true;
-                    }
-                }
             }
         }
     }
@@ -288,6 +357,9 @@ LIB_EXPORT rc_t CC PlacementSetIteratorAddRef ( const PlacementSetIterator *csel
 }
 
 
+/* =================================================================================================== */
+
+
 static void CC pi_entry_whacker( DLNode *n, void *data )
 {
     pi_entry * pie = ( pi_entry * )n;
@@ -295,12 +367,43 @@ static void CC pi_entry_whacker( DLNode *n, void *data )
     free( pie );
 }
 
+static void CC pi_window_whacker( DLNode *n, void *data )
+{
+    pi_window * pw = ( pi_window * )n;
+    DLListWhack ( &pw->pi_entries, pi_entry_whacker, NULL );
+    free( pw );
+}
+
 static void CC pi_ref_whacker( DLNode *n, void *data )
 {
     pi_ref * pr = ( pi_ref * )n;
-    DLListWhack ( &pr->pi_entries, pi_entry_whacker, NULL );
+    DLListWhack ( &pr->pi_windows, pi_window_whacker, NULL );
+    free( pr->name );
     free( pr );
 }
+
+
+static void pl_set_iter_clear_curr_ref_window( PlacementSetIterator *self )
+{
+    if ( self->current_window != NULL )
+    {
+        pi_window_whacker( (DLNode *)self->current_window, NULL );
+        self->current_window = NULL;
+    }
+}
+
+
+static void pl_set_iter_clear_curr_ref( PlacementSetIterator *self )
+{
+    if ( self->current_ref != NULL )
+    {
+        pi_ref_whacker( (DLNode *)self->current_ref, NULL );
+        self->current_ref = NULL;
+    }
+}
+
+/* =================================================================================================== */
+
 
 LIB_EXPORT rc_t CC PlacementSetIteratorRelease ( const PlacementSetIterator *cself )
 {
@@ -312,9 +415,15 @@ LIB_EXPORT rc_t CC PlacementSetIteratorRelease ( const PlacementSetIterator *cse
         if ( KRefcountDrop( &cself->refcount, "PlacementSetIterator" ) == krefWhack )
         {
             PlacementSetIterator * self = ( PlacementSetIterator * ) cself;
+
+            pl_set_iter_clear_curr_ref_window( self );
+            pl_set_iter_clear_curr_ref( self );
+
             /* release the DLList of pi-ref's and the pi's in it... */
             DLListWhack ( &self->pi_refs, pi_ref_whacker, NULL );
+
             AlignMgrRelease ( self->amgr );
+
             free( self );
         }
     }
@@ -323,59 +432,89 @@ LIB_EXPORT rc_t CC PlacementSetIteratorRelease ( const PlacementSetIterator *cse
 
 
 LIB_EXPORT rc_t CC PlacementSetIteratorNextReference ( PlacementSetIterator *self,
-    INSDC_coord_zero *first_pos, INSDC_coord_zero *last_pos,
-    struct ReferenceObj const ** refobj )
+    INSDC_coord_zero *first_pos, INSDC_coord_len *len, struct ReferenceObj const ** refobj )
 {
     rc_t rc = 0;
     if ( refobj != NULL ) { *refobj = NULL; }
-    if ( first_pos != NULL ) { *first_pos = 0; }
-    if ( last_pos != NULL ) { *last_pos = 0; }
 
     if ( self == NULL )
-        rc = RC( rcAlign, rcIterator, rcReleasing, rcSelf, rcNull );
-    else
+        return RC( rcAlign, rcIterator, rcReleasing, rcSelf, rcNull );
+
+    pl_set_iter_clear_curr_ref_window( self );
+    pl_set_iter_clear_curr_ref( self );
+    self->current_entry = NULL;     /* what is the current pi-entry, we are handling ? */
+
+    /* !!! here we are taking the next reference from the top of the list */
+    self->current_ref = ( pi_ref * )DLListPopHead ( &self->pi_refs );
+
+    if ( self->current_ref == NULL )
     {
-        if ( self->current_pi_ref != NULL )
+        return SILENT_RC( rcAlign, rcIterator, rcAccessing, rcOffset, rcDone );
+    }
+
+    if ( first_pos != NULL ) *first_pos = self->current_ref->outer.first;
+    if ( len != NULL) *len = self->current_ref->outer.len;
+
+    /* if the caller wants to know the ref-obj... */
+    if ( refobj != NULL )
+    {
+        pi_window *pw = ( pi_window * )DLListHead( &(self->current_ref->pi_windows) );
+        if ( pw != NULL )
         {
-            pi_ref_whacker( (DLNode *)self->current_pi_ref, NULL );
-        }
-        self->current_pi_ref = ( pi_ref * )DLListPopHead ( &self->pi_refs );
-        if ( self->current_pi_ref == NULL )
-        {
-            rc = RC( rcAlign, rcIterator, rcAccessing, rcOffset, rcDone ); 
-        }
-        else
-        {
-            /* if the caller wants to know the ref-obj... */
-            if ( refobj != NULL )
+            pi_entry * pie = ( pi_entry * )DLListHead( &(pw->pi_entries) );
+            if ( pie != NULL )
             {
-                pi_entry * pie = ( pi_entry * )DLListHead( &(self->current_pi_ref->pi_entries) );
-                if ( pie != NULL )
-                {
-                    rc = PlacementIteratorRefObj( pie->pi, refobj );
-                }
-                else
-                {
-                    rc = RC( rcAlign, rcIterator, rcAccessing, rcOffset, rcDone ); 
-                }
+                rc = PlacementIteratorRefObj( pie->pi, refobj );
             }
-            /* if the caller wants to know the starting position on this reference...*/
-            if ( first_pos != NULL )
-            {
-                *first_pos = self->current_pi_ref->first_pos;
-            }
-            if ( last_pos != NULL )
-            {
-                *last_pos = self->current_pi_ref->last_pos;
-            }
-            /* start with the first entry when looping through the placement-records... */
-            self->current_pi_ref->current_entry = NULL;
         }
     }
     return rc;
 }
 
 
+LIB_EXPORT rc_t CC PlacementSetIteratorNextWindow ( PlacementSetIterator *self,
+    INSDC_coord_zero *first_pos, INSDC_coord_len *len )
+{
+    rc_t rc = 0;
+    if ( first_pos != NULL ) { *first_pos = 0; }
+    if ( len != NULL ) { *len = 0; }
+
+    if ( self == NULL )
+        return RC( rcAlign, rcIterator, rcReleasing, rcSelf, rcNull );
+
+    self->current_entry = NULL;     /* what is the current pi-entry, we are handling ? */
+
+    if ( self->current_ref == NULL )
+    {
+        return SILENT_RC( rcAlign, rcIterator, rcAccessing, rcOffset, rcDone );
+    }
+
+    pl_set_iter_clear_curr_ref_window( self );
+
+    /* !!! here we are taking the next window from the top of the list */
+    self->current_window = ( pi_window * )DLListPopHead ( &(self->current_ref->pi_windows) );
+
+    /* check if we have reached the last window on this reference... */
+    if ( self->current_window == NULL )
+    {
+        return SILENT_RC( rcAlign, rcIterator, rcAccessing, rcOffset, rcDone );
+    }
+
+    /* point to the first entry in this window... */
+    self->current_entry = ( pi_entry * )DLListHead( &(self->current_window->pi_entries) );
+
+    /* if the caller wants to know first_pos / len */
+    if ( first_pos != NULL )
+    {
+        *first_pos = self->current_window->w.first;
+    }
+    if ( len != NULL )
+    {
+        *len = self->current_window->w.len;
+    }
+
+    return rc;
+}
 
 typedef struct pi_ref_nxt_avail_pos_ctx
 {
@@ -395,7 +534,7 @@ static void CC nxt_avail_pos_cb( DLNode * n, void * data )
         rc_t rc = PlacementIteratorNextAvailPos ( pie->pi, &(pie->nxt_avail.first), &(pie->nxt_avail.len) );
         if ( rc == 0 )
         {
-            pie->nxt_avail.last = pie->nxt_avail.first + pie->nxt_avail.len - 1;
+/*            OUTMSG(( "nxt_avail.first=%u w.last=%u\n", pie->nxt_avail.first, pie->w.last )); */
             ( ctx->count )++;
             if ( ctx->min_pos_initialized )
             {
@@ -434,9 +573,9 @@ LIB_EXPORT rc_t CC PlacementSetIteratorNextAvailPos ( const PlacementSetIterator
         else
         {
             PlacementSetIterator *self = ( PlacementSetIterator * )cself;
-            if ( self->current_pi_ref == NULL )
+            if ( self->current_ref == NULL || self->current_window == NULL )
             {
-                rc = RC( rcAlign, rcIterator, rcAccessing, rcOffset, rcDone );
+                rc = SILENT_RC( rcAlign, rcIterator, rcAccessing, rcOffset, rcDone );
             }
             else
             {
@@ -447,11 +586,12 @@ LIB_EXPORT rc_t CC PlacementSetIteratorNextAvailPos ( const PlacementSetIterator
                 ctx.min_pos = 0;
                 ctx.min_len = 0;
                 ctx.min_pos_initialized = false;
-                DLListForEach ( &(self->current_pi_ref->pi_entries), false, nxt_avail_pos_cb, &ctx );
+                DLListForEach ( &(self->current_window->pi_entries),
+                                false, nxt_avail_pos_cb, &ctx );
                 rc = ctx.rc;
                 if ( ctx.count == 0 )
                 {
-                    rc = RC( rcAlign, rcIterator, rcAccessing, rcOffset, rcDone );
+                    rc = SILENT_RC( rcAlign, rcIterator, rcAccessing, rcOffset, rcDone );
                 }
                 else
                 {
@@ -468,27 +608,11 @@ LIB_EXPORT rc_t CC PlacementSetIteratorNextAvailPos ( const PlacementSetIterator
 }
 
 
-static void unlink_all_before( DLList * list, INSDC_coord_zero pos )
-{
-    pi_entry *res = ( pi_entry * )DLListHead( list );
-    while ( res != NULL )
-    {
-        pi_entry *nxt = ( pi_entry * )DLNodeNext( ( DLNode * )res );
-        if ( res->w.last < pos )
-        {
-            DLListUnlink ( list, ( DLNode * )res );
-            pi_entry_whacker( ( DLNode * )res, NULL );
-        }
-        res = nxt;
-    }
-}
-
-
 LIB_EXPORT rc_t CC PlacementSetIteratorNextRecordAt ( PlacementSetIterator *self,
     INSDC_coord_zero pos, const PlacementRecord **rec )
 {
     rc_t rc = 0;
-    pi_ref * pr;
+    pi_window * pw;
     bool done;
 
     if ( rec == NULL )
@@ -496,31 +620,36 @@ LIB_EXPORT rc_t CC PlacementSetIteratorNextRecordAt ( PlacementSetIterator *self
     *rec = NULL;
     if ( self == NULL )
         return RC( rcAlign, rcIterator, rcAccessing, rcSelf, rcNull );
-    if ( self->current_pi_ref == NULL )
+    if ( self->current_ref == NULL )
+    {
         /* no more reference to iterator over! the iterator is done! */
-        return RC( rcAlign, rcIterator, rcAccessing, rcOffset, rcDone );
+        return SILENT_RC( rcAlign, rcIterator, rcAccessing, rcOffset, rcDone );
+    }
+    if ( self->current_window == NULL )
+    {
+        /* no more windows to iterator over! the iterator is done! */
+        return SILENT_RC( rcAlign, rcIterator, rcAccessing, rcOffset, rcDone );
+    }
 
-    pr = self->current_pi_ref;
+    pw = self->current_window;
     done = false;
     do
     {
-        if ( pr->current_entry == NULL )
+        if ( self->current_entry == NULL )
         {
-            unlink_all_before( &(pr->pi_entries), pos );
-            pr->current_entry = ( pi_entry * )DLListHead( &(pr->pi_entries) );
+            self->current_entry = ( pi_entry * )DLListHead( &(pw->pi_entries) );
         }
-        done = ( pr->current_entry == NULL );
-        rc = ( done ? RC( rcAlign, rcIterator, rcAccessing, rcOffset, rcDone ) : 0 );
-
+        done = ( self->current_entry == NULL );
+        rc = ( done ? SILENT_RC( rcAlign, rcIterator, rcAccessing, rcOffset, rcDone ) : 0 );
         if ( rc == 0 )
         {
-            rc = PlacementIteratorNextRecordAt ( pr->current_entry->pi, pos, rec );
+            rc = PlacementIteratorNextRecordAt ( self->current_entry->pi, pos, rec );
             done = ( GetRCState( rc ) != rcDone );
             if ( !done )
             {
-                pr->current_entry = ( pi_entry * )DLNodeNext( ( DLNode * )pr->current_entry );
-                done = ( pr->current_entry == NULL );
-                rc = ( done ? RC( rcAlign, rcIterator, rcAccessing, rcOffset, rcDone ) : 0 );
+                self->current_entry = ( pi_entry * )DLNodeNext( ( DLNode * )self->current_entry );
+                done = ( self->current_entry == NULL );
+                rc = ( done ? SILENT_RC( rcAlign, rcIterator, rcAccessing, rcOffset, rcDone ) : 0 );
             }
         }
     } while ( !done );
@@ -531,12 +660,12 @@ LIB_EXPORT rc_t CC PlacementSetIteratorNextRecordAt ( PlacementSetIterator *self
 LIB_EXPORT rc_t CC PlacementSetIteratorNextIdAt ( PlacementSetIterator *self,
     INSDC_coord_zero pos, int64_t *row_id, INSDC_coord_len *len )
 {
-    rc_t rc = 0;
-    if ( self == NULL )
-        rc = RC( rcAlign, rcIterator, rcAccessing, rcSelf, rcNull );
-    else
+    const PlacementRecord *rec;
+    rc_t rc = PlacementSetIteratorNextRecordAt ( self, pos, &rec );
+    if ( rc == 0 )
     {
-
+        if ( row_id != NULL ) *row_id = rec->id;
+        if ( len != NULL ) *len = rec->len;
     }
     return rc;
 }

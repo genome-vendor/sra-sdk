@@ -49,7 +49,7 @@ extern "C" {
 /* -----
  * Encrypted file structure:
  *   - File Header
- *   - one or more data blocks
+ *   - zero or more data blocks
  *   - file footer
  *
  * File Header:
@@ -152,6 +152,9 @@ struct KEncFileBlock
 /* ----------------------------------------------------------------------
  * Foot - the ending of an encrypted file: 
  *   these are in plan text for non-decryption validation of the whole file
+ *
+ * In Version 1 the crc_checksum is required.
+ * In Version 2 the crc_checksum is optional - if 0 it is not computed.
  */
 typedef uint64_t KEncFileFooter_t;
 typedef struct KEncFileFooter KEncFileFooter;
@@ -161,15 +164,83 @@ struct KEncFileFooter
     KEncFileFooter_t crc_checksum; /* sum of crcs of all blocks */
 };
 
+
+/* ----------
+ * Read mode is fully seekable if the underlying KFile is seekable some
+ * integrity checking will not be performed in allowing this seeking.
+ */
+KRYPTO_EXTERN rc_t CC KEncFileMakeRead_v1 (const struct KFile ** pself,
+                                           const struct KFile * encrypted_input,
+                                           const struct KKey * key);
+
+KRYPTO_EXTERN rc_t CC KEncFileMakeRead_v2 (const struct KFile ** pself,
+                                           const struct KFile * encrypted_input,
+                                           const struct KKey * key);
+
+
+/* ----------
+ * Write mode encrypted file can only be written straight through from the
+ * first byte to the last.
+ */
+KRYPTO_EXTERN rc_t CC KEncFileMakeWrite_v1 (struct KFile ** pself,
+                                            struct KFile * encrypted_output,
+                                            const struct KKey * key);
+
+KRYPTO_EXTERN rc_t CC KEncFileMakeWrite_v2 (struct KFile ** pself,
+                                            struct KFile * encrypted_output,
+                                            const struct KKey * key);
+
+
 /* ----------
  * Update mode is read/write mode where seeking within the file is allowed.
  *
  * NOTE this is in the private interface because it is not actually working
  * yet.
  */
-KRYPTO_EXTERN rc_t CC KEncFileMakeUpdate (struct KFile ** pself, 
-                                          struct KFile * encrypted,
-                                          const struct KKey * key);
+KRYPTO_EXTERN rc_t CC KEncFileMakeUpdate_v1 (struct KFile ** pself, 
+                                             struct KFile * encrypted,
+                                             const struct KKey * key);
+
+KRYPTO_EXTERN rc_t CC KEncFileMakeUpdate_v2 (struct KFile ** pself, 
+                                             struct KFile * encrypted,
+                                             const struct KKey * key);
+
+
+/* ----------
+ * Validate mode can not be read or written.
+ * Upon open the whole file is read from begining to end and all CRC
+ * and other integrity checks are performed immedaitely
+ */
+KRYPTO_EXTERN rc_t CC KEncFileValidate_v1 (const struct KFile * encrypted);
+
+KRYPTO_EXTERN rc_t CC KEncFileValidate_v2 (const struct KFile * encrypted);
+
+
+/* ----------
+ * Identify whether a file is a KEncFile type encrypted file by the header.
+ * read the header into a buffer and pass it into this function.  
+ * The buffer_size needs to be at least 8 but more bytes lead to a better
+ * check up to the size of the header of a KEncFile type encrypted file.
+ * As the header may change in the future (in a backwards compatible way)
+ * that size might change from the current 16.
+ *
+ * Possible returns:
+ * 0:
+ *      the file is an identified KEncFile type file.  False positives are
+ *      possible if a file happens to match at 8 or more bytes
+ *
+ * RC (rcFS, rcFile, rcIdentifying, rcFile, rcWrongType)
+ *      the file is definitely not a KEncFIle type encrypted file.
+ *     
+ * RC (rcFS, rcFile, rcIdentifying, rcParam, rcNull)
+ *      bad parameters in the call
+ *
+ * RC (rcFS, rcFile, rcIdentifying, rcBuffer, rcInsufficient)
+ *      not a large enough buffer to make an identification
+ */
+KRYPTO_EXTERN rc_t CC KFileIsEnc_v1 (const char * buffer, size_t buffer_size);
+
+KRYPTO_EXTERN rc_t CC KFileIsEnc_v2 (const char * buffer, size_t buffer_size);
 
 
 #ifdef __cplusplus

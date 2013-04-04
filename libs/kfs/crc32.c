@@ -706,11 +706,14 @@ LIB_EXPORT rc_t CC KCRC32SumFmtUpdate ( KCRC32SumFmt *self, const char *path, ui
             }
 
             /* if existing, perform update */
-            else if ( exist -> crc32 != entry -> crc32 || exist -> bin != entry -> bin )
+            else
             {
-                exist -> crc32 = entry -> crc32;
-                exist -> bin = entry -> bin;
-                self -> dirty = true;
+                if ( exist -> crc32 != entry -> crc32 || exist -> bin != entry -> bin )
+                {
+                    exist -> crc32 = entry -> crc32;
+                    exist -> bin = entry -> bin;
+                    self -> dirty = true;
+                }
                 KCRC32SumEntryWhack ( & entry -> n, NULL );
             }
         }
@@ -1383,7 +1386,7 @@ LIB_EXPORT rc_t CC KFileMakeCRC32Read ( const KFile **fp,
             else
             {
                 rc = KFileInit ( & f -> dad,
-				     ( const KFile_vt* ) & KCRC32FileRead_vt, true, false );
+				     ( const KFile_vt* ) & KCRC32FileRead_vt, "KCRC32File", "no-name", true, false );
                 if ( rc == 0 )
                 {
                     f -> position = 0;
@@ -1477,7 +1480,7 @@ LIB_EXPORT rc_t CC KCRC32FileMakeWrite ( KCRC32File **fp,
             else
             {
                 rc = KFileInit ( & f -> dad,
-                    ( const KFile_vt* ) & sKCRC32FileWrite_vt, out -> read_enabled, true );
+                    ( const KFile_vt* ) & sKCRC32FileWrite_vt, "KCRC32File", path, out -> read_enabled, true );
                 if ( rc == 0 )
                 {
                     f -> position = 0;
@@ -1587,7 +1590,7 @@ LIB_EXPORT rc_t CC KCRC32FileMakeAppend ( KCRC32File **fp, KFile *out, KCRC32Sum
             else
             {
                 rc = KFileInit ( & f -> dad,
-                    ( const KFile_vt* ) & sKCRC32FileAppend_vt, out -> read_enabled, true );
+                    ( const KFile_vt* ) & sKCRC32FileAppend_vt, "KCRC32File", path, out -> read_enabled, true );
                 if ( rc == 0 )
                 {
                     f -> crc32 = 0;
@@ -1734,7 +1737,7 @@ LIB_EXPORT rc_t CC KFileMakeNewCRC32Read ( const KFile **fp,
             else
             {
                 rc = KFileInit ( & f -> dad,
-                    ( const KFile_vt* ) & sKCRC32FileReadCreate_vt, in -> read_enabled, false );
+                    ( const KFile_vt* ) & sKCRC32FileReadCreate_vt, "KCRC32File", path, in -> read_enabled, false );
                 if ( rc == 0 )
                 {
                     f -> position = 0;

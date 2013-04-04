@@ -923,6 +923,9 @@ struct STable
     /* optional expression for limiting all columns' blob sizes */
     struct SExpression const *limit;
 
+    /* optional default view declaration */
+    const String *dflt_view;
+
     /* scope */
     BSTree scope;
 

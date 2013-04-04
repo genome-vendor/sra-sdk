@@ -1128,7 +1128,8 @@ rc_t CC KMain ( int argc, char *argv [] )
             {
                 OUTMSG (( "missing database target path and queries\n" ));
                 MiniUsage (args);
-                return 0;
+                ArgsWhack(args);
+                exit(EXIT_FAILURE);
             }
 
             rc = KDirectoryNativeDir (&curwd);
@@ -1155,27 +1156,29 @@ rc_t CC KMain ( int argc, char *argv [] )
                     else
                     {
                         char objpath [ 4096 ];
-                        SRAPath * sra_path = NULL;
                         bool found;
                         uint32_t type;
 
                         found = false;
 
-                        rc = SRAPathMake (&sra_path, NULL);
-                        if ( rc == 0 )
+#if 1 /* TOOLS_USE_SRAPATH != 0 */
                         {
-                            if ( ! SRAPathTest (sra_path, pc))
+                            SRAPath * sra_path = NULL;
+                            rc = SRAPathMake (&sra_path, NULL);
+                            if ( rc == 0 )
                             {
-                                rc = SRAPathFind (sra_path, pc, objpath, sizeof (objpath));
-                                if (rc == 0)
-                                    found = true;
+                                if ( ! SRAPathTest (sra_path, pc))
+                                {
+                                    rc = SRAPathFind (sra_path, pc, objpath, sizeof (objpath));
+                                    if (rc == 0)
+                                        found = true;
+                                }
+                                SRAPathRelease (sra_path);
                             }
-                            SRAPathRelease (sra_path);
-                            SRAPathClean ( );
-                        }
-                        else if ( GetRCState ( rc ) == rcNotFound && GetRCTarget ( rc ) == rcDylib )
-                        {
-                            rc = 0;
+                            else if ( GetRCState ( rc ) == rcNotFound && GetRCTarget ( rc ) == rcDylib )
+                            {
+                                rc = 0;
+                            }
                         }
 
                         if ( ! found)
@@ -1186,6 +1189,7 @@ rc_t CC KMain ( int argc, char *argv [] )
                             if (rc)
                                 LOGERR (klogFatal, rc, "Unable to resolved target path");
                         }
+#endif
 
 
                         type = KDBManagerVPathType (mgr, objpath, NULL);

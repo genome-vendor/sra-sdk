@@ -65,6 +65,14 @@ void SchemaEnvInitFeatures ( SchemaEnv *env )
         env -> mixed_fact_param_list = 1;
         env -> script_function_called_schema = 1;
         break;
+    case 1:
+        switch ( ( uint8_t ) ( env -> version >> 16 ) )
+        {
+        case 1:
+            env -> default_view_decl = 1;
+            env -> has_view_keyword = 1;
+            break;
+        }
     }
 }
 

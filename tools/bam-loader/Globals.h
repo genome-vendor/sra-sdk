@@ -58,6 +58,8 @@ typedef struct globals
 
     unsigned errCount;
     unsigned maxErrCount;
+    unsigned maxWarnCount_NoMatch;
+    unsigned maxWarnCount_DupConflict;
     unsigned pid;
     unsigned minMatchCount; /* minimum number of matches to count as an alignment */
     int minMapQual;
@@ -81,6 +83,7 @@ typedef struct globals
     bool noColorSpace;
     bool noSecondary;
     bool hasTI;
+    bool acceptHardClip;
 } Globals;
 
 extern Globals G;

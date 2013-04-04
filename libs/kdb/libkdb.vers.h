@@ -1,1 +1,0 @@
-#define LIBKDB_VERS 0x01020005

@@ -64,9 +64,9 @@
 /* StoreSchema
  *  stores schema definition in metadata
  *
- *  <schema type="">...</schema>
+ *  <schema name="">...</schema>
  */
-rc_t VTableStoreSchema ( VTable *self )
+LIB_EXPORT rc_t VTableStoreSchema ( VTable *self )
 {
     /* open schema node */
     KMDataNode *node;
@@ -82,10 +82,45 @@ rc_t VTableStoreSchema ( VTable *self )
         else
         {
             expr [ num_writ ] = 0;
-            rc = KMDataNodeWriteAttr ( node, "name", expr );
-            if ( rc != 0 )
-                PLOGERR ( klogInt, ( klogInt, rc, "failed to write table type '$(expr)'", "expr=%s", expr ));
-            else
+
+            /* if table has a default view declaration,
+               store the table information under a new attribute */
+            if ( self -> stbl -> dflt_view != NULL )
+            {
+                uint32_t type;
+                const SNameOverload *name;
+                const STable *view = VSchemaFind ( self -> schema, & name, & type,
+                    self -> stbl -> dflt_view-> addr, __func__, false );
+                if ( view == NULL )
+                {
+                    rc = RC ( rcVDB, rcTable, rcUpdating, rcSchema, rcNotFound );
+                    PLOGERR ( klogInt, ( klogInt, rc, "failed to locate default view schema '$(expr)'",
+                                         "expr=%S", self -> stbl -> dflt_view ));
+                }
+                else
+                {
+                    rc = KMDataNodeWriteAttr ( node, "table", expr );
+                    if ( rc != 0 )
+                        PLOGERR ( klogInt, ( klogInt, rc, "failed to write table type '$(expr)'", "expr=%s", expr ));
+                    else
+                    {
+                        rc = VSchemaToText ( self -> schema, expr, sizeof expr - 1, & num_writ,
+                            "%N%V", view -> name, view -> version );
+                        if ( rc != 0 )
+                            LOGERR ( klogInt, rc, "failed to determine table default view schema" );
+                        else
+                            expr [ num_writ ] = 0;
+                    }
+                }
+            }
+
+            if ( rc == 0 )
+            {
+                rc = KMDataNodeWriteAttr ( node, "name", expr );
+                if ( rc != 0 )
+                    PLOGERR ( klogInt, ( klogInt, rc, "failed to write table name '$(expr)'", "expr=%s", expr ));
+            }
+            if ( rc == 0 )
             {
                 /* truncate existing schema */
                 rc = KMDataNodeWrite ( node, "", 0 );
@@ -660,9 +695,11 @@ rc_t list_writable_columns ( VTable *self )
         return 0;
     }
 
-    rc = VTableCreateCursorWrite ( self, & curs, kcmInsert );
+    rc = VTableCreateCursorWriteInt ( self, & curs, kcmInsert, false );
     if (  rc == 0 )
     {
+	/* no need for schema-based triggers to fire **/
+	VCursorSuspendTriggers ( curs );
         /* let this private VCursor-function list the columns */
         rc = VCursorListWritableColumns ( curs, & self -> write_col_cache );
         VCursorRelease ( curs );
@@ -694,6 +731,50 @@ LIB_EXPORT rc_t CC VTableListWritableColumns ( VTable *self, KNamelist **names )
 
         * names = NULL;
     }
+    return rc;
+}
+
+LIB_EXPORT rc_t CC VTableListSeededWritableColumns ( VTable *self,
+    KNamelist **names, const KNamelist *seed )
+{
+    rc_t rc;
+
+    if ( names == NULL )
+        rc = RC ( rcVDB, rcTable, rcListing, rcParam, rcNull );
+    else
+    {
+        * names = NULL;
+
+        if ( self == NULL )
+            rc = RC ( rcVDB, rcTable, rcListing, rcSelf, rcNull );
+        else if ( seed == NULL )
+            rc = RC ( rcVDB, rcTable, rcListing, rcParam, rcNull );
+        else
+        {
+            BSTree cache;
+            BSTreeInit ( & cache );
+
+            rc = 0;
+
+            if ( ! self -> read_only )
+            {
+                VCursor *curs;
+                rc = VTableCreateCursorWriteInt ( self, & curs, kcmInsert, false );
+                if (  rc == 0 )
+                {
+                    /* let this private VCursor-function list the columns */
+                    rc = VCursorListSeededWritableColumns ( curs, & cache, seed );
+                    VCursorRelease ( curs );
+                }
+            }
+
+            if ( rc == 0 )
+                rc = make_column_namelist ( & cache, names );
+
+            BSTreeWhack ( & cache, VColumnRefWhack, NULL );
+        }
+    }
+
     return rc;
 }
 
@@ -886,3 +967,21 @@ LIB_EXPORT rc_t CC VTableDropColumn(VTable *self, const char fmt[], ...)
     va_end(va);
     return rc;
 }
+
+LIB_EXPORT rc_t CC VTableRenameColumn ( struct VTable *self, bool force,
+    const char *from, const char *to )
+{
+    rc_t rc;
+
+    if ( self == NULL )
+        rc = RC ( rcVDB, rcTable, rcAccessing, rcSelf, rcNull );
+    else
+    {
+        rc = KTableRenameColumn ( self->ktbl, force, from, to );
+        if ( GetRCState(rc) == rcNotFound )
+           rc = KMDataNodeRenameChild( self->col_node, from, to );
+    }
+
+    return rc;
+}
+

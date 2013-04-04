@@ -35,7 +35,6 @@ INT_TOOLS =
 EXT_TOOLS = \
 	nenctool
 
-
 ALL_TOOLS = \
 	$(INT_TOOLS) \
 	$(EXT_TOOLS)
@@ -43,18 +42,13 @@ ALL_TOOLS = \
 #-------------------------------------------------------------------------------
 # outer targets
 #
-vers-includes: $(addsuffix .vers.h,$(ALL_TOOLS))
-
-all std: makedirs vers-includes
+all std: vers-includes
 	@ $(MAKE_CMD) $(TARGDIR)/std
 
-$(INT_LIBS): makedirs
-	@ $(MAKE_CMD) $(ILIBDIR)/$@
-
-$(ALL_TOOLS): makedirs vers-includes
+$(ALL_TOOLS): vers-includes
 	@ $(MAKE_CMD) $(BINDIR)/$@
 
-.PHONY: vers-includes all std $(ALL_TOOLS)
+.PHONY: all std $(ALL_TOOLS)
 
 #-------------------------------------------------------------------------------
 # std
@@ -65,19 +59,18 @@ $(TARGDIR)/std: \
 .PHONY: $(TARGDIR)/std
 
 #-------------------------------------------------------------------------------
+# vers-includes
+#
+$(TARGDIR)/vers-includes: $(addsuffix .vers.h,$(EXT_TOOLS))
+
+.PHONY: $(TARGDIR)/vers-includes
+
+#-------------------------------------------------------------------------------
 # clean
 #
 clean: stdclean
 
 .PHONY: clean
-
-#-------------------------------------------------------------------------------
-# tag
-#
-tag: \
-	$(addsuffix _tag,$(ALL_TOOLS))
-
-.PHONY: tag $(addsuffix _tag,$(ALL_LIBS)) $(addsuffix _tag,$(ALL_TOOLS))
 
 #-------------------------------------------------------------------------------
 # nenctool
@@ -96,14 +89,31 @@ NENCTOOL_LIB = \
 	-lkrypto \
 	-lkfg \
 	-lkfs \
+	-lkproc \
 	-lklib
-
 
 $(BINDIR)/nenctool: $(NENCTOOL_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(NENCTOOL_LIB)
 
-nenctool_tag:
-	@ $(TOP)/build/tag-module.sh $(MODULE) nenctool $(NENCTOOL_OBJ)
+#-------------------------------------------------------------------------------
+# nenctest
+#  Copy files from one directory to another while cataloging the contents.
+#  XML files can be redirected as well.
+#
+NENCTEST_SRC = \
+	nenctest
 
+NENCTEST_OBJ = \
+	$(addsuffix .$(OBJX),$(NENCTEST_SRC))
 
+NENCTEST_LIB = \
+	-lkapp \
+	-lvfs \
+	-lkryptotest \
+	-lkfg \
+	-lkfs \
+	-lkproc \
+	-lklib
 
+$(BINDIR)/nenctest: $(NENCTEST_OBJ)
+	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(NENCTEST_LIB)

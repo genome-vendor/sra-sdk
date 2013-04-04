@@ -63,10 +63,10 @@ static const TableWriterColumn TableWriterSeq_cols[ewseq_cn_Last + 1] =
     {0, "READ_TYPE", sizeof(SRAReadTypes) * 8, ewcol_IsArray},
     {0, "READ_START", sizeof(INSDC_coord_zero) * 8, ewcol_IsArray},
     {0, "READ_LEN", sizeof(INSDC_coord_len) * 8, ewcol_IsArray},
-    {0, "TMP_KEY_ID", sizeof(uint32_t) * 8, ewcol_Temporary},
+    {0, "TMP_KEY_ID", sizeof(uint64_t) * 8, ewcol_Temporary},
     {0, "SPOT_GROUP", sizeof(char) * 8, ewcol_IsArray | ewcol_Ignore},
     {0, "READ_FILTER", sizeof(uint8_t) * 8, ewcol_IsArray},
-    {0, "TI", sizeof(uint32_t) * 8, ewcol_IsArray | ewcol_Ignore}
+    {0, "TI", sizeof(uint64_t) * 8, ewcol_IsArray | ewcol_Ignore}
 };
 
 static const TableReaderColumn TableSeqReadTmpKey_cols[] = {
@@ -508,6 +508,7 @@ LIB_EXPORT rc_t CC TableWriterSeq_Write(const TableWriterSeq* cself, const Table
         TW_COL_WRITE(cself->base, cself->cols[ewseq_cn_CSKEY], data->cskey);
         TW_COL_WRITE(cself->base, cself->cols[ewseq_cn_READ_FILTER], data->read_filter);
         TW_COL_WRITE(cself->base, cself->cols[ewseq_cn_PLATFORM], data->platform);
+        TW_COL_WRITE(cself->base, cself->cols[ewseq_cn_TI], data->ti);
         if( rc == 0 ) {
             rc = TableWriter_CloseRow(cself->base);
         }
@@ -543,7 +544,7 @@ LIB_EXPORT rc_t CC TableWriterSeq_TmpKeyStart(const TableWriterSeq* cself)
     return rc;
 }
 
-LIB_EXPORT rc_t CC TableWriterSeq_TmpKey(const TableWriterSeq* cself, int64_t rowid, uint32_t* key_id)
+LIB_EXPORT rc_t CC TableWriterSeq_TmpKey(const TableWriterSeq* cself, int64_t rowid, uint64_t* key_id)
 {
     rc_t rc = 0;
 

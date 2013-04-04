@@ -40,8 +40,10 @@
 #define KFILE_IMPL KLoaderFile
 #include <kfs/impl.h>
 
+#include <sysalloc.h>
 #include <stdlib.h>
 #include <string.h>
+#include <os-native.h> /* for strdup on Windows */
 
 #define DBG(msg) DBGMSG(DBG_LOADLIB,DBG_FLAG(DBG_LOADLIB_FILE), msg)
 
@@ -212,14 +214,16 @@ rc_t KLoaderFile_Open(KLoaderFile* self)
                     rc = RC(rcApp, rcFile, rcOpening, rcType, rcUnexpected);
                     break;
             }
+#if ! WINDOWS
             if( rc == 0 && self->ahead ) {
                 const KFile *z = NULL;
                 if( (rc = KQueueFileMakeRead(&z, self->pos, self->file,
-                                             self->buffer_size * 10,  self->buffer_size)) == 0 ) {
+                                             self->buffer_size * 10,  self->buffer_size, 0)) == 0 ) {
                     KFileRelease(self->file);
                     self->file = z;
                 }
             }
+#endif
         }
     }
     if( rc != 0 ) {
@@ -314,11 +318,11 @@ LIB_EXPORT rc_t CC KLoaderFile_Reset(const KLoaderFile* cself)
             rc = KLoaderFile_Close(cself);
             self->avail = 0;
             self->buffer[0] = 0;
+            self->eof = false;
         } else {
             self->avail += self->buffer_pos - self->buffer;
         }
         self->pos = 0;
-        self->eof = false;
         self->eol = 0;
         self->line_no = 0;
         self->buffer_pos = self->buffer;
@@ -331,7 +335,9 @@ LIB_EXPORT rc_t CC KLoaderFile_SetReadAhead(const KLoaderFile* cself, bool read_
     if( cself == NULL ) {
         return RC(rcApp, rcFile, rcConstructing, rcParam, rcNull);
     }
+#if ! WINDOWS
     ((KLoaderFile*)cself)->ahead = read_ahead;
+#endif
     return 0;
 }
 
@@ -418,7 +424,15 @@ LIB_EXPORT rc_t CC KLoaderFile_Readline(const KLoaderFile* cself, const void** b
     } else {
         KLoaderFile *self = (KLoaderFile*)cself;
         uint8_t* nl;
-        bool refill = true;
+        bool refilled = false;
+        bool eof;
+        
+        rc = KLoaderFile_IsEof(cself, &eof);
+        if( rc == 0 && eof ) {
+            *buffer = NULL;
+            return 0;
+        }
+        
         while( rc == 0 ) {
             bool CR_last = false;
             int i, cnt = self->avail - self->eol;
@@ -430,10 +444,10 @@ LIB_EXPORT rc_t CC KLoaderFile_Readline(const KLoaderFile* cself, const void** b
                     nl = &buf[i];
                 }
             }
-            if( !(nl == NULL && refill) ) {
+            if( nl != NULL || refilled ) {
                 break;
             }
-            refill = false;
+            refilled = true;
             /* none found we need to push out processed portion and load full buffer */
             if( self->eol > 0 ) {
                 /* mark that line ended on buffer end and last char in buffer is \r */
@@ -457,10 +471,7 @@ LIB_EXPORT rc_t CC KLoaderFile_Readline(const KLoaderFile* cself, const void** b
                 if( self->buffer_size == self->avail ) {
                     /* buffer could be copied and next call will provide tail of line */
                     rc = RC( rcApp, rcFile, rcReading, rcString, rcTooLong);
-                } else if( (rc = KLoaderFile_IsEof(cself, &refill)) == 0 && refill ) {
-                    /* EOF */
-                    *buffer = NULL;
-                }
+                } 
             } else {
                 *length = nl - (uint8_t*)*buffer;
                 self->eol = nl - self->buffer_pos + 1;
@@ -606,9 +617,13 @@ LIB_EXPORT rc_t CC KLoaderFile_Make(const KLoaderFile **file, const KDirectory* 
                         }
                     }
                     if( rc == 0 &&
-                        (rc = KFileInit(&obj->dad, (const KFile_vt*)&KLoaderFile_vtbl, true, false)) == 0 ) {
+                        (rc = KFileInit(&obj->dad, (const KFile_vt*)&KLoaderFile_vtbl, "KLoaderFile", filename, true, false)) == 0 ) {
                         obj->file = &obj->dad;
+#if WINDOWS
+                        obj->ahead = false;
+#else
                         obj->ahead = read_ahead;
+#endif
                         obj->realname = strdup(resolved);
                         if( obj->realname == NULL ) {
                             rc = RC(rcApp, rcFile, rcConstructing, rcMemory, rcExhausted);

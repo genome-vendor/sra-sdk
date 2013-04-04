@@ -1,1 +1,0 @@
-#define VDB_LOCK_VERS 0x0201000C

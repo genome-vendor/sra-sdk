@@ -67,7 +67,7 @@ static const TableWriterColumn TableWriterRefCoverage_cols[ewrefcv_cn_Last + 1] 
     {0, "OVERLAP_REF_LEN", sizeof(INSDC_coord_len) * 8, ewcol_IsArray},
     {0, "PRIMARY_ALIGNMENT_IDS", sizeof(int64_t) * 8, ewcol_IsArray},
     {0, "SECONDARY_ALIGNMENT_IDS", sizeof(int64_t) * 8, ewcol_IsArray},
-    {0, "EVIDENCE_ALIGNMENT_IDS", sizeof(int64_t) * 8, ewcol_IsArray}
+    {0, "EVIDENCE_INTERVAL_IDS", sizeof(int64_t) * 8, ewcol_IsArray}
 };
 
 struct TableWriterRef {
@@ -185,7 +185,7 @@ rc_t TableWriterRef_WriteDefaults(const TableWriterRef* cself)
                     c.overlap_ref_len, sizeof(c.overlap_ref_len) / sizeof(c.overlap_ref_len[0]));
             TW_COL_WRITE_DEF(self->base, self->coverage_cursor_id, self->cols_coverage[ewrefcv_cn_PRIMARY_ALIGNMENT_IDS], c.ids[ewrefcov_primary_table]);
             TW_COL_WRITE_DEF(self->base, self->coverage_cursor_id, self->cols_coverage[ewrefcv_cn_SECONDARY_ALIGNMENT_IDS], c.ids[ewrefcov_secondary_table]);
-            TW_COL_WRITE_DEF(self->base, self->coverage_cursor_id, self->cols_coverage[ewrefcv_cn_EVIDENCE_ALIGNMENT_IDS], c.ids[ewrefcov_evidence_table]);
+            TW_COL_WRITE_DEF(self->base, self->coverage_cursor_id, self->cols_coverage[ewrefcv_cn_EVIDENCE_INTERVAL_IDS], c.ids[ewrefcov_evidence_table]);
         }
     }
     return rc;
@@ -321,7 +321,7 @@ rc_t CC TableWriterRef_WriteCoverage(const TableWriterRef* cself, int64_t rowid,
                     coverage->overlap_ref_len, sizeof(coverage->overlap_ref_len) / sizeof(coverage->overlap_ref_len[0]));
             TW_COL_WRITE(cself->base, cself->cols_coverage[ewrefcv_cn_PRIMARY_ALIGNMENT_IDS], coverage->ids[ewrefcov_primary_table]);
             TW_COL_WRITE(cself->base, cself->cols_coverage[ewrefcv_cn_SECONDARY_ALIGNMENT_IDS], coverage->ids[ewrefcov_secondary_table]);
-            TW_COL_WRITE(cself->base, cself->cols_coverage[ewrefcv_cn_EVIDENCE_ALIGNMENT_IDS], coverage->ids[ewrefcov_evidence_table]);
+            TW_COL_WRITE(cself->base, cself->cols_coverage[ewrefcv_cn_EVIDENCE_INTERVAL_IDS], coverage->ids[ewrefcov_evidence_table]);
             if( rc == 0 ) {
                 TableWriterRef* self = (TableWriterRef*)cself;
                 self->last_coverage_row = rowid + offset / cself->max_seq_len;
@@ -336,10 +336,10 @@ struct TableWriterRefCoverage {
     const TableWriter* base;
     bool init; /* default written indicator */
     uint8_t cursor_id;
-    TableWriterColumn cols[sizeof(TableWriterRefCoverage_cols)/sizeof(TableWriterRefCoverage_cols[0])];
+    TableWriterColumn cols[ewrefcv_cn_ReCover + 1];
 };
 
-rc_t CC TableWriterRefCoverage_Make(const TableWriterRefCoverage** cself, VDatabase* db, const uint32_t options)
+rc_t CC TableWriterRefCoverage_MakeCoverage(const TableWriterRefCoverage** cself, VDatabase* db, const uint32_t options)
 {
     rc_t rc = 0;
     TableWriterRefCoverage* self = NULL;
@@ -351,7 +351,7 @@ rc_t CC TableWriterRefCoverage_Make(const TableWriterRefCoverage** cself, VDatab
         if( self == NULL ) {
             rc = RC(rcAlign, rcFormatter, rcConstructing, rcMemory, rcExhausted);
         } else {
-            memcpy(self->cols, TableWriterRefCoverage_cols, sizeof(TableWriterRefCoverage_cols));
+            memcpy(self->cols, TableWriterRefCoverage_cols, sizeof(self->cols));
             if( (rc = TableWriter_MakeUpdate(&self->base, db, "REFERENCE")) == 0 ) {
                 rc = TableWriter_AddCursor(self->base, self->cols,
                         sizeof(self->cols) / sizeof(self->cols[0]), &self->cursor_id);
@@ -360,13 +360,44 @@ rc_t CC TableWriterRefCoverage_Make(const TableWriterRefCoverage** cself, VDatab
     }
     if( rc == 0 ) {
         *cself = self;
-        ALIGN_DBG("table %s", "opened");
+        ALIGN_R_DBG("table %s", "opened");
     } else {
         TableWriterRefCoverage_Whack(self, false, NULL);
         ALIGN_DBGERR(rc);
     }
     return rc;
 }
+rc_t CC TableWriterRefCoverage_MakeIds(const TableWriterRefCoverage** cself, VDatabase* db, const char  * col_name)
+{
+    rc_t rc = 0;
+    TableWriterRefCoverage* self = NULL;
+
+    if( cself == NULL ) {
+        rc = RC(rcAlign, rcFormatter, rcConstructing, rcParam, rcNull);
+    } else {
+        self = calloc(1, sizeof(*self));
+        if( self == NULL ) {
+            rc = RC(rcAlign, rcFormatter, rcConstructing, rcMemory, rcExhausted);
+        } else {
+            if( (rc = TableWriter_MakeUpdate(&self->base, db, "REFERENCE")) == 0 ) {
+                self->cols[0].idx = 0;
+                self->cols[0].name = col_name;
+                self->cols[0].element_bits = 8 * sizeof(int64_t);
+                self->cols[0].flags=ewcol_IsArray;
+                rc = TableWriter_AddCursor(self->base, self->cols,1, &self->cursor_id);
+            }
+        }
+    }
+    if( rc == 0 ) {
+        *cself = self;
+        ALIGN_R_DBG("table %s", "opened");
+    } else {
+        TableWriterRefCoverage_Whack(self, false, NULL);
+        ALIGN_DBGERR(rc);
+    }
+    return rc;
+}
+
 
 rc_t CC TableWriterRefCoverage_Whack(const TableWriterRefCoverage* cself, bool commit, uint64_t* rows)
 {
@@ -379,47 +410,70 @@ rc_t CC TableWriterRefCoverage_Whack(const TableWriterRefCoverage* cself, bool c
     return rc;
 }
 
-rc_t CC TableWriterRefCoverage_Write(const TableWriterRefCoverage* cself, int64_t rowid, const ReferenceSeqCoverage* coverage)
+
+rc_t CC TableWriterRefCoverage_WriteCoverage(const TableWriterRefCoverage* cself, int64_t rowid, const ReferenceSeqCoverage* coverage)
 {
     rc_t rc = 0;
 
     if( cself == NULL || coverage == NULL ) {
         rc = RC(rcAlign, rcType, rcWriting, rcParam, rcNull);
         ALIGN_DBGERR(rc);
-    } else if( !cself->init ) {
-        ReferenceSeqCoverage c;
-            
-        memset(&c, 0, sizeof(c));
-        TW_COL_WRITE_DEF_VAR(cself->base, cself->cursor_id, cself->cols[ewrefcv_cn_CGRAPH_HIGH], c.low);
-        TW_COL_WRITE_DEF_VAR(cself->base, cself->cursor_id, cself->cols[ewrefcv_cn_CGRAPH_LOW], c.high);
-        TW_COL_WRITE_DEF_VAR(cself->base, cself->cursor_id, cself->cols[ewrefcv_cn_CGRAPH_MISMATCHES], c.mismatches);
-        TW_COL_WRITE_DEF_VAR(cself->base, cself->cursor_id, cself->cols[ewrefcv_cn_CGRAPH_INDELS], c.indels);
-        TW_COL_WRITE_DEF_BUF(cself->base, cself->cursor_id, cself->cols[ewrefcv_cn_OVERLAP_REF_POS],
-                c.overlap_ref_pos, sizeof(c.overlap_ref_pos) / sizeof(c.overlap_ref_pos[0]));
-        TW_COL_WRITE_DEF_BUF(cself->base, cself->cursor_id, cself->cols[ewrefcv_cn_OVERLAP_REF_LEN],
-                c.overlap_ref_len, sizeof(c.overlap_ref_len) / sizeof(c.overlap_ref_len[0]));
-        TW_COL_WRITE_DEF(cself->base, cself->cursor_id, cself->cols[ewrefcv_cn_PRIMARY_ALIGNMENT_IDS], c.ids[ewrefcov_primary_table]);
-        TW_COL_WRITE_DEF(cself->base, cself->cursor_id, cself->cols[ewrefcv_cn_SECONDARY_ALIGNMENT_IDS], c.ids[ewrefcov_secondary_table]);
-        TW_COL_WRITE_DEF(cself->base, cself->cursor_id, cself->cols[ewrefcv_cn_EVIDENCE_ALIGNMENT_IDS], c.ids[ewrefcov_evidence_table]);
-
-        ((TableWriterRefCoverage*)cself)->init = true;
     }
-    if( rc == 0 && (rc = TableWriter_OpenRowId(cself->base, rowid, cself->cursor_id)) == 0 ) {
-        TW_COL_WRITE_VAR(cself->base, cself->cols[ewrefcv_cn_CGRAPH_HIGH], coverage->high);
-        TW_COL_WRITE_VAR(cself->base, cself->cols[ewrefcv_cn_CGRAPH_LOW], coverage->low);
-        TW_COL_WRITE_VAR(cself->base, cself->cols[ewrefcv_cn_CGRAPH_MISMATCHES], coverage->mismatches);
-        TW_COL_WRITE_VAR(cself->base, cself->cols[ewrefcv_cn_CGRAPH_INDELS], coverage->indels);
-        TW_COL_WRITE_BUF(cself->base, cself->cols[ewrefcv_cn_OVERLAP_REF_POS],
-                coverage->overlap_ref_pos, sizeof(coverage->overlap_ref_pos) / sizeof(coverage->overlap_ref_pos[0]));
-        TW_COL_WRITE_BUF(cself->base, cself->cols[ewrefcv_cn_OVERLAP_REF_LEN],
-                coverage->overlap_ref_len, sizeof(coverage->overlap_ref_len) / sizeof(coverage->overlap_ref_len[0]));
-        TW_COL_WRITE(cself->base, cself->cols[ewrefcv_cn_PRIMARY_ALIGNMENT_IDS], coverage->ids[ewrefcov_primary_table]);
-        TW_COL_WRITE(cself->base, cself->cols[ewrefcv_cn_SECONDARY_ALIGNMENT_IDS], coverage->ids[ewrefcov_secondary_table]);
-        TW_COL_WRITE(cself->base, cself->cols[ewrefcv_cn_EVIDENCE_ALIGNMENT_IDS], coverage->ids[ewrefcov_evidence_table]);
-
-        if( rc == 0 ) {
-            rc = TableWriter_CloseRow(cself->base);
+    else {
+        if( !cself->init ) {
+            /* set the defaults */
+            ReferenceSeqCoverage c;
+            
+            memset(&c, 0, sizeof(c));
+            TW_COL_WRITE_DEF_VAR(cself->base, cself->cursor_id, cself->cols[ewrefcv_cn_CGRAPH_HIGH], c.low);
+            TW_COL_WRITE_DEF_VAR(cself->base, cself->cursor_id, cself->cols[ewrefcv_cn_CGRAPH_LOW], c.high);
+            TW_COL_WRITE_DEF_VAR(cself->base, cself->cursor_id, cself->cols[ewrefcv_cn_CGRAPH_MISMATCHES], c.mismatches);
+            TW_COL_WRITE_DEF_VAR(cself->base, cself->cursor_id, cself->cols[ewrefcv_cn_CGRAPH_INDELS], c.indels);
+            TW_COL_WRITE_DEF_BUF(cself->base, cself->cursor_id, cself->cols[ewrefcv_cn_OVERLAP_REF_POS],
+                                 c.overlap_ref_pos, sizeof(c.overlap_ref_pos) / sizeof(c.overlap_ref_pos[0]));
+            TW_COL_WRITE_DEF_BUF(cself->base, cself->cursor_id, cself->cols[ewrefcv_cn_OVERLAP_REF_LEN],
+                                 c.overlap_ref_len, sizeof(c.overlap_ref_len) / sizeof(c.overlap_ref_len[0]));
+            
+            ((TableWriterRefCoverage*)cself)->init = true;
+        }
+        if( rc == 0 && (rc = TableWriter_OpenRowId(cself->base, rowid, cself->cursor_id)) == 0 ) {
+            TW_COL_WRITE_VAR(cself->base, cself->cols[ewrefcv_cn_CGRAPH_HIGH], coverage->high);
+            TW_COL_WRITE_VAR(cself->base, cself->cols[ewrefcv_cn_CGRAPH_LOW], coverage->low);
+            TW_COL_WRITE_VAR(cself->base, cself->cols[ewrefcv_cn_CGRAPH_MISMATCHES], coverage->mismatches);
+            TW_COL_WRITE_VAR(cself->base, cself->cols[ewrefcv_cn_CGRAPH_INDELS], coverage->indels);
+            TW_COL_WRITE_BUF(cself->base, cself->cols[ewrefcv_cn_OVERLAP_REF_POS],
+                             coverage->overlap_ref_pos, sizeof(coverage->overlap_ref_pos) / sizeof(coverage->overlap_ref_pos[0]));
+            TW_COL_WRITE_BUF(cself->base, cself->cols[ewrefcv_cn_OVERLAP_REF_LEN],
+                             coverage->overlap_ref_len, sizeof(coverage->overlap_ref_len) / sizeof(coverage->overlap_ref_len[0]));
+            
+            if( rc == 0 ) {
+                rc = TableWriter_CloseRow(cself->base);
+            }
         }
     }
     return rc;
 }
+rc_t CC TableWriterRefCoverage_WriteIds(const TableWriterRefCoverage* cself, int64_t rowid, const int64_t* buf,uint32_t num)
+{
+    rc_t rc = 0;
+
+    if( cself == NULL || (buf  == NULL && num > 0)) {
+        rc = RC(rcAlign, rcType, rcWriting, rcParam, rcNull);
+        ALIGN_DBGERR(rc);
+    }
+    else {
+        if( !cself->init ) {
+            /* set the defaults */
+            TW_COL_WRITE_DEF_BUF(cself->base, cself->cursor_id, cself->cols[0],NULL,0);
+            ((TableWriterRefCoverage*)cself)->init = true;
+        }
+        if( rc == 0 && (rc = TableWriter_OpenRowId(cself->base, rowid, cself->cursor_id)) == 0 ) {
+            TW_COL_WRITE_BUF(cself->base, cself->cols[0],buf,num);
+            if( rc == 0 ) {
+                rc = TableWriter_CloseRow(cself->base);
+            }
+        }
+    }
+    return rc;
+}
+

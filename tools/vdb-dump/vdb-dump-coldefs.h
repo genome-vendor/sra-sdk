@@ -58,6 +58,7 @@ typedef struct col_def
 {
     char *name;
     uint32_t idx;
+    uint64_t elementsum;
     bool valid;
     bool excluded;
     VTypedecl type_decl;
@@ -86,8 +87,9 @@ char *vdcd_make_domain_txt( const uint32_t domain );
 bool vdcd_init( col_defs** defs, const size_t str_limit );
 void vdcd_destroy( col_defs* defs );
 
-bool vdcd_parse_string( col_defs* defs, const char* src );
+bool vdcd_parse_string( col_defs* defs, const char* src, const VTable *my_table );
 bool vdcd_extract_from_table( col_defs* defs, const VTable *my_table );
+bool vdcd_extract_from_phys_table( col_defs* defs, const VTable *my_table );
 bool vdcd_add_to_cursor( col_defs* defs, const VCursor *my_cursor );
 void vdcd_reset_content( col_defs* defs );
 void vdcd_ins_trans_fkt( col_defs* defs, const VSchema *my_schema );

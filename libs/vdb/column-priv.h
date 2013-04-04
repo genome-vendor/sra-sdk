@@ -63,6 +63,7 @@ struct SColumn;
 struct SExpression;
 struct VProduction;
 struct VBlob;
+struct VBlobMRUCacheCursorContext;
 
 
 /*--------------------------------------------------------------------------
@@ -117,10 +118,11 @@ rc_t VColumnDatatype ( const VColumn *self,
     struct VTypedecl *type, struct VTypedesc *desc );
 
 rc_t VColumnRead ( const VColumn *self, int64_t row_id,
-   uint32_t *elem_bits, const void **base, uint32_t *boff, uint32_t *row_len );
+   uint32_t *elem_bits, const void **base, uint32_t *boff, uint32_t *row_len,
+   struct VBlob **vblob );
 
 rc_t VColumnReadBlob ( const VColumn *self, struct VBlob const **blob, int64_t row_id,
-   uint32_t *elem_bits, const void **base, uint32_t *boff, uint32_t *row_len );
+   uint32_t *elem_bits, const void **base, uint32_t *boff, uint32_t *row_len, struct VBlobMRUCacheCursorContext *cctx);
 
 rc_t VColumnReadCachedBlob ( const VColumn *self, struct VBlob const *blob, int64_t row_id,
    uint32_t *elem_bits, const void **base, uint32_t *boff, uint32_t *row_len );
@@ -140,9 +142,6 @@ struct WColumn
     /* half-closed id for page cutoff */
     int64_t cutoff_id;
 
-    /* manager - for mempool */
-    struct VDBManager *mgr;
-
     /* alternate read production */
     struct VProduction *alt;
 
@@ -155,27 +154,30 @@ struct WColumn
     /* output page */
     struct VBlob *page;
 
-    /* accumulators */
-    DLList data, rowmap;
-
-    /* buffer offsets */
-    bitsz_t data_off;
-    size_t rowmap_off;
-
-    /* size to trigger page commit */
-    size_t trigger;
-
     /* default row data */
     KDataBuffer dflt;
+
+    /* accumulators */
+    KDataBuffer data, rowmap;
+
+    /* peak byte size history of data accumulator */
+    size_t data_peak_hist [ 16 ];
+    size_t data_peak;
+
+    /* total committed bits in buffer */
+    bitsz_t bits_in_buffer;
+
+    /* number of uncommitted bits in buffer */
+    bitsz_t row_len;
+
+    /* size ( in bytes ) to trigger page commit */
+    size_t trigger;
 
     /* number of committed rows in buffer */
     size_t num_rows;
 
-    /* number of committed elements in buffer */
-    size_t num_elems;
-
-    /* number of uncommitted elements in buffer */
-    size_t row_len;
+    /* peak history index */
+    uint8_t peak_hist_idx;
 
     /* true if there is a default value */
     bool have_dflt;
@@ -183,23 +185,19 @@ struct WColumn
     /* set upon any successful write */
     bool row_written;
 
+    /* set if the last row written was default */
+    bool dflt_last;
+
     /* set upon row commit */
     bool row_committed;
 };
 
 /* WColumnRowMap
- *  NB - size must be an integral power of 2
- *  8, 16, 32 are okay, but not 24.
- *
- *  in particular, sizeof VDBMem.page % sizeof WColumnRowMap == 0 || aaaaah!
  */
 typedef struct WColumnRowMap WColumnRowMap;
 struct WColumnRowMap
 {
-#if _DEBUGGING
     int64_t start_id;
-    int64_t align;
-#endif
     uint64_t len, cnt;
 };
 
@@ -244,6 +242,14 @@ bool CC WColumnRowDefaults ( void *self, void *rc );
  *  returns true if there was a memory error.
  */
 bool CC WColumnCommitRow ( void *self, void *end_id );
+
+/* RepeatRow
+ *  go into the last row entry
+ *  extend the count by count
+ *  data points to this structure
+ */
+typedef struct { int64_t end_id; uint64_t count; } WColumnRepeatRowData;
+void CC WColumnRepeatRow ( void *self, void *data );
 
 /* CloseRow
  *  discards uncommitted data

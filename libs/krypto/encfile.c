@@ -28,9 +28,8 @@
 #include <krypto/key.h>
 #include <krypto/ciphermgr.h>
 #include <krypto/cipher.h>
-#include <krypto/cipher-priv.h>
 #include "aes-priv.h"
-
+#include "encfile-priv.h"
 
 #include <klib/rc.h>
 #include <klib/checksum.h>
@@ -50,42 +49,28 @@
 
 #include <klib/out.h>
 
+#define USE_READ_V1     false
+#define USE_WRITE_V1    false
+#define USE_UPDATE_V1   false
+#define USE_BLOCK_V1    true
+/* KReencFile and KEncryptFile need to use update v1 as it is different */
+#define USE_VALIDATE_V1 false
+#define USE_ISENC_V1    false
+
+#define ENABLE_V2 true
+
 
 /* ----------------------------------------------------------------------
- * KEncFile
+ * KEncFileV1
  *   Base object class for the encryption, decryption and validation of
  *   the file format defined above
  */
-#define KFILE_IMPL KEncFile
+typedef struct KEncFileV1  KEncFileV1;
+#define KFILE_IMPL struct KEncFileV1
 #include <kfs/impl.h>
 
-/* -----
- *
- */
-typedef struct KEncFileCiphers KEncFileCiphers;
-struct KEncFileCiphers
-{
-    KCipher * master;
-    KCipher * block;
-};
 
-typedef uint8_t KEncFileIVec [16];
-/* -----
- */
-struct KEncFile
-{
-    KFile dad;                  /* base class */
-    KFile * encrypted;          /* encrypted file as a KFile */
-    KEncFileCiphers ciphers;
-    KEncFileBlock block;       /* */
-    uint64_t encrypted_max;     /* highest read/written point in the encrypted file */
-    KEncFileFooter foot;        /* contaings rcrchecksum and blockcount */
-    bool dirty;                 /* data written but not flushed */
-    bool bswap;
-    bool eof;
-    bool seekable;
-    bool written;
-};
+#include "encfile-priv.h"
 
 /* ----------
  * BufferCalcMD5
@@ -105,7 +90,7 @@ void BufferCalcMD5 (const void * buffer, size_t size, uint8_t digest [16])
     MD5StateFinish (&state, digest);
 }
 
-
+#if 0
 /* ----------------------------------------------------------------------
  * Offset conversions between encrypted file offset, decrypted file offset
  * and block ID and block offset
@@ -124,7 +109,7 @@ void BufferCalcMD5 (const void * buffer, size_t size, uint8_t digest [16])
  * functions.
  */
 
-static __inline__ uint64_t BlockId_to_EncryptedOffset (uint64_t block_id)
+static __inline__ uint64_t BlockId_to_EncryptedPos (uint64_t block_id)
 {
     /* the whole block structure is not divisible by 8
      * so this is not a simple multiply by the sizeof KEncFileBlock
@@ -133,7 +118,7 @@ static __inline__ uint64_t BlockId_to_EncryptedOffset (uint64_t block_id)
 }
 
 
-static __inline__ uint64_t BlockId_to_DecryptedOffset (uint64_t block_id)
+static __inline__ uint64_t BlockId_to_DecryptedPos (uint64_t block_id)
 {
     /* the simplest conversion as its a simple multiply */
     return (block_id * sizeof (KEncFileData));
@@ -149,7 +134,7 @@ static __inline__ uint64_t BlockId_to_DecryptedOffset (uint64_t block_id)
  * sacrifice efficiency for accuracy.
  */
 static __inline__
-uint64_t DecryptedOffset_to_BlockId (uint64_t dec_offset, uint32_t * poffset)
+uint64_t DecryptedPos_to_BlockId (uint64_t dec_offset, uint32_t * poffset)
 {
     if (poffset)
         *poffset = dec_offset % sizeof (KEncFileData);
@@ -157,8 +142,9 @@ uint64_t DecryptedOffset_to_BlockId (uint64_t dec_offset, uint32_t * poffset)
 }
 
 /* not so easy - fix this if needed... */
+#if 0
 static
-uint64_t EncryptedOffset_to_BlockId (uint64_t enc_offset, uint32_t * poffset)
+uint64_t EncryptedPos_to_BlockId (uint64_t enc_offset, uint32_t * poffset)
 {
     uint64_t block_id;
 
@@ -194,6 +180,37 @@ uint64_t EncryptedOffset_to_BlockId (uint64_t enc_offset, uint32_t * poffset)
     }
     return block_id;
 }
+#endif
+#endif
+
+typedef struct KEncFileCiphers KEncFileCiphers;
+struct KEncFileCiphers
+{
+    KCipher * master;
+    KCipher * block;
+};
+
+typedef uint8_t KEncFileIVec [16];
+/* -----
+ */
+struct KEncFileV1
+{
+    KFile dad;                  /* base class */
+    KFile * encrypted;          /* encrypted file as a KFile */
+    KEncFileCiphers ciphers;
+    KEncFileBlock block;        /* */
+    uint64_t encrypted_max;     /* highest read/written point in the encrypted file */
+    KEncFileFooter foot;        /* contains rcrchecksum and blockcount */
+#if ENABLE_V2
+    KEncFileVersion version;
+#endif
+    bool dirty;                 /* data written but not flushed */
+    bool bswap;
+    bool eof;
+    bool seekable;
+    bool written;
+    bool swarm;
+};
 
 
 /* ----------------------------------------------------------------------
@@ -211,11 +228,12 @@ uint64_t EncryptedOffset_to_BlockId (uint64_t enc_offset, uint32_t * poffset)
  *    The caller has to handle an EOF shorted buffer.
  */
 static
-rc_t KEncFileBufferRead (const KEncFile * cself, uint64_t pos, void * buffer,
+rc_t KEncFileV1BufferRead (const KEncFileV1 * cself, uint64_t pos, void * buffer,
                          size_t bsize, size_t * pnum_read)
 {
-    KEncFile * self;   /* for mutable fields */
+    KEncFileV1 * self;   /* for mutable fields */
     uint8_t * bbuffer; /* void pointer made to a byyte pointer */
+    rc_t rc;
 
     assert (cself);
     assert (buffer);
@@ -223,40 +241,24 @@ rc_t KEncFileBufferRead (const KEncFile * cself, uint64_t pos, void * buffer,
 
     *pnum_read = 0;
 
-    self = (KEncFile*)cself; /* to hit mutable fields */
+    self = (KEncFileV1*)cself; /* to hit mutable fields */
     bbuffer = buffer; /* convert to a pointer of sized target */
 
     /* we want to read a full requested size if possible so keep trying if we
      * haven't read enough yet. 
      * We can quit early only if EOF (i.e. read 0 bytes.
      */
-    while (bsize > 0)
-    {
-        size_t num_read;
-        rc_t rc;
+    rc = KFileReadAll (self->encrypted, pos, buffer, bsize, pnum_read);
+    if (rc)
+        PLOGERR (klogErr,
+                 (klogErr, rc,
+                  "error reading position '$(P)' in encrypted file",
+                  "P=%lu", pos));
 
-        rc = KFileRead (self->encrypted, pos, buffer, bsize, &num_read);
-        if (rc)
-        {
-            PLOGERR (klogErr,
-                     (klogErr, rc,
-                      "error reading position '$(P)' in encrypted file",
-                      "P=%lu", pos));
-            return rc;
-        }
-
-        if (num_read == 0)
-            break;
-
-        pos += num_read;
-        bbuffer += num_read;
-        bsize -= num_read;
-
-        *pnum_read += num_read;
-        if (self->encrypted_max < pos)
-            self->encrypted_max = pos;
-    }
-    return 0;
+    else if (self->encrypted_max < pos)
+        self->encrypted_max = pos;
+            
+    return rc;
 }
 
 
@@ -266,52 +268,16 @@ rc_t KEncFileBufferRead (const KEncFile * cself, uint64_t pos, void * buffer,
  *    return the number of bytes successfully written
  */
 static
-rc_t KEncFileBufferWrite (KEncFile * self, uint64_t pos, const void * buffer,
+rc_t KEncFileV1BufferWrite (KEncFileV1 * self, uint64_t pos, const void * buffer,
                           size_t bsize, size_t * pnum_writ)
 {
-    const uint8_t * bbuffer;
-    size_t num_writ;
     rc_t rc;
 
-    assert (self);
-    assert (buffer);
-    assert (pnum_writ);
+    rc =  KFileWriteAll (self->encrypted, pos, buffer, bsize, pnum_writ);
+    if ((rc == 0) && (self->encrypted_max < pos))
+        self->encrypted_max = pos;
 
-    *pnum_writ = 0;
-
-    bbuffer = buffer;
-    while (bsize > 0)
-    {
-        rc = KFileWrite (self->encrypted, pos, bbuffer, bsize, &num_writ);
-        DEBUG_ENCRYPT (("%s: wrote '%zu' at '%lu' end '%lu'\n", 
-                        __func__, num_writ, pos, num_writ+pos));
-
-
-        DEBUG_ENCRYPT (("%s: %zu + %zu +  %zu = %zu\n",
-                        __func__, sizeof(KEncFileKey), sizeof(KEncFileData),
-                        sizeof(uint32_t), sizeof (KEncFileBlock) ));
-
-        if (rc)
-        {
-            PLOGERR (klogErr,
-                     (klogErr, rc,
-                      "error writing position '$(P)' in encrypted file",
-                      "P=%lu", pos));
-            return rc;
-        }
-
-        if (num_writ == 0)
-            break;
-
-        pos += num_writ;
-        bbuffer += num_writ;
-        bsize -= num_writ;
-
-        *pnum_writ += num_writ;
-        if (self->encrypted_max < pos)
-            self->encrypted_max = pos;
-    }
-    return 0;
+    return rc;
 }
 
 
@@ -342,9 +308,26 @@ static const KEncFileSig KEncFileSignature = "NCBInenc";
 /* ----
  * Not unexpectedly the first version of this file will be "1"
  */
+#if ENABLE_V2
+
+#define eCurrentVersion (0x00000002)
+#define eCurrentVersionReverse (0x02000000)
+
+static
+const KEncFileHeader const_header_v1
+= { "NCBInenc", eByteOrderTag, 0x00000001 };
+
+static
+const KEncFileHeader const_bswap_header_v1
+= { "NCBInenc", eByteOrderReverse, 0x01000000 };
+    
+#else
+
 #define eCurrentVersion (0x00000001)
 #define eCurrentVersionReverse (0x01000000)
 
+#endif
+    
 static
 const KEncFileHeader const_header
 = { "NCBInenc", eByteOrderTag, eCurrentVersion };
@@ -352,13 +335,14 @@ const KEncFileHeader const_header
 static
 const KEncFileHeader const_bswap_header
 = { "NCBInenc", eByteOrderReverse, eCurrentVersionReverse };
-    
+
+
 /* ----------
  * HeaderRead
  *    Read the header of an encrypted file and validate it.
  */
 static
-rc_t KEncFileHeaderRead (KEncFile * self)
+rc_t KEncFileV1HeaderRead (KEncFileV1 * self)
 {
     KEncFileHeader header;
     size_t num_read;
@@ -366,7 +350,7 @@ rc_t KEncFileHeaderRead (KEncFile * self)
 
     assert (self);
 
-    rc = KEncFileBufferRead (self, 0, &header, sizeof (header), &num_read);
+    rc = KEncFileV1BufferRead (self, 0, &header, sizeof (header), &num_read);
     if (rc)
         return rc;
 
@@ -384,6 +368,9 @@ rc_t KEncFileHeaderRead (KEncFile * self)
     if (memcmp (&header, &const_header, sizeof (header)) == 0)
     {
         self->bswap = false;
+#if ENABLE_V2
+        self->version = eCurrentVersion;
+#endif
         return 0;
     }
 
@@ -391,8 +378,28 @@ rc_t KEncFileHeaderRead (KEncFile * self)
     if (memcmp (&header, &const_bswap_header, sizeof (header)) == 0)
     {
         self->bswap = true;
+#if ENABLE_V2
+        self->version = eCurrentVersion;
+#endif
         return 0;
     }
+
+#if ENABLE_V2
+    if (memcmp (&header, &const_header_v1, sizeof (header)) == 0)
+    {
+        self->bswap = false;
+        self->version = 1;
+        return 0;
+    }
+
+    /* next most likely is encrypted on a machine of opposite endianess */
+    if (memcmp (&header, &const_bswap_header_v1, sizeof (header)) == 0)
+    {
+        self->bswap = true;
+        self->version = 1;
+        return 0;
+    }
+#endif
 
     /* okay it's a "bad" header, so figure out why */
     if (memcmp (&header, &const_header, sizeof (header.file_sig)) != 0)
@@ -427,8 +434,9 @@ rc_t KEncFileHeaderRead (KEncFile * self)
         break;
 
     case 1:
-        /* so far there is nothing special to do by version since there
-         * is only one version */
+#if ENABLE_V2
+    case 2:
+#endif
         break;
     }
     return rc;
@@ -441,12 +449,12 @@ rc_t KEncFileHeaderRead (KEncFile * self)
  * build a ram copy of the header and write it to the file
  */
 static
-rc_t KEncFileHeaderWrite (KEncFile * self)
+rc_t KEncFileV1HeaderWrite (KEncFileV1 * self)
 {
     size_t num_writ;
     rc_t rc;
 
-    rc = KEncFileBufferWrite (self, 0, &const_header, sizeof (const_header),
+    rc = KEncFileV1BufferWrite (self, 0, &const_header, sizeof (const_header),
                               &num_writ);
     if (rc == 0)
     {
@@ -454,6 +462,13 @@ rc_t KEncFileHeaderWrite (KEncFile * self)
             rc = RC (rcFS, rcFile, rcWriting, rcHeader, rcInsufficient);
     }
     return rc;
+}
+
+LIB_EXPORT rc_t CC KEncFileV1WriteHeader_v1  (KFile * self)
+{
+    if (self == NULL)
+        return RC (rcKrypto, rcFile, rcWriting, rcSelf, rcNull);
+    return KEncFileV1HeaderWrite ((KEncFileV1*)self);
 }
 
 
@@ -469,17 +484,21 @@ rc_t KEncFileHeaderWrite (KEncFile * self)
  * we're just comparing the values in the footer against expected values
  */
 static
-rc_t KEncFileFooterValidate (const KEncFileFooter * self,
+rc_t KEncFileV1FooterValidate (const KEncFileV1 * self,
                              uint64_t block_count, uint64_t crc_checksum)
 {
     rc_t rc1 = 0, rc2 = 0;
 
-    if (self->block_count != block_count)
+    if (self->foot.block_count != block_count)
     {
         rc2 = RC (rcKrypto, rcFile, rcValidating, rcFile, rcCorrupt);
         LOGERR (klogErr, rc1, "bad block count in encrypted file footer");
     }
-    if (self->crc_checksum != crc_checksum)
+    if ((self->foot.crc_checksum != crc_checksum)
+#if ENABLE_V2
+        &&((crc_checksum != 0) || (self->version == 1))
+#endif
+        )
     {
         rc1 = RC (rcKrypto, rcFile, rcValidating, rcChecksum, rcCorrupt);
         LOGERR (klogErr, rc2, "bad crc checksum in encrypted file footer");
@@ -494,7 +513,7 @@ rc_t KEncFileFooterValidate (const KEncFileFooter * self,
  * are stored in the same object format as the footer so its very simple
  */
 static
-rc_t KEncFileFooterWrite (KEncFile * self)
+rc_t KEncFileV1FooterWrite (KEncFileV1 * self)
 {
     KEncFileFooter foot;
     uint64_t offset;
@@ -508,12 +527,12 @@ rc_t KEncFileFooterWrite (KEncFile * self)
         foot.crc_checksum = bswap_64 (foot.crc_checksum);
     }
 
-    offset = BlockId_to_EncryptedOffset (self->foot.block_count);
+    offset = BlockId_to_EncryptedPos (self->foot.block_count);
 
 /*     assert ((self->encrypted_max == offset) || */
 /*             (self->encrypted_max + sizeof(self->foot) == offset)); */
 
-    rc = KEncFileBufferWrite (self, offset, &foot, sizeof (foot),
+    rc = KEncFileV1BufferWrite (self, offset, &foot, sizeof (foot),
                               &num_writ);
     if (rc == 0)
     {
@@ -535,7 +554,7 @@ rc_t KEncFileFooterWrite (KEncFile * self)
  *    This is definitely over-kill using the MD5.
  */
 static
-void KEncFileIVecInit (const KEncFile * self, KEncFileIVec ivec)
+void KEncFileV1IVecInit (const KEncFileV1 * self, KEncFileIVec ivec)
 {
     BufferCalcMD5 (&self->block.id, sizeof self->block.id, ivec);
 }
@@ -546,7 +565,7 @@ void KEncFileIVecInit (const KEncFile * self, KEncFileIVec ivec)
  */
 
 static
-rc_t KEncFileBlockEncrypt (KEncFile * self, KEncFileBlock * e)
+rc_t KEncFileV1BlockEncrypt (KEncFileV1 * self, KEncFileBlock * e)
 {
     SHA256State state;
     uint64_t id;
@@ -566,7 +585,7 @@ rc_t KEncFileBlockEncrypt (KEncFile * self, KEncFileBlock * e)
      * 
      * create the initialization vector for this block
      */
-    KEncFileIVecInit (self, ivec);
+    KEncFileV1IVecInit (self, ivec);
 
     /*
      * set the ivec for both the master and data block ciphers
@@ -658,7 +677,7 @@ rc_t KEncFileBlockEncrypt (KEncFile * self, KEncFileBlock * e)
      * encrypt the block user key into the buffer
      */
     rc = KCipherEncryptCBC (self->ciphers.master, self->block.key, e->key,
-                            sizeof (self->block.key));
+                            sizeof (self->block.key) / sizeof (ivec));
     if (rc)
         return rc;
 
@@ -667,9 +686,10 @@ rc_t KEncFileBlockEncrypt (KEncFile * self, KEncFileBlock * e)
      */
     rc = KCipherEncryptCBC (self->ciphers.block, 
                             self->block.data, e->data,
-                            sizeof self->block.data + sizeof self->block.u);
+                            (sizeof self->block.data + sizeof self->block.u) / sizeof (ivec));
     if (rc)
         return rc;
+
     self->block.u.valid = saved_valid;
 
     crc = CRC32 (0, e, (char*)(&e->crc)-(char*)e);
@@ -693,7 +713,7 @@ rc_t KEncFileBlockEncrypt (KEncFile * self, KEncFileBlock * e)
  */
 
 static
-rc_t KEncFileBlockDecrypt (KEncFile * self, KEncFileBlock * e)
+rc_t KEncFileV1BlockDecrypt (KEncFileV1 * self, KEncFileBlock * e)
 {
     uint8_t ivec [16];
     rc_t rc;
@@ -702,7 +722,7 @@ rc_t KEncFileBlockDecrypt (KEncFile * self, KEncFileBlock * e)
     assert (e);
 
     /* create the initialization vector for this block */
-    KEncFileIVecInit (self, ivec);
+    KEncFileV1IVecInit (self, ivec);
 
     /*
      * set the ivec for both the master and data block ciphers
@@ -720,7 +740,7 @@ rc_t KEncFileBlockDecrypt (KEncFile * self, KEncFileBlock * e)
      * the computer ivec
      */
     rc = KCipherDecryptCBC (self->ciphers.master, e->key, self->block.key,
-                            sizeof e->key);
+                            (sizeof e->key) / sizeof ivec);
     if (rc)
         return rc;
 
@@ -733,14 +753,15 @@ rc_t KEncFileBlockDecrypt (KEncFile * self, KEncFileBlock * e)
     if (rc)
         return rc;
     rc = KCipherDecryptCBC (self->ciphers.block, e->data, 
-                            self->block.data, sizeof e->data + sizeof e->u);
+                            self->block.data, 
+                            (sizeof e->data + sizeof e->u) / sizeof ivec);
     if (rc)
         return rc;
 
     if (self->bswap)
     {
         self->block.u.valid = bswap_16 (self->block.u.valid);
-        self->block.id = bswap_64 (self->block.id);
+/*         self->block.id = bswap_64 (self->block.id); */
     }
 
     /* we choose not to flag errors in decryption so don't validate these */
@@ -757,10 +778,10 @@ rc_t KEncFileBlockDecrypt (KEncFile * self, KEncFileBlock * e)
  *    decryption is a separate step
  */
 static
-rc_t KEncFileBlockRead (const KEncFile * cself, uint64_t block_id,
+rc_t KEncFileV1BlockRead (const KEncFileV1 * cself, uint64_t block_id,
                         KEncFileBlock * block, bool validate)
 {
-    KEncFile * self;    /* mutable fields */
+    KEncFileV1 * self;    /* mutable fields */
     uint64_t pos;
     uint64_t max;
     size_t num_read;
@@ -770,8 +791,8 @@ rc_t KEncFileBlockRead (const KEncFile * cself, uint64_t block_id,
     assert (cself);
     assert (block);
 
-    self = (KEncFile*)cself;
-    pos = BlockId_to_EncryptedOffset (block_id);
+    self = (KEncFileV1*)cself;
+    pos = BlockId_to_EncryptedPos (block_id);
 
     /* set aside the current maximum position within the encrypted file */
     max = self->encrypted_max;
@@ -781,7 +802,7 @@ rc_t KEncFileBlockRead (const KEncFile * cself, uint64_t block_id,
     self->block.u.valid = 0;
     self->dirty = false;
 
-    rc = KEncFileBufferRead (self, pos, &e, sizeof e, &num_read);
+    rc = KEncFileV1BufferRead (self, pos, &e, sizeof e, &num_read);
     if (rc)
         PLOGERR (klogErr,
                  (klogErr, rc,
@@ -823,7 +844,7 @@ rc_t KEncFileBlockRead (const KEncFile * cself, uint64_t block_id,
                 {
                     PLOGERR (klogErr,
                              (klogErr,
-                              RC (rcKrypto, rcFile, rcValidating, rcCrc, rcCorrupt),
+                              RC (rcKrypto, rcFile, rcValidating, rcIndex, rcIncorrect),
                               "error validating id for block '$(BID)' is not $(C2)", 
                               "BID=%lu,C2=%lu", block_id, e.id));
                 }
@@ -863,7 +884,7 @@ rc_t KEncFileBlockRead (const KEncFile * cself, uint64_t block_id,
                 }
                 if (validate && !self->written)
                 {
-                    rc = KEncFileFooterValidate (&self->foot, foot.block_count,
+                    rc = KEncFileV1FooterValidate (self, foot.block_count,
                                                  foot.crc_checksum);
                     if (rc)
                         break;
@@ -882,7 +903,7 @@ rc_t KEncFileBlockRead (const KEncFile * cself, uint64_t block_id,
 }
 
 static
-rc_t KEncFileBlockWrite (KEncFile * self)
+rc_t KEncFileV1BlockWrite (KEncFileV1 * self)
 {
     KEncFileBlock e;
     uint64_t block_offset;
@@ -895,7 +916,7 @@ rc_t KEncFileBlockWrite (KEncFile * self)
         return RC (rcFS, rcFile, rcWriting, rcBuffer, rcCorrupt);
 
     /* where in the file is this block */
-    block_offset = BlockId_to_EncryptedOffset(self->block.id);
+    block_offset = BlockId_to_EncryptedPos(self->block.id);
 
     /* if this is an update to a block take out the old crc value */
     if (block_offset < self->encrypted_max)
@@ -905,7 +926,7 @@ rc_t KEncFileBlockWrite (KEncFile * self)
     else
         ++self->foot.block_count;
 
-    rc = KEncFileBlockEncrypt (self, &e);
+    rc = KEncFileV1BlockEncrypt (self, &e);
     if (rc)
         return rc;
 
@@ -913,7 +934,7 @@ rc_t KEncFileBlockWrite (KEncFile * self)
     self->foot.crc_checksum += self->block.crc;
 
     /* now write the buffer to the encrypted file */
-    rc = KEncFileBufferWrite (self, block_offset, &e, sizeof e, &num_writ);
+    rc = KEncFileV1BufferWrite (self, block_offset, &e, sizeof e, &num_writ);
 
     if ((rc == 0) && (num_writ != sizeof e))
     {
@@ -928,7 +949,7 @@ rc_t KEncFileBlockWrite (KEncFile * self)
 
 
 static
-rc_t KEncFileBlockFlush (KEncFile *self)
+rc_t KEncFileV1BlockFlush (KEncFileV1 *self)
 {
     rc_t rc = 0;
 
@@ -938,16 +959,16 @@ rc_t KEncFileBlockFlush (KEncFile *self)
 
     /* first do we need to deal with the file header? 
      * if the encrypted file has not been written to we do */
-    if (self->encrypted_max == 0)
+    if ((self->encrypted_max == 0) && (self->swarm == false))
     {
-        rc = KEncFileHeaderWrite (self);
+        rc = KEncFileV1HeaderWrite (self);
         if (rc)
             return rc;
     }
 
     if (self->dirty)
     {
-        rc = KEncFileBlockWrite (self);
+        rc = KEncFileV1BlockWrite (self);
         if (rc == 0)
             self->dirty = false;
     }
@@ -961,7 +982,7 @@ rc_t KEncFileBlockFlush (KEncFile *self)
  *
  */
 static
-rc_t KEncFileBlockSeek (KEncFile * self, uint64_t block_id, bool fill, bool validate)
+rc_t KEncFileV1BlockSeek (KEncFileV1 * self, uint64_t block_id, bool fill, bool validate)
 {
     KEncFileBlock b;
     rc_t rc;
@@ -971,7 +992,7 @@ rc_t KEncFileBlockSeek (KEncFile * self, uint64_t block_id, bool fill, bool vali
         if (self->dirty)
         {
             /* flush what we got */
-            rc = KEncFileBlockFlush (self);
+            rc = KEncFileV1BlockFlush (self);
             if (rc)
                 return rc;
         }
@@ -982,12 +1003,12 @@ rc_t KEncFileBlockSeek (KEncFile * self, uint64_t block_id, bool fill, bool vali
 
             for (tid = self->block.id + 1; tid < block_id; ++tid)
             {
-                if (self->encrypted_max > BlockId_to_EncryptedOffset(block_id))
+                if (self->encrypted_max > BlockId_to_EncryptedPos(block_id))
                     continue;
 
                 memset (&b, 0, sizeof b);
 
-                rc = KEncFileBlockRead (self, tid, &b, validate);
+                rc = KEncFileV1BlockRead (self, tid, &b, validate);
                 if (rc)
                     return rc;
 
@@ -999,7 +1020,7 @@ rc_t KEncFileBlockSeek (KEncFile * self, uint64_t block_id, bool fill, bool vali
                         memset (self->block.data, 0, sizeof (self->block.data));
                         self->block.u.valid = sizeof (self->block.data);
                         self->dirty = true;
-                        rc = KEncFileBlockFlush (self);
+                        rc = KEncFileV1BlockFlush (self);
                         if (rc)
                             return rc;
                     }
@@ -1009,7 +1030,7 @@ rc_t KEncFileBlockSeek (KEncFile * self, uint64_t block_id, bool fill, bool vali
                 /* in this loop a less than full block is end of file */
                 else if (fill)
                 {
-                    rc = KEncFileBlockDecrypt (self, &b);
+                    rc = KEncFileV1BlockDecrypt (self, &b);
                     if (rc)
                         return rc;
 
@@ -1018,7 +1039,7 @@ rc_t KEncFileBlockSeek (KEncFile * self, uint64_t block_id, bool fill, bool vali
                         memset (self->block.data + self->block.u.valid, 0, 
                                 sizeof (self->block.data) - self->block.u.valid);
                         self->dirty = true;
-                        rc = KEncFileBlockFlush (self);
+                        rc = KEncFileV1BlockFlush (self);
                         if (rc)
                             return rc;
                     }
@@ -1033,13 +1054,13 @@ rc_t KEncFileBlockSeek (KEncFile * self, uint64_t block_id, bool fill, bool vali
     /* done with intervening blocks */
     memset (&b, 0, sizeof b);
 
-    rc = KEncFileBlockRead (self, block_id, &b, validate);
+    rc = KEncFileV1BlockRead (self, block_id, &b, validate);
     if (rc)
         return rc;
 
     if (! self->eof)
     {
-        rc = KEncFileBlockDecrypt (self, &b);
+        rc = KEncFileV1BlockDecrypt (self, &b);
     }
     if (fill)
     {
@@ -1057,31 +1078,55 @@ rc_t KEncFileBlockSeek (KEncFile * self, uint64_t block_id, bool fill, bool vali
  *
  */
 static
-rc_t CC KEncFileDestroyRead (KEncFile *self)
+rc_t CC KEncFileV1DestroyRead (KEncFileV1 *self)
 {
-    rc_t rc = 0;
+    rc_t rc1 = 0;
+    rc_t rc2 = 0;
+    rc_t rc3 = 0;
 
     if (self)
     {
-        rc = KFileRelease (self->encrypted);
+        rc1 = KFileRelease (self->encrypted);
+        rc2 = KCipherRelease (self->ciphers.master);
+        rc3 = KCipherRelease (self->ciphers.block);
         free (self);
+        return rc1 ?  rc1 : rc2 ? rc2 : rc3;
     }
-    return rc;
+    return 0;
 }
 
 
 static
-rc_t CC KEncFileDestroyWrite (KEncFile *self)
+rc_t CC KEncFileV1DestroyWrite (KEncFileV1 *self)
 {
     rc_t rc1;
     rc_t rc2;
 
-    rc1 = (self->block.u.valid) ? KEncFileBlockFlush (self) : 0;
+    rc1 = (self->block.u.valid) ? KEncFileV1BlockFlush (self) : 0;
     if ((rc1 == 0)&&(self->encrypted_max != 0))
-        rc1 = KEncFileFooterWrite (self);
+        rc1 = KEncFileV1FooterWrite (self);
     rc2 = KFileRelease (self->encrypted);
 
     return (rc1 ?  rc1 : rc2);
+}
+
+
+static
+rc_t CC KEncFileV1DestroySwarm (KEncFileV1 *self)
+{
+    rc_t rc1 = 0;
+    rc_t rc2 = 0;
+    rc_t rc3 = 0;
+
+    if (self)
+    {
+        rc1 = KFileRelease (self->encrypted);
+        rc2 = KCipherRelease (self->ciphers.master);
+        rc3 = KCipherRelease (self->ciphers.block);
+        free (self);
+        return rc1 ?  rc1 : rc2 ? rc2 : rc3;
+    }
+    return 0;
 }
 
 
@@ -1096,7 +1141,7 @@ rc_t CC KEncFileDestroyWrite (KEncFile *self)
  * unencrypted file in a meaningful way.
  */
 static
-struct KSysFile *CC KEncFileGetSysFileUnsupported (const KEncFile *self, uint64_t *offset)
+struct KSysFile *CC KEncFileV1GetSysFileUnsupported (const KEncFileV1 *self, uint64_t *offset)
 {
     assert (self);
     assert (offset);
@@ -1110,7 +1155,7 @@ struct KSysFile *CC KEncFileGetSysFileUnsupported (const KEncFile *self, uint64_
  *  returns 0 if random access, error code otherwise
  */
 static
-rc_t CC KEncFileRandomAccess (const KEncFile *self)
+rc_t CC KEncFileV1RandomAccess (const KEncFileV1 *self)
 {
     assert (self != NULL);
     assert (self->encrypted != NULL);
@@ -1119,7 +1164,7 @@ rc_t CC KEncFileRandomAccess (const KEncFile *self)
 
 
 static
-rc_t CC KEncFileRandomAccessUnsupported (const KEncFile *self)
+rc_t CC KEncFileV1RandomAccessUnsupported (const KEncFileV1 *self)
 {
     return RC ( rcFS, rcFile, rcUpdating, rcFunction, rcUnsupported );
 }
@@ -1132,7 +1177,7 @@ rc_t CC KEncFileRandomAccessUnsupported (const KEncFile *self)
  *  "size" [ OUT ] - return parameter for file size
  */
 static
-rc_t CC KEncFileSizeUnsupported (const KEncFile *self, uint64_t *size)
+rc_t CC KEncFileV1SizeUnsupported (const KEncFileV1 *self, uint64_t *size)
 {
     return RC ( rcFS, rcFile, rcAccessing, rcFunction, rcUnsupported );
 }
@@ -1145,7 +1190,7 @@ rc_t CC KEncFileSizeUnsupported (const KEncFile *self, uint64_t *size)
  *  "size" [ IN ] - new file size
  */
 static
-rc_t CC KEncFileSetSizeUnsupported (KEncFile *self, uint64_t size)
+rc_t CC KEncFileV1SetSizeUnsupported (KEncFileV1 *self, uint64_t size)
 {
     assert (self);
     return RC ( rcFS, rcFile, rcUpdating, rcFunction, rcUnsupported );
@@ -1164,7 +1209,7 @@ rc_t CC KEncFileSetSizeUnsupported (KEncFile *self, uint64_t size)
  *  giving number of bytes actually read
  */
 static
-rc_t CC KEncFileReadUnsupported (const KEncFile *self,
+rc_t CC KEncFileV1ReadUnsupported (const KEncFileV1 *self,
                                  uint64_t pos,
                                  void *buffer,
                                  size_t bsize,
@@ -1175,13 +1220,13 @@ rc_t CC KEncFileReadUnsupported (const KEncFile *self,
 
 
 static
-rc_t CC KEncFileRead	(const KEncFile *cself,
+rc_t CC KEncFileV1Read	(const KEncFileV1 *cself,
                          uint64_t pos,
                          void *buffer,
                          size_t bsize,
                          size_t *num_read)
 {
-    KEncFile * self = (KEncFile *)cself; /* mutable values */
+    KEncFileV1 * self = (KEncFileV1 *)cself; /* mutable values */
     uint64_t block_id;
     uint32_t offset;
     size_t to_copy;
@@ -1195,7 +1240,7 @@ rc_t CC KEncFileRead	(const KEncFile *cself,
 
     *num_read = 0;
 
-    block_id = DecryptedOffset_to_BlockId (pos, &offset);
+    block_id = DecryptedPos_to_BlockId (pos, &offset);
 
     /*
      * are we on the wrong block?
@@ -1203,7 +1248,7 @@ rc_t CC KEncFileRead	(const KEncFile *cself,
      */
     if ((block_id != self->block.id) || (self->block.u.valid == 0))
     {
-        rc = KEncFileBlockSeek (self, block_id, false, false);
+        rc = KEncFileV1BlockSeek (self, block_id, false, false);
         if (rc)
             return rc;
     }
@@ -1241,7 +1286,7 @@ rc_t CC KEncFileRead	(const KEncFile *cself,
  * Unsupported as we now treat archives as READ ONLY
  */
 static
-rc_t CC KEncFileWriteUnsupported (KEncFile *self, uint64_t pos,
+rc_t CC KEncFileV1WriteUnsupported (KEncFileV1 *self, uint64_t pos,
                                   const void *buffer, size_t bsize,
                                   size_t *num_writ)
 {
@@ -1251,7 +1296,7 @@ rc_t CC KEncFileWriteUnsupported (KEncFile *self, uint64_t pos,
 }
 
 static
-rc_t KEncFileWriteInt (KEncFile *self, uint64_t block_id, uint32_t block_offset,
+rc_t KEncFileV1WriteInt (KEncFileV1 *self, uint64_t block_id, uint32_t block_offset,
                        const void *buffer, size_t bsize,
                        size_t *pnum_writ, bool seek)
 {
@@ -1271,7 +1316,7 @@ rc_t KEncFileWriteInt (KEncFile *self, uint64_t block_id, uint32_t block_offset,
         /* if we need to change blocks */
         if (block_id != self->block.id)
         {
-            rc = KEncFileBlockSeek (self, block_id, true, false);
+            rc = KEncFileV1BlockSeek (self, block_id, true, false);
             if (rc)
                 return rc;
         }
@@ -1318,28 +1363,31 @@ rc_t KEncFileWriteInt (KEncFile *self, uint64_t block_id, uint32_t block_offset,
         remaining = sizeof self->block.data - self->block.u.valid;
 
         memmove (self->block.data + self->block.u.valid, buffer, remaining);
-        
+        self->block.u.valid = sizeof self->block.data;
+
         self->dirty = true;
-        rc = KEncFileBlockFlush (self);
+        rc = KEncFileV1BlockFlush (self);
         if (rc)
         {
             LOGERR (klogErr, rc, "error flushing block in encrypt");
             return rc;
         }
-        *pnum_writ += remaining;
+
+        tot_writ = remaining;
         pb += remaining;
         bsize -= remaining; 
         ++block_id;
     }
-    
+
     /* now loop through complete blocks to write */
     for (; bsize >= sizeof self->block.data; bsize -= sizeof self->block.data)
     {
         memcpy (self->block.data, pb, sizeof self->block.data);
+
         self->block.u.valid = sizeof self->block.data;
         self->block.id = block_id;
         self->dirty = true;
-        rc = KEncFileBlockFlush (self);
+        rc = KEncFileV1BlockFlush (self);
         if (rc)
         {
             LOGERR (klogErr, rc, "error flushing block in encrypt");
@@ -1355,14 +1403,14 @@ rc_t KEncFileWriteInt (KEncFile *self, uint64_t block_id, uint32_t block_offset,
     {
         KEncFileBlock b;
 
-        if (self->encrypted_max > BlockId_to_EncryptedOffset(block_id))
+        if (self->encrypted_max > BlockId_to_EncryptedPos(block_id))
         {
-            rc = KEncFileBlockRead (self, block_id, &b, false);
+            rc = KEncFileV1BlockRead (self, block_id, &b, false);
             if (rc)
                 return rc;
             /* if valid is not 0 we actually read something */
             if (b.u.valid)
-                rc = KEncFileBlockDecrypt (self, &b);
+                rc = KEncFileV1BlockDecrypt (self, &b);
         }
         else
         {
@@ -1384,7 +1432,7 @@ rc_t KEncFileWriteInt (KEncFile *self, uint64_t block_id, uint32_t block_offset,
 
 
 static
-rc_t CC KEncFileWrite (KEncFile *self, uint64_t pos,
+rc_t CC KEncFileV1Write (KEncFileV1 *self, uint64_t pos,
                        const void *buffer, size_t bsize,
                        size_t *pnum_writ)
 {
@@ -1401,9 +1449,9 @@ rc_t CC KEncFileWrite (KEncFile *self, uint64_t pos,
      * find our location in the encrypted file by block id
      * and offset
      */
-    block_id = DecryptedOffset_to_BlockId (pos, &block_offset);
-    curr_block_id = DecryptedOffset_to_BlockId
-        (BlockId_to_DecryptedOffset (self->block.id) + self->block.u.valid,
+    block_id = DecryptedPos_to_BlockId (pos, &block_offset);
+    curr_block_id = DecryptedPos_to_BlockId
+        (BlockId_to_DecryptedPos (self->block.id) + self->block.u.valid,
          &curr_block_offset);
 
     /* are we writing to the wrong block/offset? */
@@ -1412,13 +1460,13 @@ rc_t CC KEncFileWrite (KEncFile *self, uint64_t pos,
         rc = RC (rcFS, rcFile, rcWriting, rcOffset, rcIncorrect);
         PLOGERR (klogErr, (klogErr, rc, "attempt to seek in encryption write at"
                            " '$(O)' seek to '$(P)'", "O=%lu,P=%lu",
-                           BlockId_to_EncryptedOffset(self->block.id), pos));
+                           BlockId_to_EncryptedPos(self->block.id), pos));
     }
     else
     {
         if ((block_id != 0) && (block_id != self->block.id))
         {
-            rc = KEncFileBlockFlush (self);
+            rc = KEncFileV1BlockFlush (self);
             if (rc == 0)
             {
                 ++self->block.id;
@@ -1427,7 +1475,7 @@ rc_t CC KEncFileWrite (KEncFile *self, uint64_t pos,
         }
         
         if (rc == 0)
-            rc = KEncFileWriteInt (self, block_id, block_offset, buffer,
+            rc = KEncFileV1WriteInt (self, block_id, block_offset, buffer,
                                        bsize, pnum_writ, false);
     }
     return rc;
@@ -1435,31 +1483,32 @@ rc_t CC KEncFileWrite (KEncFile *self, uint64_t pos,
 
 
 static
-rc_t CC KEncFileUpdate (KEncFile *self, uint64_t pos,
+rc_t CC KEncFileV1WriteSwarm (KEncFileV1 *self, uint64_t pos,
+                            const void *buffer, size_t bsize,
+                            size_t *pnum_writ)
+{
+    uint32_t block_offset;
+    rc_t rc;
+
+    self->block.id = DecryptedPos_to_BlockId (pos, &block_offset);
+    self->block.u.valid = 0;
+    if (bsize > sizeof self->block.data - block_offset)
+        bsize = sizeof self->block.data - block_offset;
+
+    rc = KEncFileV1WriteInt (self, self->block.id, block_offset, buffer,
+                           bsize, pnum_writ, false);
+    if (rc == 0)
+        rc = KEncFileV1BlockFlush (self);
+    return rc;
+}
+
+
+static
+rc_t CC KEncFileV1Update (KEncFileV1 *self, uint64_t pos,
                         const void *buffer, size_t bsize,
                         size_t *pnum_writ)
 {
-    uint64_t block_id;
-    uint32_t block_offset;
-    bool seek;
-
-    assert (self); /* checked in file.c KFileWrite() */
-    /* pos can be 'anything' */
-    assert (buffer); /* checked in file.c KFileWrite() */
-    assert (bsize); /* checked in file.c KFileWrite() */
-    assert (pnum_writ); /* checked in file.c KFileWrite() */
-
-    /*
-     * find our location in the encrypted file by block id
-     * and offset
-     */
-    block_id = DecryptedOffset_to_BlockId (pos, &block_offset);
-
-    /* are we on the wrong block? or need to seek forward? */
-    seek = ((block_id != self->block.id) || (block_offset > self->block.u.valid));
-
-    return KEncFileWriteInt (self, block_id, block_offset, buffer, bsize, 
-                             pnum_writ, seek);
+    return RC (rcKrypto, rcFile, rcConstructing, rcFunction, rcUnsupported);
 }
 
 
@@ -1470,7 +1519,7 @@ rc_t CC KEncFileUpdate (KEncFile *self, uint64_t pos,
  *  but rather an implementation class
  */
 static
-uint32_t CC KEncFileType (const KEncFile *self)
+uint32_t CC KEncFileV1Type (const KEncFileV1 *self)
 {
     assert (self != NULL);
     assert (self->encrypted != NULL);
@@ -1480,7 +1529,7 @@ uint32_t CC KEncFileType (const KEncFile *self)
 
 
 /* ----------------------------------------------------------------------
- * KEncFileMake
+ * KEncFileV1Make
  *  create a new file object
  */
 
@@ -1488,7 +1537,7 @@ uint32_t CC KEncFileType (const KEncFile *self)
  * KeysInit
  */
 static
-rc_t KEncFileCiphersInit (KEncFile * self, const KKey * key, bool read, bool write)
+rc_t KEncFileV1CiphersInit (KEncFileV1 * self, const KKey * key, bool read, bool write)
 {
     KCipherManager * mgr;
     size_t z;
@@ -1546,10 +1595,10 @@ rc_t KEncFileCiphersInit (KEncFile * self, const KKey * key, bool read, bool wri
  *    common make for all encryptor/decryptors
  */
 static
-rc_t KEncFileMakeInt (KEncFile ** pself, KFile * encrypted,
+rc_t KEncFileV1MakeInt (KEncFileV1 ** pself, KFile * encrypted,
                       const KFile_vt_v1 * vt, bool r, bool w, bool v)
 {
-    KEncFile * self;
+    KEncFileV1 * self;
     rc_t rc;
 
     assert (pself);
@@ -1566,7 +1615,7 @@ rc_t KEncFileMakeInt (KEncFile ** pself, KFile * encrypted,
     else
     {
         /* all KFiles get this initialization */
-        rc = KFileInit (&self->dad, (const KFile_vt*)vt, r, w);
+        rc = KFileInit (&self->dad, (const KFile_vt*)vt, "KEncFileV1", "no-name", r, w);
         if (rc)
             LOGERR (klogInt, rc, "failure initialize encrypted file root class");
         else
@@ -1590,7 +1639,7 @@ rc_t KEncFileMakeInt (KEncFile ** pself, KFile * encrypted,
  * common parameter validation for all encryptor/decryptors
  */
 static
-rc_t KEncFileMakeCmn (KEncFile ** pself, KFile * encrypted, const KKey * key,
+rc_t KEncFileV1MakeCmn (KEncFileV1 ** pself, KFile * encrypted, const KKey * key,
                       const KFile_vt_v1 * vt, bool r, bool w)
 {
     rc_t rc = 0;
@@ -1643,16 +1692,16 @@ rc_t KEncFileMakeCmn (KEncFile ** pself, KFile * encrypted, const KKey * key,
         }
         if (rc == 0)
         {
-            KEncFile * self;
+            KEncFileV1 * self;
 
             assert (vt);
             assert ((r == true) || (r == false));
             assert ((w == true) || (w == false));
 
-            rc = KEncFileMakeInt (&self, encrypted, vt, r, w, false);
+            rc = KEncFileV1MakeInt (&self, encrypted, vt, r, w, false);
             if (rc == 0)
             {
-                rc = KEncFileCiphersInit (self, key, r, w);
+                rc = KEncFileV1CiphersInit (self, key, r, w);
                 if (rc == 0)
                 {
                     *pself = self;
@@ -1667,73 +1716,73 @@ rc_t KEncFileMakeCmn (KEncFile ** pself, KFile * encrypted, const KKey * key,
 
 
 
-static const KFile_vt_v1 vtKEncFileRead =
+static const KFile_vt_v1 vtKEncFileV1Read =
 {
     /* version */
     1, 1,
 
     /* 1.0 */
-    KEncFileDestroyRead,
-    KEncFileGetSysFileUnsupported,
-    KEncFileRandomAccess,
-    KEncFileSizeUnsupported,
-    KEncFileSetSizeUnsupported,
-    KEncFileRead,
-    KEncFileWriteUnsupported,
+    KEncFileV1DestroyRead,
+    KEncFileV1GetSysFileUnsupported,
+    KEncFileV1RandomAccess,
+    KEncFileV1SizeUnsupported,
+    KEncFileV1SetSizeUnsupported,
+    KEncFileV1Read,
+    KEncFileV1WriteUnsupported,
 
     /* 1.1 */
-    KEncFileType
+    KEncFileV1Type
 };
-static const KFile_vt_v1 vtKEncFileWrite =
+static const KFile_vt_v1 vtKEncFileV1Write =
 {
     /* version */
     1, 1,
 
     /* 1.0 */
-    KEncFileDestroyWrite,
-    KEncFileGetSysFileUnsupported,
-    KEncFileRandomAccessUnsupported,
-    KEncFileSizeUnsupported,
-    KEncFileSetSizeUnsupported,
-    KEncFileReadUnsupported,
-    KEncFileWrite,
+    KEncFileV1DestroyWrite,
+    KEncFileV1GetSysFileUnsupported,
+    KEncFileV1RandomAccessUnsupported,
+    KEncFileV1SizeUnsupported,
+    KEncFileV1SetSizeUnsupported,
+    KEncFileV1ReadUnsupported,
+    KEncFileV1Write,
 
     /* 1.1 */
-    KEncFileType
+    KEncFileV1Type
 };
-static const KFile_vt_v1 vtKEncFileUpdate =
+static const KFile_vt_v1 vtKEncFileV1Update =
 {
     /* version */
     1, 1,
 
     /* 1.0 */
-    KEncFileDestroyWrite,
-    KEncFileGetSysFileUnsupported,
-    KEncFileRandomAccess,
-    KEncFileSizeUnsupported,
-    KEncFileSetSizeUnsupported,
-    KEncFileRead,
-    KEncFileUpdate,
+    KEncFileV1DestroySwarm,
+    KEncFileV1GetSysFileUnsupported,
+    KEncFileV1RandomAccess,
+    KEncFileV1SizeUnsupported,
+    KEncFileV1SetSizeUnsupported,
+    KEncFileV1ReadUnsupported,
+    KEncFileV1WriteSwarm,
 
     /* 1.1 */
-    KEncFileType
+    KEncFileV1Type
 };
-static const KFile_vt_v1 vtKEncFileValidate =
+static const KFile_vt_v1 vtKEncFileV1Validate =
 {
     /* version */
     1, 1,
 
     /* 1.0 */
-    KEncFileDestroyRead,
-    KEncFileGetSysFileUnsupported,
-    KEncFileRandomAccessUnsupported,
-    KEncFileSizeUnsupported,
-    KEncFileSetSizeUnsupported,
-    KEncFileReadUnsupported,
-    KEncFileWriteUnsupported,
+    KEncFileV1DestroyRead,
+    KEncFileV1GetSysFileUnsupported,
+    KEncFileV1RandomAccessUnsupported,
+    KEncFileV1SizeUnsupported,
+    KEncFileV1SetSizeUnsupported,
+    KEncFileV1ReadUnsupported,
+    KEncFileV1WriteUnsupported,
 
     /* 1.1 */
-    KEncFileType
+    KEncFileV1Type
 };
 
 
@@ -1741,19 +1790,19 @@ static const KFile_vt_v1 vtKEncFileValidate =
  * Read mode is fully seekable if the underlying KFile is seekable some
  * integrity checking will not be performed in allowing this seeking.
  */
-LIB_EXPORT rc_t CC KEncFileMakeRead (const KFile ** pself, 
-                                     const KFile * encrypted,
-                                     const KKey * key)
+LIB_EXPORT rc_t CC KEncFileMakeRead_v1 (const KFile ** pself, 
+                                        const KFile * encrypted,
+                                        const KKey * key)
 {
-    KEncFile * self;
+    KEncFileV1 * self;
     rc_t rc;
-    rc = KEncFileMakeCmn (&self, (KFile *)encrypted, key, &vtKEncFileRead, 
+    rc = KEncFileV1MakeCmn (&self, (KFile *)encrypted, key, &vtKEncFileV1Read, 
                           true, false);
     if (rc)
         LOGERR (klogErr, rc, "error constructing decryptor");
     else
     {
-        rc = KEncFileHeaderRead (self);
+        rc = KEncFileV1HeaderRead (self);
         if (rc)
             LOGERR (klogErr, rc, "error reading encrypted file header");
         else
@@ -1771,11 +1820,11 @@ LIB_EXPORT rc_t CC KEncFileMakeRead (const KFile ** pself,
  * Write mode encrypted file can only be written straight through form the
  * first byte to the last.
  */
-LIB_EXPORT rc_t CC KEncFileMakeWrite (KFile ** pself, 
-                                      KFile * encrypted,
-                                      const KKey * key)
+LIB_EXPORT rc_t CC KEncFileMakeWrite_v1 (KFile ** pself, 
+                                         KFile * encrypted,
+                                         const KKey * key)
 {
-    KEncFile * self;
+    KEncFileV1 * self;
     rc_t rc;
 
     rc = KFileSetSize (encrypted, 0);
@@ -1785,7 +1834,7 @@ LIB_EXPORT rc_t CC KEncFileMakeWrite (KFile ** pself,
                 "corrupted file might result");
 #endif
 
-    rc = KEncFileMakeCmn (&self, encrypted, key, &vtKEncFileWrite, 
+    rc = KEncFileV1MakeCmn (&self, encrypted, key, &vtKEncFileV1Write, 
                           false, true);
     if (rc)
         LOGERR (klogErr, rc, "error creating encryptor");
@@ -1798,28 +1847,23 @@ LIB_EXPORT rc_t CC KEncFileMakeWrite (KFile ** pself,
 /* ----------
  * Update mode is read/write mode where seeking within the file is allowed.
  */
-LIB_EXPORT rc_t CC KEncFileMakeUpdate (KFile ** pself, 
-                                       KFile * encrypted,
-                                       const KKey * key)
+
+
+LIB_EXPORT rc_t CC KEncFileV1MakeUpdate_v1 (KFile ** pself, 
+                                          KFile * encrypted,
+                                          const KKey * key)
 {
-    KEncFile * self;
+    KEncFileV1 * self;
     rc_t rc;
 
-    rc =  KEncFileMakeCmn (&self, encrypted, key, &vtKEncFileUpdate,
-                           true, true);
+    rc = KEncFileV1MakeCmn (&self, encrypted, key, &vtKEncFileV1Update, 
+                          false, true);
     if (rc)
-        LOGERR (klogErr, rc, "error constructing encryptor/decryptor");
+        LOGERR (klogErr, rc, "error creating encryptor");
     else
     {
-        rc = KEncFileHeaderRead (self);
-        if (rc)
-            LOGERR (klogErr, rc, "error reading encrypted file header");
-        else
-        {
-            *pself = &self->dad;
-            return 0;
-        }
-        KFileRelease (&self->dad);
+        self->swarm = true;
+        *pself = &self->dad;
     }
     return rc;
 }
@@ -1829,20 +1873,20 @@ LIB_EXPORT rc_t CC KEncFileMakeUpdate (KFile ** pself,
  * Validate mode is useful only for the KFileEncValidate function
  */
 static
-rc_t KEncFileMakeValidate (const KEncFile ** pself, const KFile * encrypted)
+rc_t KEncFileV1MakeValidate (const KEncFileV1 ** pself, const KFile * encrypted)
 {
-    KEncFile * self;
+    KEncFileV1 * self;
     rc_t rc;
 
     assert (pself);
     assert (encrypted);
 
-    rc = KEncFileMakeInt (&self, (KFile*)encrypted, &vtKEncFileValidate, true, false, true);
+    rc = KEncFileV1MakeInt (&self, (KFile*)encrypted, &vtKEncFileV1Validate, true, false, true);
     if (rc)
-        LOGERR (klogErr, rc, "error making KEncFile");
+        LOGERR (klogErr, rc, "error making KEncFileV1");
     else
     {
-        rc = KEncFileHeaderRead (self);
+        rc = KEncFileV1HeaderRead (self);
         if (rc)
             LOGERR (klogErr, rc, "error reading encrypted file header");
         else
@@ -1861,9 +1905,9 @@ rc_t KEncFileMakeValidate (const KEncFile ** pself, const KFile * encrypted)
  * Upon open the whole file is read from begining to end and all CRC
  * and other integrity checks are performed immedaitely
  */
-LIB_EXPORT rc_t CC KEncFileValidate (const KFile * encrypted)
+LIB_EXPORT rc_t CC KEncFileV1Validate_v1 (const KFile * encrypted)
 {
-    const KEncFile * file;
+    const KEncFileV1 * file;
     rc_t rc;
 
     /* fail if a NULL parameter: can't validate all addresses */
@@ -1874,13 +1918,13 @@ LIB_EXPORT rc_t CC KEncFileValidate (const KFile * encrypted)
         return rc;
     }
 
-    /* if the parameter is already a KEncFile work on the file behind it instead */
+    /* if the parameter is already a KEncFileV1 work on the file behind it instead */
     /* we definitely can't work on a file being written that has not been closed */
-    if (encrypted->vt == (const KFile_vt*)&vtKEncFileRead)
-        encrypted = (const KFile *)(((const KEncFile*)encrypted)->encrypted);
+    if (encrypted->vt == (const KFile_vt*)&vtKEncFileV1Read)
+        encrypted = (const KFile *)(((const KEncFileV1*)encrypted)->encrypted);
 
     /* file header is validated within the call to Make Validate */
-    rc = KEncFileMakeValidate (&file, encrypted);
+    rc = KEncFileV1MakeValidate (&file, encrypted);
     if (rc)
         LOGERR (klogErr, rc,
                 "unable to validate encrypted file due to "
@@ -1896,9 +1940,10 @@ LIB_EXPORT rc_t CC KEncFileValidate (const KFile * encrypted)
         {
             KEncFileBlock block;
 
-            STSMSG (2, ("reading block '%u'", block_count));
+            STSMSG (2, ("reading block '%u' at '%lu'", block_count,
+                        BlockId_to_EncryptedPos(block_count)));
            
-            rc = KEncFileBlockRead (file, block_count, &block, true);
+            rc = KEncFileV1BlockRead (file, block_count, &block, true);
             if (rc)
             {
                 STSMSG (2, ("read error at block '%u'", block_count));
@@ -1917,34 +1962,8 @@ LIB_EXPORT rc_t CC KEncFileValidate (const KFile * encrypted)
     return (rc);
 }
 
-/* intended for copycat only - DO NOT USE LIGHTLY AS THEY ARE INSECURE! */
-LIB_EXPORT rc_t CC KEncFileGetRawFile (KEncFile * self, KFile ** raw)
-{
-    if (raw == NULL)
-        return RC (rcKrypto, rcFile, rcAccessing, rcParam, rcNull);
-    *raw = NULL;
-    if (self == NULL)
-        return RC (rcKrypto, rcFile, rcAccessing, rcSelf, rcNull);
 
-    *raw = self->encrypted;
-
-    return 0;
-}
-LIB_EXPORT rc_t CC KEncFileSetRawFile (KEncFile * self, KFile * raw)
-{
-    if (raw == NULL)
-        return RC (rcKrypto, rcFile, rcAccessing, rcParam, rcNull);
-    if (self == NULL)
-        return RC (rcKrypto, rcFile, rcAccessing, rcSelf, rcNull);
-
-    self->encrypted = raw;
-
-    return 0;
-}
-
-
-
-LIB_EXPORT rc_t CC KFileIsEnc (const char * buffer, size_t buffer_size)
+LIB_EXPORT rc_t CC KFileIsEnc_v1 (const char * buffer, size_t buffer_size)
 {
     const KEncFileHeader * header;
 
@@ -1960,11 +1979,141 @@ LIB_EXPORT rc_t CC KFileIsEnc (const char * buffer, size_t buffer_size)
         buffer_size = sizeof (*header);
 
     if ((memcmp (header, &const_header, buffer_size) == 0) ||
-        (memcmp (header, &const_bswap_header, buffer_size) == 0))
+        (memcmp (header, &const_bswap_header, buffer_size) == 0)
+#if ENABLE_V2
+        ||
+        (memcmp (header, &const_header_v1, buffer_size) == 0) ||
+        (memcmp (header, &const_bswap_header_v1, buffer_size) == 0)
+#endif
+        )
         return 0;
 
     return RC (rcFS, rcFile, rcIdentifying, rcFile, rcWrongType); 
 }
+
+
+
+/* ----------
+ * Read mode is fully seekable if the underlying KFile is seekable some
+ * integrity checking will not be performed in allowing this seeking.
+ */
+LIB_EXPORT rc_t CC KEncFileMakeRead (const struct KFile ** pself,
+                                        const struct KFile * encrypted_input,
+                                        const struct KKey * key)
+{
+#if USE_READ_V1
+    return KEncFileV1MakeRead_v1 (pself, encrypted_input, key);
+#else
+    return KEncFileMakeRead_v2 (pself, encrypted_input, key);
+#endif
+}
+
+
+/* ----------
+ * Write mode encrypted file can only be written straight through from the
+ * first byte to the last.
+ */
+LIB_EXPORT rc_t CC KEncFileMakeWrite (struct KFile ** pself,
+                                         struct KFile * encrypted_output,
+                                         const struct KKey * key)
+{
+#if USE_WRITE_V1
+    return KEncFileV1MakeWrite_v1 (pself, encrypted_output, key);
+#else
+    return KEncFileMakeWrite_v2 (pself, encrypted_output, key);
+#endif
+}
+
+/* ----------
+ * Update mode is read/write mode where seeking within the file is allowed.
+ *
+ * NOTE this is in the private interface because it is not actually working
+ * yet.
+ */
+LIB_EXPORT rc_t CC KEncFileMakeUpdate (struct KFile ** pself, 
+                                       struct KFile * encrypted,
+                                       const struct KKey * key)
+{
+#if USE_UPDATE_V1
+    return KEncFileV1MakeUpdate_v1 (pself, encrypted, key);
+#else
+    return KEncFileMakeUpdate_v2 (pself, encrypted, key);
+#endif
+}
+LIB_EXPORT rc_t CC KEncFileMakeWriteBlock (struct KFile ** pself, 
+                                           struct KFile * encrypted,
+                                           const struct KKey * key)
+{
+#if USE_BLOCK_V1
+    return KEncFileV1MakeUpdate_v1 (pself, encrypted, key);
+#else
+    return KEncFileMakeUpdate_v2 (pself, encrypted, key);
+#endif
+}
+
+
+LIB_EXPORT rc_t CC KEncFileWriteHeader  (KFile * self)
+{
+#if USE_UPDATE_V1
+    return KEncFileV1WriteHeader_v1  (self);
+#else
+    return KEncFileV1WriteHeader_v1  (self);
+#endif
+}
+
+
+/* ----------
+ * Validate mode can not be read or written.
+ * Upon open the whole file is read from begining to end and all CRC
+ * and other integrity checks are performed immedaitely
+ */
+LIB_EXPORT rc_t CC KEncFileValidate (const struct KFile * encrypted)
+{
+#if USE_VALIDATE_V1
+    return KEncFileV1Validate_v1 (encrypted);
+#else
+    return KEncFileValidate_v2 (encrypted);
+#endif
+}
+
+
+/* ----------
+ * Identify whether a file is a KEncFile type encrypted file by the header.
+ * read the header into a buffer and pass it into this function.  
+ * The buffer_size needs to be at least 8 but more bytes lead to a better
+ * check up to the size of the header of a KEncFile type encrypted file.
+ * As the header may change in the future (in a backwards compatible way)
+ * that size might change from the current 16.
+ *
+ * Possible returns:
+ * 0:
+ *      the file is an identified KEncFile type file.  False positives are
+ *      possible if a file happens to match at 8 or more bytes
+ *
+ * RC (rcFS, rcFile, rcIdentifying, rcFile, rcWrongType)
+ *      the file is definitely not a KEncFile type encrypted file.
+ *     
+ * RC (rcFS, rcFile, rcIdentifying, rcParam, rcNull)
+ *      bad parameters in the call
+ *
+ * RC (rcFS, rcFile, rcIdentifying, rcBuffer, rcInsufficient)
+ *      not a large enough buffer to make an identification
+ */
+LIB_EXPORT rc_t CC KFileIsEnc (const char * buffer, size_t buffer_size)
+{
+#if USE_ISENC_V1
+    return KFileIsEnc_v1 (buffer, buffer_size);
+#else
+    return KFileIsEnc_v2 (buffer, buffer_size);
+#endif
+}
+
+
+
+#ifdef __cplusplus
+}
+#endif
+
 
 
 /* end of file encfile.c */

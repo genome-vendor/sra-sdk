@@ -26,88 +26,21 @@
 
 #include <sra/sraschema.h>
 #include <sra/sradb-priv.h>
-#include <kfs/dyload.h>
 #include <klib/rc.h>
 
-#include <sysalloc.h>
-#include <os-native.h>
-
 #include "sra-priv.h"
-
-#include <string.h>
-#include <assert.h>
-
 
 /*--------------------------------------------------------------------------
  * SRASchema
  *  a schema object pre-loaded with default SRA schema
  */
 
-#if ! _STATIC
-/* LoadLibrary
- *  loads libsraschema and fills out function pointers
- */
-static KDylib *libsraschema = NULL;
-
-static struct
-{
-    rc_t ( CC * sraSchemaMake ) ( struct VSchema **schema, struct VDBManager const *mgr );
-
-} imports;
-
-static
-rc_t SRASchemaLoadLibrary ( void )
-{
-    KDyld *dl;
-    rc_t rc = KDyldMake ( & dl );
-    if ( rc == 0 )
-    {
-        rc = KDyldLoadLib ( dl, & libsraschema, LPFX "sra-schema" SHLX );
-        if ( rc == 0 )
-        {
-            KSymAddr *sym;
-
-            /* resolve symbols */
-            rc = KDylibSymbol ( libsraschema, & sym, "SRASchemaMake" );
-            if ( rc == 0 )
-            {
-                KSymAddrAsFunc ( sym, ( fptr_t* ) & imports . sraSchemaMake );
-                KSymAddrRelease ( sym );
-            }
-
-            /* bail on error */
-            if ( rc != 0 )
-            {
-                KDylibRelease ( libsraschema );
-                libsraschema = NULL;
-                memset ( & imports, 0, sizeof imports );
-            }
-        }
-        KDyldRelease ( dl );
-    }
-
-    return rc;
-}
-#endif
-
 /* Make
  *  create an instance of the default SRA schema
  */
 rc_t CC VDBManagerMakeSRASchema ( struct VDBManager const *self, struct VSchema **schema )
 {
-#if _STATIC
     return SRASchemaMake ( schema, self );
-#else
-    if ( libsraschema == NULL )
-    {
-        rc_t rc = SRASchemaLoadLibrary ();
-        if ( rc != 0 )
-            return rc;
-    }
-
-    assert ( imports . sraSchemaMake != NULL );
-    return ( * imports . sraSchemaMake ) ( schema, self );
-#endif
 }
 
 rc_t CC SRAMgrMakeSRASchema ( const SRAMgr *self, struct VSchema **schema )

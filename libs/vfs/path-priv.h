@@ -38,7 +38,11 @@
 #include <stdarg.h>
 
 #ifdef __cplusplus
-extern "C" {}
+extern "C" {
+#endif
+
+#ifndef USE_VRESOLVER
+#define USE_VRESOLVER 1
 #endif
 
 #ifndef SUPPORT_FILE_URL
@@ -49,6 +53,10 @@ extern "C" {}
 #define USE_EXPERIMENTAL_CODE 1
 #endif
 
+#ifndef USE_VPATH_OPTIONS_STRINGS
+#define USE_VPATH_OPTIONS_STRINGS 0
+#endif
+
 #ifdef _DEBUGGING
 #define PATH_DEBUG(msg) DBGMSG(DBG_VFS,DBG_FLAG(DBG_VFS_PATH), msg)
 #else
@@ -56,19 +64,6 @@ extern "C" {}
 #endif
 #define OFF_PATH_DEBUG(msg)
 
-#define NCBI_FILE_SCHEME "ncbi-file"
-
-typedef int32_t VPUri_t;
-enum eVPUri_t
-{
-    vpuri_invalid = -1,
-    vpuri_not_supported,
-    vpuri_ncbi_vfs,
-#if SUPPORT_FILE_URL
-    vpuri_file,
-#endif
-    vpuri_count
-};
 
 typedef struct VPOption VPOption;
 struct VPOption
@@ -81,6 +76,17 @@ struct VPOption
 
 struct VPath
 {
+#if USE_VPATH_OPTIONS_STRINGS
+    const VPath * root;
+
+    KRefcount refcount;
+
+    String fullpath;
+
+    String scheme;
+
+
+#else
     const VPath * root;
     KRefcount refcount;
     String path;
@@ -89,7 +95,9 @@ struct VPath
     char * fragment;
     size_t alloc_size;  /* how much extra space allocated for a path too long for the built in buffer */
     size_t asciz_size;  /* doubles as allocated size -1 if less than the size of the buffer below */
+    VPUri_t scheme;
     char * storage;
+#endif
 };
 
 

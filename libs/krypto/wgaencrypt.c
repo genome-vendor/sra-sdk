@@ -49,6 +49,8 @@
 #include <string.h>
 #include <assert.h>
 
+#include <os-native.h> /* strncasecmp on Windows */
+
 /* retain errors in encryption to be compatible with C++ */
 #define RETAINED_COMPATIBILTY_WITH_ERROR 1
 
@@ -466,8 +468,9 @@ rc_t KWGAEncFileReadInt (KWGAEncFile * self, uint64_t pos, size_t bsize)
 
 #if RETAINED_COMPATIBILTY_WITH_ERROR
         KCipherDecryptECB (self->cipher, self->buffer.data, self->buffer.data,
-                           (tot_read / ECB_BYTES) * ECB_BYTES);
+                           (tot_read / ECB_BYTES));
 #else
+/* Well this is wrong for even being wrong now */
         KCipherDecryptECB (self->cipher, self->buffer.data, self->buffer.data,
                            tot_read);
 #endif
@@ -865,6 +868,7 @@ KRYPTO_EXTERN rc_t CC KFileMakeWGAEncRead (const struct KFile ** pself,
                                     rc = KFileInit (&self->dad, 
                                                     (const KFile_vt*)
                                                     &vtKWGAEncFileRead,
+                                                    "KWGAEncFile", "no-name",
                                                     true, false);
                                     if (rc)
                                         LOGERR (klogInt, rc, "Failed to initialize decrypting file");
@@ -1161,7 +1165,19 @@ KRYPTO_EXTERN rc_t CC WGAEncValidate (const KFile * encrypted,
             }
             if (rc == 0)
             {
+                uint64_t sys_file_size;
+                uint64_t pad_file_size;
+                rc_t orc;
+
                 /* ccheck file size */
+
+                orc = KFileSize (encrypted, &sys_file_size);
+                if (orc == 0)
+                {
+                    pad_file_size = file_size + 15;
+                    pad_file_size &= ~15;
+                    pad_file_size += sizeof (KWGAEncFileHeader);
+                }
                 header_file_size = strtou64 (header.file_sz, NULL, KWGA_ENC_FILE_HEADER_RADIX);
 
                 if (key_size == 0)
@@ -1175,6 +1191,11 @@ KRYPTO_EXTERN rc_t CC WGAEncValidate (const KFile * encrypted,
                 
                 else if (file_size > header_file_size)
                     rc = RC (rcKrypto, rcFile, rcValidating, rcSize, rcExcessive);
+
+                else if ((orc == 0) &&
+                         (sys_file_size > pad_file_size))
+                    rc = RC (rcKrypto, rcFile, rcValidating, rcSize, rcExcessive);
+
                 /* check md5 */
                 else if (!header.md5_here)
                     rc = RC (rcKrypto, rcFile, rcValidating, rcEncryption, rcNotFound);

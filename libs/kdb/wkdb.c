@@ -36,6 +36,9 @@
 
 #include <vfs/manager.h>
 #include <vfs/path.h>
+#include <vfs/resolver.h>
+#include <vfs/manager-priv.h>
+#include <sra/srapath.h>
 
 #include <kfs/kfs-priv.h>
 #include <kfs/directory.h>
@@ -53,12 +56,16 @@
 
 #include <limits.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
 #include <ctype.h>
 #include <assert.h>
 #include <errno.h>
 
+#ifndef SUPPORT_VFS_URI
+#define SUPPORT_VFS_URI 0
+#endif
 
 /*--------------------------------------------------------------------------
  * (W)KDB utility
@@ -116,7 +123,7 @@ enum ScanBits
 static
 rc_t CC scan_dbdir ( const KDirectory *dir, uint32_t type, const char *name, void *data )
 {
-    int *bits = data;
+    uint32_t *bits = data;
 
     type &= kptAlias - 1;
 
@@ -223,100 +230,119 @@ const char *KDBGetNamespaceString ( int namespace )
     }
 }
 
-int KDBPathType ( const KDirectory *dir, bool *pHasZombies, const char *path )
+
+int KDBPathTypeDir (const KDirectory * dir, int type, bool * pHasZombies, const char * path)
 {
-    const char *leaf, *parent;
-
-    rc_t rc;
+    const char * leaf, * parent;
     uint32_t bits;
-    int type = KDirectoryVPathType ( dir, path, NULL );
-    switch ( type )
+    rc_t rc;
+
+    bits = 0;
+
+    assert ((type == kptDir) || (type == (kptDir|kptAlias)));
+
+    rc = KDirectoryVVisit ( dir, false, scan_dbdir, & bits, path, NULL );
+    if ( rc == 0 ) do
     {
-    case kptDir:
-    case kptDir | kptAlias:
-        bits = 0;
-        rc = KDirectoryVVisit ( dir, false, scan_dbdir, & bits, path, NULL );
-        if ( rc == 0 )
+        if ( ( bits & scan_zombie ) != 0 ) {
+            bits &= ~scan_zombie;
+            if (pHasZombies)
+                *pHasZombies = true;
+        }
+        /* look for a column */
+        if ( ( bits & scan_idxN ) != 0 &&
+             ( bits & ( scan_data | scan_dataN ) ) != 0 )
         {
-            if ( ( bits & scan_zombie ) != 0 ) {
-                bits &= ~scan_zombie;
-                if (pHasZombies)
-                    *pHasZombies = true;
-            }
-            /* look for a column */
-            if ( ( bits & scan_idxN ) != 0 &&
-                 ( bits & ( scan_data | scan_dataN ) ) != 0 )
-            {
-                if ( ( bits & ( scan_db | scan_tbl | scan_idx | scan_col ) ) == 0 )
-                    type += kptColumn - kptDir;
-                break;
-            }
+            if ( ( bits & ( scan_db | scan_tbl | scan_idx | scan_col ) ) == 0 )
+                type += kptColumn - kptDir;
+            break;
+        }
 
-            /* look for a table */
-            if ( ( bits & scan_col ) != 0 )
+        /* look for a table */
+        if ( ( bits & scan_col ) != 0 )
+        {
+            /* can't have sub-tables or a db */
+            if ( ( bits & ( scan_db | scan_tbl ) ) == 0 )
             {
-                /* can't have sub-tables or a db */
-                if ( ( bits & ( scan_db | scan_tbl ) ) == 0 )
+                /* look for an old-structure table */
+                if ( ( bits & ( scan_meta | scan_md ) ) == scan_meta ||
+                     ( bits & ( scan_skey | scan_idx ) ) == scan_skey )
+                    type += kptPrereleaseTbl - kptDir;
+                else
+                    type += kptTable - kptDir;
+            }
+            break;
+        }
+
+        /* look for metadata */
+        if ( ( bits & ( scan_cur | scan_rNNN ) ) != 0 )
+        {
+            if ( ( bits & ( scan_db | scan_tbl | scan_idx | scan_col ) ) == 0 )
+                type += kptMetadata - kptDir;
+            break;
+        }
+
+        /* look for a database */
+        if ( ( bits & scan_tbl ) != 0 )
+        {
+            if ( ( bits & scan_col ) == 0 )
+                type += kptDatabase - kptDir;
+            break;
+        }
+
+        /* look for a structured column */
+        if ( ( bits & scan_odir ) != 0 )
+        {
+            leaf = strrchr ( path, '/' );
+            if ( leaf != NULL )
+            {
+                parent = string_rchr ( path, leaf - path, '/' );
+                if ( parent ++ == NULL )
+                    parent = path;
+                if ( memcmp ( parent, "col/", 4 ) != 0 )
+                    break;
+
+                bits = 0;
+                if ( KDirectoryVVisit ( dir, 1, scan_dbdir, & bits, path, NULL ) == 0 )
                 {
-                    /* look for an old-structure table */
-                    if ( ( bits & ( scan_meta | scan_md ) ) == scan_meta ||
-                         ( bits & ( scan_skey | scan_idx ) ) == scan_skey )
-                        type += kptPrereleaseTbl - kptDir;
-                    else
-                        type += kptTable - kptDir;
-                }
-                break;
-            }
-
-            /* look for metadata */
-            if ( ( bits & ( scan_cur | scan_rNNN ) ) != 0 )
-            {
-                if ( ( bits & ( scan_db | scan_tbl | scan_idx | scan_col ) ) == 0 )
-                    type += kptMetadata - kptDir;
-                break;
-            }
-
-            /* look for a database */
-            if ( ( bits & scan_tbl ) != 0 )
-            {
-                if ( ( bits & scan_col ) == 0 )
-                    type += kptDatabase - kptDir;
-                break;
-            }
-
-            /* look for a structured column */
-            if ( ( bits & scan_odir ) != 0 )
-            {
-                leaf = strrchr ( path, '/' );
-                if ( leaf != NULL )
-                {
-                    parent = string_rchr ( path, leaf - path, '/' );
-                    if ( parent ++ == NULL )
-                        parent = path;
-                    if ( memcmp ( parent, "col/", 4 ) != 0 )
-                        break;
-
-                    bits = 0;
-                    if ( KDirectoryVVisit ( dir, 1, scan_dbdir, & bits, path, NULL ) == 0 )
+                    if ( ( bits & scan_idxN ) != 0 &&
+                         ( bits & ( scan_data | scan_dataN ) ) != 0 )
                     {
-                        if ( ( bits & scan_idxN ) != 0 &&
-                             ( bits & ( scan_data | scan_dataN ) ) != 0 )
-                        {
-                            if ( ( bits & ( scan_db | scan_tbl | scan_idx | scan_col ) ) == 0 )
-                                type += kptColumn - kptDir;
-                            break;
-                        }
+                        if ( ( bits & ( scan_db | scan_tbl | scan_idx | scan_col ) ) == 0 )
+                            type += kptColumn - kptDir;
+                        break;
                     }
                 }
             }
         }
+    } while (0);
+
+    return type;
+}
+
+
+int KDBPathType ( const KDirectory *dir, bool *pHasZombies, const char *path )
+{
+    const char *leaf, *parent;
+
+
+    rc_t rc;
+    int type = KDirectoryVPathType ( dir, path, NULL );
+    
+    if (pHasZombies)
+        *pHasZombies = false;
+
+    switch ( type )
+    {
+    case kptDir:
+    case kptDir | kptAlias:
+        type = KDBPathTypeDir (dir, type, pHasZombies, path);
         break;
 
     case kptFile:
     case kptFile | kptAlias:
     {
         /* if we hit a file first try it as an archive */
-        rc_t rc;
         const KDirectory * ldir;
 
         rc = KDirectoryOpenSraArchiveRead_silent ( dir, &ldir, false, path );
@@ -350,11 +376,13 @@ int KDBPathType ( const KDirectory *dir, bool *pHasZombies, const char *path )
         break;
     }
     }
-
     return type;
 }
 
 
+
+#if SUPPORT_VFS_URI
+#else
 /* return configured password as ASCIZ
  * opertates on vfs/kfs/kfg objects, not kdb objects */
 static
@@ -374,7 +402,7 @@ rc_t KDBOpenFileGetPassword (char * pw, size_t pwz)
     else
     {
         size_t pwfz;
-        char pwf [4097];
+        char pwf [4096 + 1];
 
         rc = VFSManagerGetConfigPWFile (mgr, pwf, sizeof (pwf) - 1, &pwfz);
         if (rc)
@@ -404,7 +432,15 @@ rc_t KDBOpenFileGetPassword (char * pw, size_t pwz)
                 else
                 {
                     size_t z;
-                    char pwb [4098]; /* arbitrarily using 4096 as maximum allowed length */
+                    char pwb [4098]; /* arbitrarily using 4096 as maximum
+                                        allowed length */
+
+                    /* at this point we are only getting the password from a 
+                     * file but in the future if we can get it from a pipe of
+                     * some sort we can't count on the ReadAll to really know
+                     * if we hit end of file and not just a pause in the
+                     * streaming.  VFS/KFS 2 will have to fix this somehow
+                     */
 
                     rc = KFileReadAll (pwf, 0, pwb, sizeof pwb, &z);
                     if (rc)
@@ -563,28 +599,87 @@ rc_t KDBOpenFileAsDirectory (const KDirectory * dir,
     }
     return rc;
 }
+#endif
 
 
-rc_t KDBOpenPathTypeRead ( const KDirectory * dir, const char * path, 
-    const KDirectory ** pdir, int pathtype, int * ppathtype )
+static rc_t KDBOpenPathTypeReadInt ( const KDBManager * mgr, const KDirectory * dir, const char * path,
+                                     const KDirectory ** pdir, int * type,
+                                     int pathtype, uint32_t rcobj, bool try_srapath )
 {
-    rc_t rc;
+    VFSManager * vmgr = mgr->vfsmgr;
+    const KDirectory * ldir = NULL;
+    rc_t rc = 0;
+
+    /* object relative opens can be done using KFS - we hacked in VFS after all */
+    if (! try_srapath)
+    {
+        rc = KDirectoryOpenDirUpdate ((KDirectory*)dir, (KDirectory**)pdir, false, path);
+        if ((rc) && (GetRCState(rc) != rcNotFound))
+            rc = KDirectoryOpenDirRead (dir, pdir, false, path);
+    }
+    else
+    {
+        VPath * vpath;
+
+        /*
+         * We've got to decide if the path coming in is a full or relative
+         * path and if relative make it relative to dir or possibly its a srapath
+         * accession
+         *
+         */
+        rc = VPathMakeDirectoryRelative ( &vpath, dir, path, NULL );
+        if ( rc == 0 )
+        {
+            rc = VFSManagerOpenDirectoryReadDirectoryRelativeDecrypt ( vmgr, dir, &ldir, vpath );
+
+            if ( rc == 0 )
+            {
+                *type = (~kptAlias) & KDBPathType ( ldir, NULL, "." );
+
+                /* just a directory, not a kdb type */
+                if ( *type == kptDir )
+                    rc = RC (rcDB, rcMgr, rcOpening, rcPath, rcIncorrect);
+
+                else if ( *type != pathtype )
+                {
+                    KDirectoryRelease( ldir );
+                    rc = RC ( rcDB, rcMgr, rcOpening, rcobj, rcIncorrect );
+                }
+                else
+                {
+                    if ( pdir != NULL )
+                        *pdir = ldir;
+                    else
+                        KDirectoryRelease( ldir );
+                }
+            }
+            VPathRelease ( vpath );
+        }
+    }
+    return rc;
+}
+
+rc_t KDBOpenPathTypeRead ( const KDBManager * mgr, const KDirectory * dir, const char * path, 
+    const KDirectory ** pdir, int pathtype, int * ppathtype, bool try_srapath )
+{
+    const KDirectory *ldir;
+    rc_t rc = 0;
     uint32_t rcobj;
-    uint32_t dtype;
-    int type;
-    const KDirectory * ldir;
+    int type = kptNotFound; /* bogus? */
 
-    rc = 0;
+/*     KOutMsg ("%s: %s\n", __func__, path); */
 
-    if (pdir != NULL)
+    if ( pdir != NULL )
         *pdir = NULL;
+    if ( ppathtype != NULL )
+        *ppathtype = type;
 
     switch (pathtype & ~ kptAlias) /* tune the error message based on path type */
     {
         /* we'll hit this if we don't track defines in kdb/manager.h */
     default:
         rc = RC (rcDB, rcMgr, rcOpening, rcType, rcInvalid);
-        break;
+        return rc;
 
     case kptTable:
     case kptPrereleaseTbl:
@@ -601,84 +696,18 @@ rc_t KDBOpenPathTypeRead ( const KDirectory * dir, const char * path,
         break;
     }
 
-    type = dtype = (~kptAlias) & KDirectoryPathType (dir, path);
-    
+    rc = KDBOpenPathTypeReadInt( mgr, dir, path, &ldir, &type, pathtype, rcobj, try_srapath );
+
     if (rc == 0)
     {
-        switch (dtype)
-        {
-        default:
-            rc = RC (rcDB, rcMgr, rcOpening, rcPath, rcUnsupported);
-            break;
+        if ( ppathtype != NULL )
+            *ppathtype = type;
 
-        case kptNotFound:
-            rc =  RC ( rcDB, rcMgr, rcOpening, rcobj, rcNotFound );
-            break;
-
-        case kptBadPath:
-            rc =  RC ( rcDB, rcMgr, rcOpening, rcPath, rcInvalid );
-            break;
-
-        case kptDir:
-            type = (~kptAlias) & KDBPathType ( dir, NULL, path );
-
-            /* just a directory, not a kdb type */
-            if (type == dtype)
-                rc = RC (rcDB, rcMgr, rcOpening, rcPath, rcIncorrect);
-
-            else if (type != pathtype)
-                rc = RC (rcDB, rcMgr, rcOpening, rcobj, rcIncorrect);
-
-            else
-            {
-/* ??? */
-                rc = KDirectoryVOpenDirUpdate ( ( KDirectory * ) dir, ( KDirectory ** ) & ldir, false, path, NULL );
-                if ( rc != 0)
-                {
-                    rc = KDirectoryVOpenDirRead ( dir, &ldir, false, path, NULL );
-                }
-                if (rc == 0)
-                {
-                    if (pdir != NULL)
-                        *pdir = ldir;
-                    else
-                        KDirectoryRelease(ldir);
-                }
-            }
-            break;
-
-        case kptFile:
-            rc = KDBOpenFileAsDirectory (dir, path, &ldir, rcobj);
-            if ( rc == 0 )
-            {
-                /* recheck this newly opened directory for KDB/KFS type */
-                type = (~kptAlias) & KDBPathType ( ldir, NULL, "." );
-
-                /* just a directory, not a kdb type */
-
-                if (type == pathtype)
-                {
-                    if (pdir != NULL)
-                        *pdir = ldir;
-                    else
-                        KDirectoryRelease(ldir);
-                    /* rc is 0 */
-                    break;
-                }
-
-                else if (type == dtype)
-                    rc = RC (rcDB, rcMgr, rcOpening, rcPath, rcIncorrect);
-
-                else 
-                    rc = RC (rcDB, rcMgr, rcOpening, rcobj, rcIncorrect);
-
-                KDirectoryRelease (ldir);
-            }
-        }
+        if (pdir != NULL)
+            *pdir = ldir;
+        else
+            KDirectoryRelease (ldir);
     }
-
-    if (ppathtype != NULL)
-        *ppathtype = type;
 
     return rc;
 }
@@ -690,7 +719,6 @@ rc_t KDBOpenPathTypeRead ( const KDirectory * dir, const char * path,
  */
 rc_t KDBWritable ( const KDirectory *dir, const char *path )
 {
-    /* we have to be able to check the access if it is to be writable */
     uint32_t access;
     rc_t rc;
 
@@ -749,7 +777,7 @@ rc_t KDBWritable ( const KDirectory *dir, const char *path )
             {
             case kptFile:
             case kptFile | kptAlias:
-                rc = RC (rcDB, rcPath, rcAccessing, rcLock, rcLocked );
+                rc = RC ( rcDB, rcPath, rcAccessing, rcLock, rcLocked );
                 break;
             case kptNotFound:
                 break;
@@ -769,13 +797,15 @@ rc_t KDBWritable ( const KDirectory *dir, const char *path )
             rc = RC ( rcDB, rcPath, rcAccessing, rcPath, rcInvalid);
             break;
         default:
-            /* a bad "file" type with the name of our object
+            /* an illegal type of object named "lock" is in this directory
+             * which will block the ability to lock it
              */
             rc = RC (rcDB, rcPath, rcAccessing, rcPath, rcUnexpected);
         }
     }
     return rc;
 }
+
 
 bool KDBIsLocked ( const KDirectory *dir, const char *path )
 {
@@ -994,10 +1024,24 @@ rc_t KDBVMakeSubPath ( struct KDirectory const *dir,
         subpath_max -= ns_size + 1;
     }
 
+#if CRUFTY_USE_OF_RESOLVE_PATH
     /* because this call only builds a path instead of resolving anything
      * is is okay that we are using the wrong directory */
     rc = KDirectoryVResolvePath ( dir, false,
         subpath, subpath_max, path, args );
+#else
+    {
+        int sz = vsnprintf ( subpath, subpath_max, path, args );
+        if ( sz < 0 || ( size_t ) sz >= subpath_max )
+            rc = RC ( rcDB, rcDirectory, rcResolving, rcBuffer, rcInsufficient );
+        else if ( sz == 0 )
+            rc = RC ( rcDB, rcDirectory, rcResolving, rcPath, rcEmpty );
+        else
+        {
+            rc = 0;
+        }
+    }
+#endif
     switch ( GetRCState ( rc ) )
     {
     case 0:
@@ -1018,6 +1062,21 @@ rc_t KDBVMakeSubPath ( struct KDirectory const *dir,
         subpath [ ns_size ] = '/';
     }
     return 0;
+}
+
+/* KDBMakeSubPath
+ *  adds a namespace to path spec
+ */
+rc_t KDBMakeSubPath ( struct KDirectory const *dir,
+    char *subpath, size_t subpath_max, const char *ns,
+    uint32_t ns_size, const char *path, ... )
+{
+    rc_t rc = 0;
+    va_list args;
+    va_start(args, path);
+    rc = KDBVMakeSubPath(dir, subpath, subpath_max, ns, ns_size, path, args);
+    va_end(args);
+    return rc;
 }
 
 /* VDrop
@@ -1042,7 +1101,7 @@ rc_t KDBMgrVDrop ( KDirectory * dir, const KDBManager * mgr, uint32_t obj_type,
                                   path, args );
     if (rc == 0)
     {
-        int pt = KDBPathType ( dir, NULL, full_path );
+        int pt = KDBPathType ( /*mgr,*/ dir, NULL, full_path );
         switch ( pt )
         {
         case kptNotFound:
@@ -1109,7 +1168,7 @@ rc_t KDBVDrop ( KDirectory *dir, const KDBManager * mgr,
         path, sizeof path, ns, ns_size, name, args );
     if ( rc == 0 )
     {
-        int pt = KDBPathType ( dir, NULL, path );
+        int pt = KDBPathType ( /*mgr,*/ dir, NULL, path );
         switch ( pt )
         {
         case kptNotFound:
@@ -1133,7 +1192,7 @@ rc_t KDBVDrop ( KDirectory *dir, const KDBManager * mgr,
         case kptFile | kptAlias:
         case kptFile:
 	    /* can we get here?  Will we have needed to open for update to get here? */
-	    rc = KDBOpenPathTypeRead ( dir, path, NULL, type, NULL );
+	    rc = KDBOpenPathTypeRead ( mgr, dir, path, NULL, type, NULL, false );
 	    if ( rc == 0 )
                 return RC ( rcDB, rcDirectory, rcRemoving, rcPath, rcReadonly );
             /* fall through */
@@ -1191,12 +1250,12 @@ rc_t KDBRename ( KDirectory *dir, KDBManager *mgr, uint32_t type, bool force,
         return RC ( rcDB, rcDirectory, rcRenaming, rcType, rcIncorrect );
     }
 
-    rc = KDBVMakeSubPath ( dir,
-        src, sizeof src, ns, ns_size, from, NULL );
+    rc = KDBMakeSubPath ( dir,
+        src, sizeof src, ns, ns_size, from);
     if ( rc == 0 )
     {
         char dst [ 256 ];
-        int pt = KDBPathType ( dir, NULL, src );
+        int pt = KDBPathType ( /*mgr,*/ dir, NULL, src );
         switch ( pt )
         {
         case kptNotFound:
@@ -1221,8 +1280,8 @@ rc_t KDBRename ( KDirectory *dir, KDBManager *mgr, uint32_t type, bool force,
             return RC ( rcDB, rcDirectory, rcRenaming, rcPath, rcIncorrect );
         }
 
-        rc = KDBVMakeSubPath ( dir,
-            dst, sizeof dst, ns, ns_size, to, NULL );
+        rc = KDBMakeSubPath ( dir,
+            dst, sizeof dst, ns, ns_size, to );
         if ( rc == 0 )
         {
             if ( KDirectoryVPathType ( dir, dst, NULL ) != kptNotFound )
@@ -1284,12 +1343,12 @@ rc_t KDBAlias ( KDirectory *dir, uint32_t type,
         return RC ( rcDB, rcDirectory, rcAliasing, rcType, rcIncorrect );
     }
 
-    rc = KDBVMakeSubPath ( dir,
-        src, sizeof src, ns, ns_size, targ, NULL );
+    rc = KDBMakeSubPath ( dir,
+        src, sizeof src, ns, ns_size, targ );
     if ( rc == 0 )
     {
         char dst [ 256 ];
-        int pt = KDBPathType ( dir, NULL, src );
+        int pt = KDBPathType ( /*NULL,*/ dir, NULL, src );
         switch ( pt )
         {
         case kptNotFound:
@@ -1301,7 +1360,7 @@ rc_t KDBAlias ( KDirectory *dir, uint32_t type,
         case kptTable | kptAlias:
         case kptIndex | kptAlias:
         case kptColumn | kptAlias:
-            pt -= kptAlias;
+            pt &= ~ kptAlias;
 
         case kptDatabase:
         case kptTable:
@@ -1314,8 +1373,8 @@ rc_t KDBAlias ( KDirectory *dir, uint32_t type,
             return RC ( rcDB, rcDirectory, rcAliasing, rcPath, rcIncorrect );
         }
 
-        rc = KDBVMakeSubPath ( dir,
-            dst, sizeof dst, ns, ns_size, alias, NULL );
+        rc = KDBMakeSubPath ( dir,
+            dst, sizeof dst, ns, ns_size, alias );
         if ( rc == 0 )
         {
             rc = KDirectoryCreateAlias ( dir,
@@ -1324,4 +1383,28 @@ rc_t KDBAlias ( KDirectory *dir, uint32_t type,
     }
 
     return rc;
+}
+
+
+/* KDBIsPathUri
+ * A hack to get some of VFS into KDB that is too tightly bound to KFS
+ */
+
+bool KDBIsPathUri (const char * path)
+{
+    const char * pc;
+    size_t z;
+
+    z = string_size (path);
+
+    if (NULL != (pc = string_chr (path, z, ':')))
+        return true;
+
+    if (NULL != (pc = string_chr (path, z, '?')))
+        return true;
+
+    if (NULL != (pc = string_chr (path, z, '#')))
+        return true;
+
+    return false;
 }

@@ -34,6 +34,8 @@
 #define AES_ENCRYPT	1
 #define AES_DECRYPT	0
 
+/* Because array size can't be a const in C, the following two are macros.
+   Both sizes are in bytes. */
 #define AES_MAXNR (14)
 #define AES_BLOCK_SIZE (16)
 
@@ -46,11 +48,14 @@ typedef uint8_t AES_BYTE;
 typedef uint32_t AES_WORD;
 
 
-typedef struct AES_KEY AES_KEY;
 
+
+/* typedef int64_t AESState  __attribute__ ((vector_size (AES_BLOCK_SIZE))); */
+
+typedef struct AES_KEY AES_KEY;
 struct AES_KEY
 {
-    AES_WORD rd_key [sizeof (AES_WORD) * (AES_MAXNR + 1)];
+    uint32_t rd_key [sizeof (AES_WORD) * (AES_MAXNR + 1)];
     uint32_t rounds;
 };
 
@@ -79,25 +84,6 @@ void AES_decrypt(const uint8_t *in, uint8_t *out,
                  const AES_KEY *key);
 
 
-/* Most useful for testnig against Appendix A of the FIPS-197 document */
-#define DEBUG_KEYEXP(msg) DBGMSG(DBG_AES,DBG_FLAG(DBG_AES_KEYEXP), msg)
-#define DEBUG_CIPHER(msg) DBGMSG(DBG_AES,DBG_FLAG(DBG_AES_CIPHER), msg)
-#define DEBUG_INVKEYEXP(msg) DBGMSG(DBG_AES,DBG_FLAG(DBG_AES_INVKEYEXP), msg)
-#define DEBUG_INVCIPHER(msg) DBGMSG(DBG_AES,DBG_FLAG(DBG_AES_INVCIPHER), msg)
-
-#define DEBUG_CIPHER_MVECTOR(M,v) DBGMSG(DBG_AES,DBG_FLAG(DBG_AES_CIPHER), \
-                                        ("%s:\t%0.8x %0.8x %0.8x %0.8x\n",M, \
-                                         v.columns[0],v.columns[1],v.columns[2],v.columns[3]))
-#define DEBUG_INVCIPHER_MVECTOR(M,v) DBGMSG(DBG_AES,DBG_FLAG(DBG_AES_INVCIPHER), \
-                                           ("%s:\t%0.8x %0.8x %0.8x %0.8x\n",M, \
-                                            v.columns[0],v.columns[1],v.columns[2],v.columns[3]))
-
-#define DEBUG_CIPHER_VECTOR(M,v) DBGMSG(DBG_AES,DBG_FLAG(DBG_AES_CIPHER), \
-                                        ("%s:\t%0.8x %0.8x %0.8x %0.8x\n",M, \
-                                         bswap_32(v.columns[0]),bswap_32(v.columns[1]),bswap_32(v.columns[2]),bswap_32(v.columns[3])))
-#define DEBUG_INVCIPHER_VECTOR(M,v) DBGMSG(DBG_AES,DBG_FLAG(DBG_AES_INVCIPHER), \
-                                        ("%s:\t%0.8x %0.8x %0.8x %0.8x\n",M, \
-                                         bswap_32(v.columns[0]),bswap_32(v.columns[1]),bswap_32(v.columns[2]),bswap_32(v.columns[3])))
 
 #ifdef  __cplusplus
 }

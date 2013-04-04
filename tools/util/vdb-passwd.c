@@ -37,12 +37,18 @@
 
 #include <string.h> /* strcmp */
 #include <assert.h>
+#include <limits.h> /* PATH_MAX */
+
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
 
 #define DISP_RC(rc, msg) (void)((rc == 0) ? 0 : LOGERR(klogInt, rc, msg))
 
 #define RELEASE(type, obj) do { rc_t rc2 = type##Release(obj); \
     if (rc2 && !rc) { rc = rc2; } obj = NULL; } while (false)
 
+/******************************************************************************/
 static
 rc_t SetPwd(const char *password, bool quiet)
 {
@@ -58,16 +64,80 @@ rc_t SetPwd(const char *password, bool quiet)
     }
 
     if (rc == 0) {
-        rc = VFSManagerUpdateKryptoPassword(mgr, password, strlen(password));
+        char pwd_dir[PATH_MAX] = "";
+        rc = VFSManagerUpdateKryptoPassword
+            (mgr, password, strlen(password), pwd_dir, sizeof pwd_dir);
         if (rc) {
-          if (quiet) {
-              LOGERR(klogInt, rc, "while updating the password");
-          }
-          else {
-             OUTMSG(("Cannot set the password. "
-              "Please run \"perl configuration-assistant.perl\" and try again\n"
-             ));
-          }
+            if (quiet) {
+                LOGERR(klogInt, rc, "while updating the password");
+            }
+            else if (rc == SILENT_RC(rcVFS, rcEncryptionKey, rcUpdating,
+                            rcDirectory, rcExcessive))
+            {
+                OUTMSG((
+                    "\nSecurity warning:\n"
+                    "Directory \"%s\" has excessive access permissions.\n"
+                    "Run \"chmod 700 %s\" to fix it\n"
+                    "or ask your system administrator to do it.\n",
+                    pwd_dir, pwd_dir));
+                rc = 0;
+            }
+            else if (rc == SILENT_RC(rcVFS, rcEncryptionKey, rcUpdating,
+                rcSize, rcExcessive))
+            {
+                OUTMSG((
+                    "\nError:\n"
+                    "Password is too long.\n"
+                    "Maximum password size is %ld.\n",
+                    VFS_KRYPTO_PASSWORD_MAX_SIZE));
+            }
+            else if (rc == SILENT_RC(rcVFS, rcEncryptionKey, rcUpdating,
+                rcEncryptionKey, rcInvalid))
+            {
+                OUTMSG((
+                    "\nError:\n"
+                    "Invalid character in password\n"
+                    "(CR/LF are not allowed)\n"));
+            }
+            else if (rc == SILENT_RC(rcVFS, rcEncryptionKey, rcUpdating,
+                rcPath, rcExcessive))
+            {
+                OUTMSG((
+                    "\nError:\n"
+                    "Cannot set the password.\n"
+                    "Path to password file is too long.\n"
+                    "Your configuration should be fixed.\n"));
+            }
+            else if (rc == SILENT_RC(rcVFS, rcEncryptionKey, rcUpdating,
+                rcPath, rcIncorrect))
+            {
+                OUTMSG((
+                    "\nError:\n"
+                    "Cannot set the password.\n"
+                    "Existing password path/file name is not a file.\n"
+                    "Your configuration should be fixed.\n"));
+            }
+            else if (rc == SILENT_RC(rcVFS, rcEncryptionKey, rcUpdating,
+                rcPath, rcCorrupt))
+            {
+                OUTMSG((
+                    "\nError:\n"
+                    "Cannot set the password.\n"
+                    "Unknown file type for configured path/file name.\n"
+                    "Your configuration should be fixed.\n"));
+            }
+            else if (rc == SILENT_RC(rcVFS, rcEncryptionKey, rcWriting,
+                rcFile, rcInsufficient))
+            {
+                OUTMSG((
+                    "\nError:\n"
+                    "Incomplete writes to temporary password file.\n"
+                    "Cannot set the password.\n"));
+            }
+            else {
+                OUTMSG(("\nCannot set the password. Please run "
+                 "\"perl configuration-assistant.perl\" and try again\n"));
+            }
         }
     }
 
@@ -85,14 +155,18 @@ rc_t run(bool quiet)
 
     char password[PWD_SZ] = "";
 
+    bool empty = false;
+
     KWrtHandler handler;
     handler.writer = KOutWriterGet();
     handler.data = KOutDataGet();
+
     KOutHandlerSetStdErr();
     KLogLibHandlerSet(NULL, NULL);
 
     OUTMSG(("Changing password\n"));
 
+#if 1
     if (rc == 0) {
         int i = 0;
         for (i = 0; i < 3 && rc == 0; ++i) {
@@ -110,6 +184,7 @@ rc_t run(bool quiet)
         }
         if (rc == 0 && password[0] == '\0') {
             rc = RC(rcExe, rcString, rcReading, rcString, rcIncorrect);
+            empty = true;
          /* LOGERR(klogErr, rc, "failed to set password"); */
         }
     }
@@ -127,11 +202,18 @@ rc_t run(bool quiet)
         }
     }
 
+#else
+    strcpy(password, "1n2");
+#endif
+
     if (rc == 0) {
         rc = SetPwd(password, quiet);
     }
 
     KOutHandlerSet(handler.writer, handler.data);
+
+    if (empty)
+    {   rc = 0; }
 
     return rc;
 }

@@ -31,7 +31,6 @@ MODULE = libs/sra
 INT_LIBS = \
 
 EXT_LIBS = \
-	libsrapath \
 	libsraschema \
 	libwsraschema \
 	libsradb \
@@ -49,18 +48,16 @@ VPATH += $(OBJDIR)
 #-------------------------------------------------------------------------------
 # outer targets
 #
-vers-includes: $(addsuffix .vers.h,$(EXT_LIBS))
-
-all std: makedirs vers-includes
+all std: vers-includes
 	@ $(MAKE_CMD) $(TARGDIR)/std
 
-$(INT_LIBS): makedirs vers-includes
+$(INT_LIBS): vers-includes
 	@ $(MAKE_CMD) $(ILIBDIR)/$@
 
-$(EXT_LIBS): makedirs vers-includes
+$(EXT_LIBS): vers-includes
 	@ $(MAKE_CMD) $(LIBDIR)/$@
 
-.PHONY: vers-includes all std $(ALL_LIBS)
+.PHONY: all std $(ALL_LIBS)
 
 #-------------------------------------------------------------------------------
 # std
@@ -72,10 +69,18 @@ $(TARGDIR)/std: \
 .PHONY: $(TARGDIR)/all $(TARGDIR)/std
 
 #-------------------------------------------------------------------------------
+# vers-includes
+#
+$(TARGDIR)/vers-includes: $(addsuffix .vers.h,$(EXT_LIBS))
+
+.PHONY: $(TARGDIR)/vers-includes
+
+#-------------------------------------------------------------------------------
 # clean
 #
 clean: stdclean
-	@ rm -f $(LIBDIR)/libsra-schema.* $(LIBDIR)/libwsra-schema.*
+	@ rm -f $(LIBDIR)/libsra-schema.* $(LIBDIR)/libwsra-schema.* $(LIBDIR)/sra-dflt-schema*
+	@ rm -f $(BINDIR)/libsra-schema.* $(BINDIR)/libwsra-schema.*
 
 .PHONY: clean
 
@@ -89,35 +94,37 @@ tag: \
 
 
 #-------------------------------------------------------------------------------
-# srapath stub library
-#
-$(LIBDIR)/libsrapath: $(LIBDIR)/libsrapath.$(LIBX)
-
-SRAPATH_SRC = \
-	srapath-stub
-
-SRAPATH_OBJ = \
-	$(addsuffix .$(LOBX),$(SRAPATH_SRC))
-
-$(LIBDIR)/libsrapath.$(LIBX): $(SRAPATH_OBJ)
-	$(LD) --slib -o $@ $^
-
-libsrapath.vers.h:
-	@ true
-
-
-#-------------------------------------------------------------------------------
 # sradb embedded schema
 #
 $(LIBDIR)/libsraschema: $(LIBDIR)/libsraschema.$(LIBX)
 
 $(LIBDIR)/libwsraschema: $(LIBDIR)/libwsraschema.$(LIBX)
 
-sra-dflt-schema: sra-dflt-schema.$(OBJX)
-	$(LD) --exe -o $@ $^ -skapp -svdb -skdb -svfs -skrypto -skfg -skfs -sklib -ldl -sz -sbz2
+SRA_DFLT_SCHEMA_LIBS = \
+	-skapp \
+	-svdb \
+	-skdb \
+	-svfs \
+	-skrypto \
+	-skfg \
+	-skfs \
+	-sklib \
+	-sksproc
 
-sra-schema.c: sra-dflt-schema $(SRCDIR)/built-in.vschema $(TOP)/build/sra-dflt-schema.sh
-	@ $(TOP)/build/sra-dflt-schema.sh $(OS) ./sra-dflt-schema -o$@ -I$(TOP)/interfaces -T$@.d $(SRCDIR)/built-in.vschema
+SRA_DFLT_SCHEMA_OS_LIBS = \
+	-ldl \
+	-sz \
+	-sbz2 \
+	-lm
+
+# set workdir for RUN_REMOTELY in rwin mode 
+RWORKDIR=$(OBJDIR)
+
+$(LIBDIR)/sra-dflt-schema: sra-dflt-schema.$(OBJX)
+	$(LD) --exe -o $@ $^ $(SRA_DFLT_SCHEMA_LIBS) $(SRA_DFLT_SCHEMA_OS_LIBS)
+
+sra-schema.c: $(LIBDIR)/sra-dflt-schema $(SRCDIR)/built-in.vschema $(TOP)/build/sra-dflt-schema.sh
+	@ $(TOP)/build/sra-dflt-schema.sh $(BUILD_OS) "$(RUN_REMOTELY) $(LIBDIR)/sra-dflt-schema" -o$@ -I$(TOP)/interfaces -T$(OBJDIR)/$@.d $(SRCDIR)/built-in.vschema
 
 SRA_SCHEMA_SRC = \
 	sraschema \
@@ -149,17 +156,8 @@ SRASCHEMA_SRC = \
 WSRASCHEMA_SRC = \
 	wsraschema-stub
 
-ifeq (--static,$(STATIC))
-	SRASCHEMA_SRC += $(SRA_SCHEMA_SRC)
-else
-	SRASCHEMA_DEPS = $(LIBDIR)/libsra-schema.$(SHLX)
-endif
-
-ifeq (--static,$(STATIC))
-	WSRASCHEMA_SRC += $(SRA_SCHEMA_SRC)
-else
-	WSRASCHEMA_DEPS = $(LIBDIR)/libwsra-schema.$(SHLX)
-endif
+SRASCHEMA_SRC += $(SRA_SCHEMA_SRC)
+WSRASCHEMA_SRC += $(SRA_SCHEMA_SRC)
 
 SRASCHEMA_OBJ = \
 	$(addsuffix .$(LOBX),$(SRASCHEMA_SRC))
@@ -198,14 +196,15 @@ SRADB_OBJ = \
 
 SRADB_LIB = \
 	-ssraschema \
-	-ssrapath \
 	-dvdb \
 	-dkdb \
+	-dvfs \
+	-lkfg \
 	-dkfs \
 	-dklib
 
 $(LIBDIR)/libsradb.$(SHLX): $(SRADB_OBJ)
-	$(LD) --dlib --vers $(SRCDIR) -o $@ $^ $(SRADB_LIB)
+	$(LD) --dlib --vers $(SRCDIR) -o $@ $^ -ssrapath $(SRADB_LIB)
 
 $(LIBDIR)/libsradb.$(LIBX): $(SRADB_OBJ)
 	$(LD) --slib --vers $(SRCDIR) -o $@ $^ $(SRADB_LIB)
@@ -229,14 +228,15 @@ WSRADB_OBJ = \
 
 WSRADB_LIB = \
 	-ssraschema \
-	-ssrapath \
 	-dwvdb \
 	-dwkdb \
+	-dvfs \
+	-lkfg \
 	-dkfs \
 	-dklib
 
 $(LIBDIR)/libwsradb.$(SHLX): $(WSRADB_OBJ)
-	$(LD) --dlib --vers $(SRCDIR) -o $@ $^ $(WSRADB_LIB)
+	$(LD) --dlib --vers $(SRCDIR) -o $@ $^ -ssrapath $(WSRADB_LIB)
 
 $(LIBDIR)/libwsradb.$(LIBX): $(WSRADB_OBJ)
 	$(LD) --slib --vers $(SRCDIR) -o $@ $^ $(WSRADB_LIB)

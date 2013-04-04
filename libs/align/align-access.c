@@ -27,10 +27,10 @@
 #include <align/extern.h>
 #include <klib/rc.h>
 #include <align/align-access.h>
-#include <sysalloc.h>
 #include <atomic32.h>
 
 #include <vfs/path.h>
+#include <sysalloc.h>
 
 #include <stdlib.h>
 #include <string.h>

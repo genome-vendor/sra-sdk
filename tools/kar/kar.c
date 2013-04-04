@@ -203,7 +203,7 @@ rc_t CC Usage (const Args * args)
     OUTMSG (("\n"
              "  To examine in detail the contents of an archive named 'example.sra'\n"
              "\n"
-             "  $ %s --%s example.sra\n",
+             "  $ %s --%s --%s example.sra\n",
              progname, OPTION_LONGLIST, OPTION_TEST));
 
     OUTMSG (("\n"

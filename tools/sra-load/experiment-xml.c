@@ -867,7 +867,7 @@ rc_t Experiment_MemberSeg(const ExperimentXML* self,
             size_t max = sizeof(err_buf);
 
             for(i = 1; i <= self->reads->nreads; i++) {
-                int x = snprintf(p, max, "[%hd:%hd, len = %hd", pool[i].start, pool[i].start + pool[i].length, pool[i].length);
+                int x = snprintf(p, max, "[%hd:%d, len = %hd", pool[i].start, pool[i].start + pool[i].length, pool[i].length);
                 if( x > 0 && x < max ) {
                     max -= x;
                     p += x;

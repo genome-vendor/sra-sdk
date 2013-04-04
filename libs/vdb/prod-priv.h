@@ -43,13 +43,18 @@
 #include "schema-priv.h"
 #endif
 
+#ifndef _h_blob_priv_
+#include "blob-priv.h"
+#endif
+
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 
 #define PROD_CACHE  	  2                   	/** default size of Production Cache ***/
-#define PROD_CACHE_MAX_EXTENTS  16		/** maximum multiplier for extending selected production caches when random io is detected ***/
+#define PROD_CACHE_MAX_EXTENTS  4		/** maximum multiplier for extending selected production caches when random io is detected ***/
 #define PROD_CACHE_WASH_ACCESS_THRESHOLD 10	/** number of accesses to wash part of the cache to trigger cache extension ***/
 						/** this is to determine random access pattern ***/
 
@@ -80,6 +85,7 @@ struct VBlob;
 struct VColumn;
 struct VPhysical;
 struct VProdResolve;
+struct VBlobMRUCacheCursorContext;
 
 
 /*--------------------------------------------------------------------------
@@ -150,6 +156,8 @@ struct VProduction
 
     /* true if used as control parameter */
     bool control;
+    /* is this production directly connected to a Column in a Cursor */
+    VBlobMRUCacheCursorContext cctx;
 };
 
 
@@ -223,7 +231,7 @@ uint32_t VProductionFixedRowLength ( const VProduction *self, int64_t row_id, bo
  *  fetch a blob containing at least the requested row
  *  returns a new reference
  */
-rc_t VProductionReadBlob ( const VProduction *self, struct VBlob **vblob, int64_t id , uint32_t cnt);
+rc_t VProductionReadBlob ( const VProduction *self, struct VBlob **vblob, int64_t id , uint32_t cnt, struct VBlobMRUCacheCursorContext* cctx);
 
 
 /*--------------------------------------------------------------------------
@@ -248,10 +256,11 @@ struct VSimpleProd
 {
     VProduction dad;
     VProduction *in;
+    struct VCursor const *curs;
 };
 
 rc_t VSimpleProdMake ( VProduction **prod, Vector *owned,
-    int sub, const char *name, const VFormatdecl *fd,
+    struct VCursor const *curs,int sub, const char *name, const VFormatdecl *fd,
     const VTypedesc *desc, const VCtxId *cid,
     VProduction *in, uint8_t chain );
 
@@ -261,7 +270,7 @@ rc_t VSimpleProdMake ( VProduction **prod, Vector *owned,
 /* Read
  *  return a blob containing row id
  */
-rc_t VSimpleProdRead ( VSimpleProd *self, struct VBlob **vblob, int64_t id, uint32_t cnt );
+rc_t VSimpleProdRead ( VSimpleProd *self, struct VBlob **vblob, int64_t id, uint32_t cnt, struct VBlobMRUCacheCursorContext *cctx );
 
 
 /*--------------------------------------------------------------------------
@@ -314,6 +323,10 @@ struct VFunctionProd
 
     /* vector of VProduction input parameters */
     Vector parms;
+
+    /* adaptive prefetch parameters */
+   int64_t start_id;
+   int64_t stop_id;
 };
 
 
@@ -352,11 +365,12 @@ struct VScriptProd
     VProduction dad;
     VProduction *rtn;
     Vector owned;
+    struct VCursor const *curs;
 };
 
 
 rc_t VScriptProdMake ( VScriptProd **prod, Vector *owned,
-    int sub, const char *name, const VFormatdecl *fd,
+    struct VCursor const *curs, int sub, const char *name, const VFormatdecl *fd,
     const VTypedesc *desc, uint8_t chain );
 
 void VScriptProdDestroy ( VScriptProd *self );
@@ -365,7 +379,7 @@ void VScriptProdDestroy ( VScriptProd *self );
 /* Read
  */
 rc_t VScriptProdRead ( VScriptProd *self,
-    struct VBlob **vblob, int64_t id, uint32_t cnt );
+    struct VBlob **vblob, int64_t id, uint32_t cnt);
 
 
 /*--------------------------------------------------------------------------
@@ -386,7 +400,7 @@ struct VPhysicalProd
 };
 
 rc_t VPhysicalProdMake ( VProduction **prod, Vector *owned,
-    struct VPhysical *phys, int sub, const char *name,
+    struct VCursor *curs, struct VPhysical *phys, int sub, const char *name,
     const VFormatdecl *fd, const VTypedesc *desc );
 
 void VPhysicalProdDestroy ( VPhysicalProd *self );

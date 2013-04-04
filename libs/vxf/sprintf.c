@@ -84,7 +84,7 @@ rc_t validate_obj ( const Sprintf *obj, bool fmt_only )
 #endif
 
 static
-const size_t get_radix_size ( const PrintFmt *fmt, uint32_t selector )
+size_t get_radix_size ( const PrintFmt *fmt, uint32_t selector )
 {
     const uint8_t *radix_size;
     switch ( fmt -> radix )

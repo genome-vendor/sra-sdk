@@ -41,19 +41,19 @@
 extern "C" {
 #endif
 
-/* bitcpy                                                                                                                                                                                                    
- *  copy a string of bits from source to dest                                                                                                                                                                
- *                                                                                                                                                                                                           
- *  both source and dest may have non-byte aligned pointers                                                                                                                                                  
- *  the number of bits to copy need not be byte aligned                                                                                                                                                      
- *                                                                                                                                                                                                           
- *  depending upon architecture and OS conventions, the word                                                                                                                                                 
- *  size may be adjusted to 1, 2, or 4 bytes, where the base                                                                                                                                                 
- *  pointers are always word aligned.                                                                                                                                                                        
- *                                                                                                                                                                                                           
- *  bits in memory are always treated as big-endian, meaning                                                                                                                                                 
- *  that on multi-byte fetches and stores, we perform byte-swapping                                                                                                                                          
- *  if there are shifts or masks                                                                                                                                                                             
+/* bitcpy
+ *  copy a string of bits from source to dest
+ *
+ *  both source and dest may have non-byte aligned pointers
+ *  the number of bits to copy need not be byte aligned
+ *
+ *  depending upon architecture and OS conventions, the word
+ *  size may be adjusted to 1, 2, or 4 bytes, where the base
+ *  pointers are always word aligned.
+ *
+ *  bits in memory are always treated as big-endian, meaning
+ *  that on multi-byte fetches and stores, we perform byte-swapping
+ *  if there are shifts or masks
  */
 static __inline__
 void bitcpy ( void *dbase, bitsz_t doff, const void *sbase, bitsz_t soff, bitsz_t sz )
