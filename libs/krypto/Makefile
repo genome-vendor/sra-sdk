@@ -29,19 +29,16 @@ USE_GCC_IF_ICC = 1
 TOP ?= $(shell ../../build/abspath.sh ../..)
 MODULE = libs/krypto
 
-INT_LIBS = 
-
-EXT_LIBS = \
+INT_LIBS = \
 	libkrypto
 
 ALL_LIBS = \
-	$(INT_LIBS) \
-	$(EXT_LIBS)
+	$(INT_LIBS)
 
 include $(TOP)/build/Makefile.env
 
 ifeq ($(OS),linux)
-INT_LIBS += libkryptotest
+	INT_LIBS += libkryptotest
 endif
 
 
@@ -85,17 +82,13 @@ all std: makedirs compiler-test
 $(INT_LIBS): makedirs
 	@ $(MAKE_CMD) $(ILIBDIR)/$@
 
-$(EXT_LIBS): makedirs
-	@ $(MAKE_CMD) $(LIBDIR)/$@
-
 .PHONY: all std $(ALL_LIBS)
 
 #-------------------------------------------------------------------------------
 # std
 #
 $(TARGDIR)/std: \
-	$(addprefix $(ILIBDIR)/,$(INT_LIBS)) \
-	$(addprefix $(LIBDIR)/,$(EXT_LIBS))
+	$(addprefix $(ILIBDIR)/,$(INT_LIBS))
 #	@echo VEC_SUPPORTED $(VEC_SUPPORTED)
 #	@echo VECREG_SUPPORTED $(VECREG_SUPPORTED)
 #	@echo AESNI_SUPPORTED $(AESNI_SUPPORTED)
@@ -108,15 +101,6 @@ $(TARGDIR)/std: \
 clean: stdclean
 
 .PHONY: clean
-
-#-------------------------------------------------------------------------------
-# tag
-#
-tag: \
-	$(addsuffix _tag,$(ALL_LIBS))
-
-.PHONY: tag $(addsuffix _tag,$(ALL_LIBS))
-
 
 #-------------------------------------------------------------------------------
 # compiler-test
@@ -210,7 +194,7 @@ compile-test.aes-ni.pic.o : compile-test.c
 #-------------------------------------------------------------------------------
 # krypto
 #
-$(LIBDIR)/libkrypto: $(addprefix $(LIBDIR)/libkrypto.,$(LIBEXT))
+$(ILIBDIR)/libkrypto: $(addprefix $(ILIBDIR)/libkrypto.,$(ILIBEXT))
 
 ALL_LIB_SRC = \
 	ciphermgr \
@@ -221,11 +205,8 @@ ALL_LIB_SRC = \
 	aes_core \
 	aes-byte \
 	cipher-byte \
-	key
-
-ifeq ($(OS),linux)
-ALL_LIB_SRC += reencfile
-endif
+	key \
+	reencfile
 
 LIB_SRC = \
 	no-null-ncbi
@@ -294,17 +275,11 @@ KRYPTO_OBJ = \
 KRYPTO_LIB = \
 	-dkfg \
 	-dkfs \
-	-dklib \
-    -dkproc
+	-dkproc \
+	-dklib
 
-$(LIBDIR)/libkrypto.$(SHLX): $(KRYPTO_OBJ)
-	$(LD) --dlib --vers $(SRCDIR) -o $@ $^ $(KRYPTO_LIB)
-
-$(LIBDIR)/libkrypto.$(LIBX): $(KRYPTO_OBJ)
-	$(LD) --slib --vers $(SRCDIR) -o $@ $^ $(KRYPTO_LIB)
-
-libkrypto_tag:
-	@ $(TOP)/build/tag-module.sh $(MODULE) libkrypto $(KRYPTO_OBJ)
+$(ILIBDIR)/libkrypto.$(LIBX): $(KRYPTO_OBJ)
+	$(LD) --slib -o $@ $^ $(KRYPTO_LIB)
 
 
 #-------------------------------------------------------------------------------
@@ -312,7 +287,6 @@ libkrypto_tag:
 #
 
 $(ILIBDIR)/libkryptotest: $(addprefix $(ILIBDIR)/libkryptotest.,$(ILIBEXT))
-
 
 KRYPTOTEST_SRC = $(ALL_LIB_SRC)	$(TEST_LIB_SRC)
 
@@ -322,18 +296,12 @@ KRYPTOTEST_OBJ = \
 KRYPTOTEST_LIB = \
 	-dkfg \
 	-dkfs \
-	-dklib \
-	-dkproc 
-
-
-$(ILIBDIR)/libkryptotest.$(SHLX): $(KRYPTOTEST_OBJ)
-	$(LD) --dlib --vers $(SRCDIR) -o $@ $^ $(KRYPTOTEST_LIB)
+	-dkproc \
+	-dklib
 
 $(ILIBDIR)/libkryptotest.$(LIBX): $(KRYPTOTEST_OBJ)
-	$(LD) --slib --vers $(SRCDIR) -o $@ $^ $(KRYPTOTEST_LIB)
+	$(LD) --slib -o $@ $^ $(KRYPTOTEST_LIB)
 
-libkryptotest_tag:
-	@ $(TOP)/build/tag-module.sh $(MODULE) libkryptotest $(KRYPTOTEST_OBJ)
 
 
 

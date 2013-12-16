@@ -26,10 +26,15 @@
 #ifndef _h_kns_mgr_priv_
 #define _h_kns_mgr_priv_
 
+#ifndef _h_klib_refcount_
+#include <klib/refcount.h>
+#endif
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#include <klib/rc.h>
 
 #include "curlhdr/curl.h"
 #include "curlhdr/easy.h"
@@ -51,6 +56,9 @@ struct KNSManager
     struct curl_slist* ( CC * curl_slist_append_fkt ) ( struct curl_slist * list, const char * string );
     void ( CC * curl_slist_free_all_fkt ) ( struct curl_slist * list );
 };
+
+    rc_t KNSManagerInit ( struct KNSManager *self );
+    void KNSManagerCleanup ( struct KNSManager *self );
 
 #ifdef __cplusplus
 }

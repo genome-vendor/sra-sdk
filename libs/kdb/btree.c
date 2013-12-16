@@ -931,7 +931,7 @@ typedef struct KBTreeBranchNode_v2 KBTreeBranchNode;
    will be such that some number of keys are guaranteed to fit */
 #define MIN_KEY_COUNT 2
 #define MAX_KEY_SIZE \
-    ( ( PGSIZE - sizeof ( KBTreeBranchEntry_v2 ) - \
+    (( PGSIZE - 12 - 256 * sizeof(KBTreeSrchWindow)   - \
         MIN_KEY_COUNT * ( sizeof ( KBTreeBranchEntry_v2 ) + sizeof ( uint32_t ) ) \
         ) / MIN_KEY_COUNT )
 

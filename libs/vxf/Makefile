@@ -28,14 +28,16 @@ default: std
 TOP ?= $(shell ../../build/abspath.sh ../..)
 MODULE = libs/vxf
 
-MOD_LIBS = \
+INT_LIBS = \
 	libvxf \
 	libwvxf
 
-ALL_LIBS = \
-	$(MOD_LIBS)
-
 include $(TOP)/build/Makefile.env
+
+RWORKDIR = $(BINDIR)
+
+ALL_LIBS = \
+	$(INT_LIBS)
 
 #-------------------------------------------------------------------------------
 # outer targets
@@ -43,16 +45,16 @@ include $(TOP)/build/Makefile.env
 all std: makedirs
 	@ $(MAKE_CMD) $(TARGDIR)/std
 
-$(MOD_LIBS): makedirs
+$(INT_LIBS): makedirs
 	@ $(MAKE_CMD) $(TARGDIR)/$@
 
-.PHONY: vers-includes all std $(ALL_LIBS)
+.PHONY: all std $(ALL_LIBS)
 
 #-------------------------------------------------------------------------------
 # std
 #
 $(TARGDIR)/std: \
-	$(addprefix $(TARGDIR)/,$(MOD_LIBS))
+	$(addprefix $(TARGDIR)/,$(INT_LIBS))
 
 .PHONY: $(TARGDIR)/std
 
@@ -66,9 +68,7 @@ clean: stdclean
 #-------------------------------------------------------------------------------
 # vdb transform library
 #
-$(TARGDIR)/libvxf: $(addprefix $(TARGDIR)/libvxf.,$(MODEXT))
-
-$(TARGDIR)/libvxf.$(SHLX): $(MODDIR)/libvxf.$(SHLX)
+$(TARGDIR)/libvxf: $(addprefix $(ILIBDIR)/libvxf.,$(ILIBEXT))
 
 VXF_SRC = \
 	ceil \
@@ -97,6 +97,7 @@ VXF_SRC = \
 	trim \
 	deriv \
 	integral \
+	integral_0 \
 	delta \
 	undelta \
 	add-row-id \
@@ -123,11 +124,6 @@ VXF_LIB = \
 	-dz \
 	-dbz2
 
-$(MODDIR)/libvxf.$(SHLX): $(VXF_OBJ)
-	$(LD) --dlib --vers $(SRCDIR) -o $@ $^ $(VXF_LIB)
-
-$(TARGDIR)/libvxf.$(LIBX): $(ILIBDIR)/libvxf.$(LIBX)
-
 $(ILIBDIR)/libvxf.$(LIBX): $(VXF_OBJ)
 	$(LD) --slib -o $@ $^ $(VXF_LIB)
 
@@ -135,9 +131,7 @@ $(ILIBDIR)/libvxf.$(LIBX): $(VXF_OBJ)
 # wvdb transform library
 #
 
-$(TARGDIR)/libwvxf: $(addprefix $(TARGDIR)/libwvxf.,$(MODEXT))
-
-$(TARGDIR)/libwvxf.$(SHLX): $(WMODDIR)/libwvxf.$(SHLX)
+$(TARGDIR)/libwvxf: $(addprefix $(ILIBDIR)/libwvxf.,$(ILIBEXT))
 
 WVXF_SRC = \
 	$(VXF_SRC) \
@@ -159,15 +153,10 @@ WVXF_LIB = \
 	-dz \
 	-dbz2
 
-$(WMODDIR)/libwvxf.$(SHLX): $(WVXF_OBJ)
-	$(LD) --dlib --vers $(SRCDIR) -o $@ $^ $(WVXF_LIB)
-
-$(TARGDIR)/libwvxf.$(LIBX): $(ILIBDIR)/libwvxf.$(LIBX)
-
 $(ILIBDIR)/libwvxf.$(LIBX): $(WVXF_OBJ)
 	$(LD) --slib -o $@ $^ $(WVXF_LIB)
 
 libwvxf.vers.h:
 	@ true
 
-.PHONY: $(TARGDIR)/libwvxf $(TARGDIR)/libwvxf.$(SHLX) $(TARGDIR)/libwvxf.$(LIBX)
+.PHONY: $(TARGDIR)/libwvxf

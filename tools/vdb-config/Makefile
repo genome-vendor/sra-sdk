@@ -91,15 +91,9 @@ VDB_CONFIG_OBJ = \
 
 VDB_CONFIG_LIB = \
 	-lkapp \
-	-lsraschema \
-	-lvdb \
-	-lkdb \
-	-lvfs \
-	-lkrypto \
-	-lkfg \
-	-lkfs \
-	-lkproc \
-	-lklib
+	-lncbi-vdb \
+	-lxml2 \
+	-lm
 
 $(BINDIR)/vdb-config: $(VDB_CONFIG_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(VDB_CONFIG_LIB)

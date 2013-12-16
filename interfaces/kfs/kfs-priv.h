@@ -73,7 +73,20 @@ KFS_EXTERN rc_t CC KArrayFileGetMeta ( struct KArrayFile const *self, const char
  */
 KFS_EXTERN rc_t CC KDlsetList ( struct KDlset const *self, struct KNamelist **list );
 
-    
+
+#if WINDOWS
+/* PosixStringToSystemString
+ * converts posix path string to system path
+ *  "buffer" [ OUT ] - NUL terminated system path string
+ *  "bsize" [ IN ] - buffer length
+ *  "path" [ IN ] - NUL terminated posix path string
+ */
+KFS_EXTERN rc_t KDirectoryPosixStringToSystemString (
+    const struct KDirectory *self,
+    char *buffer, size_t bsize, const char *path, ... );
+#endif
+
+
 #ifdef __cplusplus
 }
 #endif

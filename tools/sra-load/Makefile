@@ -107,28 +107,12 @@ LOADER_OBJ = \
 	$(addsuffix .$(OBJX),$(LOADER_SRC))
 
 LOADER_LIB = \
-	-lwsradb \
-	-dwsraxf \
 	-lkapp \
-	-dwvxf \
-	-lwvdb \
-	-lwkdb \
-	-lvfs \
-	-lkrypto \
-	-lkfg \
 	-lload \
-	-lkfs \
-	-lksrch \
-	-lkxml \
-	-lkxfs \
-	-lklib \
-	-lkq \
-	-lkproc \
+	-lncbi-wvdb \
+	$(LIBXML) \
 	-lm
 
-ifneq (win,$(OS))
-	LOADER_LIB += -lxml2
-endif
 
 #------------------------------------------------------------------------------
 # sff-load

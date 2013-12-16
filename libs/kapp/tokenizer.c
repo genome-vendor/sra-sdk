@@ -350,7 +350,7 @@ static rc_t tokenize_file_and_progname_into_argv( const char * filename, const c
     else
     {
         VPath * vfs_path;
-        rc = VPathMake ( &vfs_path, filename );
+        rc = VFSManagerMakePath ( vfs_mgr, &vfs_path, filename );
         if ( rc != 0 )
             LOGERR( klogInt, rc, "VPathMake() failed" );
         else

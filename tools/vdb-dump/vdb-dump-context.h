@@ -66,6 +66,7 @@ extern "C" {
 #define OPTION_NUMELEMSUM        "numelemsum"
 #define OPTION_SHOW_BLOBBING     "blobbing"
 #define OPTION_ENUM_PHYS         "phys"
+#define OPTION_CHECK_CURL        "check-curl"
 
 #define ALIAS_ROW_ID_ON         "I"
 #define ALIAS_LINE_FEED         "l"
@@ -143,6 +144,7 @@ typedef struct dump_context
     bool sum_num_elem;
     bool show_blobbing;
     bool enum_phys;
+    bool check_curl;
 } dump_context;
 typedef dump_context* p_dump_context;
 
@@ -158,5 +160,9 @@ void vdco_show_help( p_dump_context ctx );
 rc_t vdco_set_table( p_dump_context ctx, const char *src );
 
 rc_t vdco_capture_arguments_and_options( const Args * args, dump_context *ctx );
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

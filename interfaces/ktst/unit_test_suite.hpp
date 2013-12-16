@@ -94,7 +94,7 @@ class TestCase;
 
 class TestEnv {
 public:
-	typedef rc_t ArgsHandler(int argc, char* argv[]);
+    typedef rc_t ArgsHandler(int argc, char* argv[]);
 
     TestEnv(int argc, char* argv[], ArgsHandler *argsHandler = NULL);
     ~TestEnv(void);
@@ -122,6 +122,9 @@ public:
     static rc_t Usage(const char *progname);
 #endif
 
+    static bool in_child_process;
+    static std::string GetPidString();
+
 private:
     static void TermHandler();
 
@@ -144,10 +147,9 @@ protected:
 public:
     ncbi::NK::counter_t GetErrorCounter(void) { return _ec; }
     const std::string& GetName(void) const { return _name; }
-
-protected:
     void ErrorCounterAdd(ncbi::NK::counter_t ec) { _ec += ec; }
 
+protected:
     void report_error(const char* msg, const char* file, int line, bool is_msg = false, bool isCritical = false);
 
     void report_passed(const char* msg, const char* file, int line);

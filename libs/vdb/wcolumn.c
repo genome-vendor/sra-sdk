@@ -607,7 +607,7 @@ bool WColumnCommitRowData ( WColumn *self, int64_t *end_id )
                 uint64_t row_count = self -> cutoff_id - self -> start_id;
                 if ( row_count != 0 )
                 {
-                    int64_t end;
+/*                  int64_t end; */
                     uint64_t msb = row_count;
 
                     /* adjust id to nearest power of two size

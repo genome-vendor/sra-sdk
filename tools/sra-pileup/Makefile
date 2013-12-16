@@ -94,19 +94,8 @@ TOOL_OBJ = \
 
 TOOL_LIB = \
 	-lkapp \
-	-ssrapath \
-	-lalign-reader \
-	$(READONLY_SCHEMA_LIBS) \
-	-lsraschema \
-	-lvdb \
-	-lkdb \
-	-lvfs \
-	-lkrypto \
-	-lkfg \
-	-lkfs \
-	-lksrch \
-	-lkproc \
-	-lklib \
+	-lncbi-vdb \
+	-lxml2 \
 	-lm
 
 $(BINDIR)/sra-pileup: $(TOOL_OBJ)
@@ -133,19 +122,8 @@ SAMDUMP3_OBJ = \
 
 SAMDUMP3_LIB = \
 	-lkapp \
-	-ssrapath \
-	-lalign-reader \
-	$(READONLY_SCHEMA_LIBS) \
-	-lsraschema \
-	-lvdb \
-	-lkdb \
-	-lvfs \
-	-lkrypto \
-	-lkfg \
-	-lkfs \
-	-lksrch \
-	-lkproc \
-	-lklib \
+	-lncbi-vdb \
+	-lxml2 \
 	-lm
 
 $(BINDIR)/sam-dump: $(SAMDUMP3_OBJ)

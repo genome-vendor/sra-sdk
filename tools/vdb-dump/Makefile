@@ -99,19 +99,9 @@ VDB_DUMP_OBJ = \
 	$(addsuffix .$(OBJX),$(VDB_DUMP_SRC))
 
 VDB_DUMP_LIB = \
-	-ssraschema \
-	-dalign-reader \
-	$(READONLY_SCHEMA_LIBS) \
-	-lksrch \
-	-lvdb \
-	-lkdb \
-	-lvfs \
-	-lkrypto \
 	-lkapp \
-	-lkfg \
-	-lkfs \
-	-lkproc \
-	-lklib \
+	-lncbi-vdb \
+	-lxml2 \
 	-lm
 
 $(BINDIR)/vdb-dump: $(VDB_DUMP_OBJ)

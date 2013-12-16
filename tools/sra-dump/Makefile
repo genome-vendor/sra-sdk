@@ -33,7 +33,6 @@ include $(TOP)/build/Makefile.env
 INT_TOOLS =
 
 EXT_TOOLS = \
-	sra-dump \
 	fastq-dump \
 	sff-dump \
 	illumina-dump \
@@ -85,38 +84,6 @@ tag: \
 .PHONY: tag $(addsuffix _tag,$(ALL_TOOLS))
 
 #-------------------------------------------------------------------------------
-# sra-dump
-#  vdb table copy tool
-#
-SRADUMP_SRC = \
-	sra-dump
-
-SRADUMP_OBJ = \
-	$(addsuffix .$(OBJX),$(SRADUMP_SRC))
-
-SRADUMP_LIB = \
-	-lkapp \
-	-lsradb \
-	-lalign-reader \
-	$(READONLY_SCHEMA_LIBS) \
-	-lvdb \
-	-lkdb \
-	-lvfs \
-	-lkrypto \
-	-lkfg \
-	-lkfs \
-	-dksrch \
-	-lkproc \
-	-lklib \
-	-lm
-
-$(BINDIR)/sra-dump: $(SRADUMP_OBJ)
-	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(SRADUMP_LIB)
-
-sradump_tag:
-	@ $(TOP)/build/tag-module.sh $(MODULE) sradump $(SRADUMP_OBJ)
-
-#-------------------------------------------------------------------------------
 # Common dumper definitions
 #
 DUMP_COMMON_SRC = \
@@ -125,22 +92,9 @@ DUMP_COMMON_SRC = \
 	core
 
 DUMP_COMMON_LIB = \
-	-lsradb \
-	-lsrareader \
-	-dsraxf \
-	-lalign-reader \
-	-daxf \
 	-lkapp \
-	-dvxf \
-	-lvdb \
-	-lkdb \
-	-lvfs \
-	-lkrypto \
-	-lkfg \
-	-lkfs \
-	-dksrch \
-	-lkproc \
-	-lklib \
+	-lncbi-vdb \
+	-lxml2 \
 	-lm
 
 #-------------------------------------------------------------------------------

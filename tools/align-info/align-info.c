@@ -343,7 +343,6 @@ static rc_t align_info(const Params* prm) {
     }
 
     if (rc == 0) {
-/*      const char path[] = "/panfs/pan1/trace_work/scratch/XXX000013"; */
         rc = VDBManagerOpenDBRead(mgr, &db, schema, prm->dbPath);
         if (rc == 0) {
             is_db = true;
@@ -377,6 +376,7 @@ static rc_t align_info(const Params* prm) {
                     bool circular = false;
                     const char* name = NULL;
                     const char* path = NULL;
+                    const char* remote = NULL;
                     bool local = false;
                     const char* seqId = NULL;
                     rc = VDBDependenciesCircular(dep, &circular, i);
@@ -409,11 +409,20 @@ static rc_t align_info(const Params* prm) {
                             "while calling VDBDependenciesSeqId");
                         break;
                     }
+                    rc = VDBDependenciesPathRemote(dep, &remote, i);
+                    if (rc != 0) {
+                        DISP_RC2(rc, prm->dbPath,
+                            "while calling VDBDependenciesRemote");
+                        break;
+                    }
                     OUTMSG(("%s,%s,%s,%s", seqId, name,
                         (circular ? "true" : "false"),
                         (local ? "local" : "remote")));
                     if (path && path[0]) {
                         OUTMSG((":%s", path));
+                    }
+                    else if (remote && remote[0]) {
+                        OUTMSG(("::%s", remote));
                     }
                     OUTMSG(("\n"));
                 }

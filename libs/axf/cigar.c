@@ -352,7 +352,7 @@ rc_t CC cigar_impl_2 ( void *data, const VXformInfo *info, int64_t row_id,
     rc_t rc = 0;
     uint64_t cnt;
     INSDC_coord_zero start;
-    INSDC_coord_len *cigar_len;
+    INSDC_coord_len *cigar_len = NULL;
     KDataBuffer *buf = (self->version & 0x04) ? NULL : rslt->data;
     
     assert(argv[0].u.data.elem_bits == 8);
@@ -397,7 +397,7 @@ rc_t CC cigar_impl_2 ( void *data, const VXformInfo *info, int64_t row_id,
                                 reflen[argv[4].u.data.first_elem],(nreads==1));
         }
         if (rc) return rc;
-        if (self->version & 0x04)
+        if (cigar_len != NULL /*self->version & 0x04*/)
             cigar_len[n] = cnt;
         else
             rslt->elem_count += cnt;
@@ -1399,18 +1399,20 @@ rc_t CC get_ref_len_impl ( void *data, const VXformInfo *info, int64_t row_id,
 	if(read_len < right) return RC(rcXF, rcFunction, rcExecuting, rcData, rcInvalid);
 	result = read_len - right;
     } else {
-	int32_t  ires;
+	int32_t  ires, rov;
 	unsigned i;
 	
 	if(argc > 2){/*** clipping ***/
 		for(i=0,ires=read_len - right;i<n_offsets;i++){
-			ires += ref_offset[i];
-		}
+			memcpy( & rov, ref_offset + i, sizeof rov );
+			ires += rov;
+        }
 	} else {
 		int32_t sum_pos,sum_neg;
 		for(i=0,sum_pos=sum_neg=0;i<n_offsets;i++){
-			if(ref_offset[i] > 0) sum_pos+=ref_offset[i];
-			else                  sum_neg+=ref_offset[i];
+			memcpy( & rov, ref_offset + i, sizeof rov );
+			if (rov > 0) sum_pos += rov;
+			else         sum_neg += rov;            
 		}
 		if(sum_pos + sum_neg >= 0){/** all offsets may not over-shorten needed reference ***/
 			ires = read_len + sum_pos + sum_neg;
@@ -1419,7 +1421,8 @@ rc_t CC get_ref_len_impl ( void *data, const VXformInfo *info, int64_t row_id,
 			for(i=0,j=0,sum_pos=0,ires=0;j<read_len; j++){
 				if(hro[i]){
 					if(i >= n_offsets) return RC(rcXF, rcFunction, rcExecuting, rcData, rcInvalid);
-					ires += ref_offset[i];
+					memcpy( & rov, ref_offset + i, sizeof rov );
+					ires += rov;
 					i++;
 				}
 				sum_pos ++;

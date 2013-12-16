@@ -1161,7 +1161,9 @@ rc_t CC KMain ( int argc, char *argv [] )
 
                         found = false;
 
-#if 1 /* TOOLS_USE_SRAPATH != 0 */
+#if ! WINDOWS /* TOOLS_USE_SRAPATH != 0 */
+#warning fix kdbmanagerVPathType to understand accessions
+#if 0
                         {
                             SRAPath * sra_path = NULL;
                             rc = SRAPathMake (&sra_path, NULL);
@@ -1180,6 +1182,7 @@ rc_t CC KMain ( int argc, char *argv [] )
                                 rc = 0;
                             }
                         }
+#endif
 
                         if ( ! found)
                         {

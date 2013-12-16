@@ -24,7 +24,6 @@
 */
 #include <align/extern.h>
 
-#include <kapp/main.h>
 #include <klib/log.h>
 #include <klib/rc.h>
 #include <klib/sort.h>
@@ -295,7 +294,7 @@ unsigned str_weight(char const str[], char const qry[], unsigned const qry_len)
     unsigned wt = no_match;
     
     if (fnd) {
-        unsigned const fnd_len = strlen(fnd);
+        unsigned const fnd_len = string_size( fnd );
         unsigned const fndlen = (fnd_len > qry_len && fnd[qry_len] == '|') ? qry_len : fnd_len;
         
         if (fndlen == qry_len && (fnd == str || fnd[-1] == '|')) {
@@ -874,8 +873,8 @@ rc_t ReferenceSeq_GetRefSeqInfo(ReferenceSeq *const self)
 static
 rc_t ReferenceSeq_Attach(ReferenceMgr *const self, ReferenceSeq *const rs)
 {
-    unsigned const seqid_len = rs->seqId ? strlen(rs->seqId) : 0;
-    unsigned const id_len = rs->id ? strlen(rs->id) : 0;
+    unsigned const seqid_len = rs->seqId ? string_size( rs->seqId ) : 0;
+    unsigned const id_len = rs->id ? string_size( rs->id ) : 0;
     rc_t rc = 0;
     KFile const *kf = NULL;
     
@@ -933,7 +932,7 @@ rc_t ReferenceMgr_OpenSeq(ReferenceMgr *const self, ReferenceSeq **const rslt,
                           unsigned const seq_len,
                           uint8_t const md5[16])
 {
-    unsigned const idLen = strlen(id);
+    unsigned const idLen = string_size( id );
     key_id_t const *const fnd = ReferenceMgr_FindId(self, id);
     
     assert(rslt != NULL);
@@ -1029,7 +1028,7 @@ rc_t ReferenceMgr_OpenSeq(ReferenceMgr *const self, ReferenceSeq **const rslt,
             
             if (seq->type == rst_unattached && seq->seqId != NULL) {
                 /* attach didn't work for id; try to find seqId within fasta seqIds */
-                unsigned const seqIdLen = strlen(seq->seqId);
+                unsigned const seqIdLen = string_size( seq->seqId );
                 unsigned best_wt = 0;
                 unsigned best = n;
                 
@@ -1236,7 +1235,7 @@ LIB_EXPORT rc_t CC ReferenceMgr_Make(ReferenceMgr const **cself, VDatabase *db,
                 }
             }
         }
-        ReferenceMgr_Release(self, false, NULL, false);
+        ReferenceMgr_Release(self, false, NULL, false, NULL);
     }
     else
         rc = RC(rcAlign, rcIndex, rcConstructing, rcMemory, rcExhausted);
@@ -1444,7 +1443,7 @@ rc_t CoverageGetSeqLen(ReferenceMgr const *const mgr, TCover data[], uint64_t co
 }
 
 static
-rc_t ReferenceMgr_ReCover(const ReferenceMgr* cself, uint64_t ref_rows)
+rc_t ReferenceMgr_ReCover(const ReferenceMgr* cself, uint64_t ref_rows, rc_t (*const quitting)(void))
 {
     rc_t rc = 0;
     uint64_t new_rows = 0;
@@ -1613,7 +1612,7 @@ rc_t ReferenceMgr_ReCover(const ReferenceMgr* cself, uint64_t ref_rows)
                     }
                 } /**** DONE WITH WORK ON STATISTICS ***/
                 ALIGN_DBGERR(rc);
-                rc = rc ? rc : Quitting();
+                rc = rc ? rc : quitting();
             }
 		    /*** HAVE TO RELEASE **/
 		    TableReader_Whack(reader);
@@ -1690,9 +1689,11 @@ rc_t ReferenceMgr_ReCover(const ReferenceMgr* cself, uint64_t ref_rows)
 }
 
 LIB_EXPORT rc_t CC ReferenceMgr_Release(const ReferenceMgr *cself,
-                                        bool commit,
+                                        const bool commit,
                                         uint64_t *const Rows,
-                                        bool build_coverage)
+                                        const bool build_coverage,
+                                        rc_t (*const quitting)(void)
+                                        )
 {
     rc_t rc = 0;
 
@@ -1717,7 +1718,7 @@ LIB_EXPORT rc_t CC ReferenceMgr_Release(const ReferenceMgr *cself,
         KDataBufferWhack(&self->refSeqsById);
         
         if (rc == 0 && build_coverage && commit)
-            rc = ReferenceMgr_ReCover(cself, rows);
+            rc = ReferenceMgr_ReCover(cself, rows, quitting);
 #if 0 
         {
             VTable* t = NULL;
@@ -1771,7 +1772,7 @@ rc_t ReferenceSeq_ReadDirect(ReferenceSeq *self,
             
             memcpy(&buffer[dst_off], &src[offset], to_write);
             *written += to_write;
-            if (!read_circular)
+            if (!self->circular)
                 break;
             offset = 0;
             dst_off += to_write;
@@ -1806,10 +1807,10 @@ rc_t ReferenceMgr_LoadSeq(ReferenceMgr *const self, ReferenceSeq *obj)
         
         obj->start_rowid = self->ref_rowid + 1;
         data.name.buffer = id;
-        data.name.elements = strlen(id);
+        data.name.elements = string_size( id );
         data.read.buffer = readBuf.base;
         data.seq_id.buffer = seqId;
-        data.seq_id.elements = strlen(seqId);
+        data.seq_id.elements = string_size( seqId );
         data.force_READ_write = obj->type == rst_local || (self->options & ewrefmgr_co_allREADs);
         data.circular = obj->circular;
         
@@ -1910,7 +1911,7 @@ LIB_EXPORT rc_t CC ReferenceMgr_Verify(const ReferenceMgr* cself, const char* id
             const uint8_t* o_md5;
 
             if( tmp == NULL ) {
-                if( (rc = RefSeqMgr_GetSeq(cself->rmgr, &tmp, rseq->accession, strlen(rseq->accession))) != 0 ||
+                if( (rc = RefSeqMgr_GetSeq(cself->rmgr, &tmp, rseq->accession, string_size( rseq->accession ))) != 0 ||
                     (rc = RefSeq_SeqLength(tmp, &o_len)) != 0 ) {
                     ALIGN_DBGERRP("%s->%s verification", rc, id, rseq->accession);
                 }
@@ -2238,12 +2239,30 @@ LIB_EXPORT rc_t CC ReferenceMgr_Compress(const ReferenceMgr* cself, uint32_t opt
     return rc;
 }
 
-LIB_EXPORT rc_t CC ReferenceSeq_Compress(const ReferenceSeq* cself, const uint32_t options, INSDC_coord_zero offset,
+LIB_EXPORT size_t CC ReferenceMgr_CompressHelper(uint8_t cmp_rslt[],
+                                                 TableWriterAlgnData const *const data,
+                                                 uint8_t const input[])
+{
+    size_t const len = data->has_mismatch.elements;
+    bool const *const has_mismatch = data->has_mismatch.buffer;
+    size_t i;
+    size_t n;
+    
+    for (n = i = 0; i != len; ++i) {
+        if (has_mismatch[i]) {
+            cmp_rslt[n] = input[i];
+            ++n;
+        }
+    }
+    return n;
+}
+
+LIB_EXPORT rc_t CC ReferenceSeq_Compress(const ReferenceSeq* cself, uint32_t options, INSDC_coord_zero offset,
                                          const char* seq, INSDC_coord_len seq_len,
                                          const void* cigar, uint32_t cigar_len,
                                          INSDC_coord_zero allele_offset, const char* allele,
-					 INSDC_coord_len allele_len,
-					 INSDC_coord_zero offset_in_allele,
+                                         INSDC_coord_len allele_len,
+                                         INSDC_coord_zero offset_in_allele,
                                          const void* allele_cigar, uint32_t allele_cigar_len,
                                          TableWriterAlgnData* data)
 {
@@ -2414,6 +2433,7 @@ LIB_EXPORT rc_t CC ReferenceSeq_Compress(const ReferenceSeq* cself, const uint32
                             has_mismatch[seq_pos] = false;
                         }
                     }
+                    data->mismatch.elements = ReferenceMgr_CompressHelper(mismatch, data, (uint8_t const *)seq);
                 }
             }
         }

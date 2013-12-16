@@ -28,16 +28,12 @@ TOP ?= $(shell ../../build/abspath.sh ../..)
 MODULE = libs/kfg
 
 INT_LIBS = \
-
-EXT_LIBS = \
 	libkfg
 
 ALL_LIBS = \
-	$(INT_LIBS) \
-	$(EXT_LIBS)
+	$(INT_LIBS)
 
 TEST_TOOLS = \
-	wb-test-kfg
 
 include $(TOP)/build/Makefile.env
 
@@ -50,9 +46,6 @@ all std: makedirs
 $(INT_LIBS): makedirs
 	@ $(MAKE_CMD) $(ILIBDIR)/$@
 
-$(EXT_LIBS): makedirs
-	@ $(MAKE_CMD) $(LIBDIR)/$@
-
 $(TEST_TOOLS): makedirs
 	@ $(MAKE_CMD) $(TEST_BINDIR)/$@
 
@@ -62,8 +55,7 @@ $(TEST_TOOLS): makedirs
 # std
 #
 $(TARGDIR)/std: \
-	$(addprefix $(ILIBDIR)/,$(INT_LIBS)) \
-	$(addprefix $(LIBDIR)/,$(EXT_LIBS))
+	$(addprefix $(ILIBDIR)/,$(INT_LIBS))
 
 .PHONY: $(TARGDIR)/std
 
@@ -76,27 +68,28 @@ clean: stdclean
 .PHONY: clean
 
 #-------------------------------------------------------------------------------
-# tag
-#
-tag: \
-	$(addsuffix _tag,$(ALL_LIBS))
-
-.PHONY: tag $(addsuffix _tag,$(ALL_LIBS))
-
-#-------------------------------------------------------------------------------
 # kfg
 #
-$(LIBDIR)/libkfg: $(NCBIDIR)/config.kfg $(addprefix $(LIBDIR)/libkfg.,$(LIBEXT))
+$(ILIBDIR)/libkfg: $(TARGDIR)/default.kfg $(addprefix $(ILIBDIR)/libkfg.,$(ILIBEXT))
 
-$(NCBIDIR)/config.kfg: $(SRCDIR)/config.$(OS).kfg
-	sed -e "s|\$$"'(TOP)|'$(TOP)'|g' -e 's|/cygdrive||g' $^ > $@
+$(TARGDIR)/default.kfg: $(NCBIDIR)/default.kfg $(TEST_BINDIR)/ncbi/default.kfg
+
+$(NCBIDIR)/default.kfg: $(SRCDIR)/default.kfg
+	rm -f $(NCBIDIR)/config.kfg
+	cp $^ $@
+
+$(TEST_BINDIR)/ncbi/default.kfg: $(SRCDIR)/default.kfg
+	mkdir -p $(TEST_BINDIR)/ncbi
+	cp $^ $@
 
 KFG_SRC = \
 	config-grammar \
 	config-lex \
 	config \
+	kart \
 	repository \
-	report 
+	report-kfg \
+    keystore 
 
 KFG_OBJ = \
 	$(addsuffix .$(LOBX),$(KFG_SRC))
@@ -105,35 +98,6 @@ KFG_LIB = \
 	-dkfs \
 	-dklib
 
-$(LIBDIR)/libkfg.$(SHLX): $(KFG_OBJ)
-	$(LD) --dlib --vers $(SRCDIR) -o $@ $^ $(KFG_LIB)
+$(ILIBDIR)/libkfg.$(LIBX): $(INTERM_SRC) $(KFG_OBJ)
+	$(LD) --slib -o $@ $^ $(KFG_LIB)
 
-$(LIBDIR)/libkfg.$(LIBX): $(KFG_OBJ)
-	$(LD) --slib --vers $(SRCDIR) -o $@ $^ $(KFG_LIB)
-
-libkfg_tag:
-	@ $(TOP)/build/tag-module.sh $(MODULE) libkfg $(KFG_OBJ)
-
-#-------------------------------------------------------------------------------
-# white-box test
-#
-TEST_SRC = \
-	wb-test-kfg
-
-TEST_OBJ = \
-	$(addsuffix .$(OBJX),$(TEST_SRC))
-
-TEST_LIB = \
-	-skapp \
-	-skfg \
-	-svdb \
-	-svfs \
-	-skdb \
-	-skfs \
-	-skrypto \
-	-skproc \
-	-sktst \
-	-sklib 
-
-$(TEST_BINDIR)/wb-test-kfg: $(TEST_OBJ)
-	$(LP) --exe -o $@ $^ $(TEST_LIB) 

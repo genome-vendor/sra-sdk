@@ -1066,11 +1066,13 @@ static rc_t ProcessBAM(char const bamFile[], context_t *ctx, VDatabase *db,
             BAMAlignmentGetReadLength(rec, &readlen);/*BAM*/
             if (isColorSpace) {
                 BAMAlignmentGetCSSeqLen(rec, &csSeqLen);
-                if (readlen != csSeqLen && readlen != 0) {
+                if (readlen > csSeqLen) {
                     rc = RC(rcAlign, rcRow, rcReading, rcData, rcInconsistent);
-                    (void)LOGERR(klogErr, rc, "Sequence length and CS Sequence length are not equal");
+                    (void)LOGERR(klogErr, rc, "Sequence length and CS Sequence length are inconsistent");
                     goto LOOP_END;
                 }
+                else if (readlen < csSeqLen)
+                    readlen = 0;
             }
             else if (readlen == 0) {
             }
@@ -1146,6 +1148,9 @@ static rc_t ProcessBAM(char const bamFile[], context_t *ctx, VDatabase *db,
             goto LOOP_END;
         originally_aligned = (flags & BAMFlags_SelfIsUnmapped) == 0;/*BAM*/
         aligned = originally_aligned && (AR_MAPQ(data) >= G.minMapQual);
+
+        if (isColorSpace && readlen == 0)   /* detect hard clipped colorspace   */
+            aligned = false;                /* reads and make unaligned         */
         
         if (aligned && align == NULL) {
             rc = RC(rcApp, rcFile, rcReading, rcData, rcInconsistent);

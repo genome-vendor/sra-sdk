@@ -128,7 +128,7 @@ rc_t CC KCipherRelease (const KCipher * self)
         case krefWhack:
             return KCipherWhack ((KCipher *)self);
 
-        case krefLimit:
+        case krefNegative:
             return RC ( rcKrypto, rcCipher, rcReleasing, rcRange, rcExcessive );
         }
     }
@@ -502,19 +502,21 @@ rc_t KCipherMake (KCipher ** new_cipher, kcipher_type type)
             case ksubcipher_byte:
                 rc = KCipherByteMake (new_cipher, type);
                 break;
-
+#ifdef USEVEC
             case ksubcipher_vec:
                 rc = KCipherVecMake (new_cipher, type);
                 break;
-
+#endif
+#ifdef USEVECREG
             case ksubcipher_vecreg:
                 rc = KCipherVecRegMake (new_cipher, type);
                 break;
-
+#endif
+#ifdef USEAESNI
             case ksubcipher_accelerated:
                 rc = KCipherVecAesNiMake (new_cipher, type);
                 break;
-
+#endif
             default:
                 rc = KCipherMakeInt (new_cipher, type);
                 break;

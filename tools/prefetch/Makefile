@@ -25,7 +25,7 @@
 
 default: std
 
-TOP ?= $(abspath ../..)
+TOP ?= $(shell ../../build/abspath.sh ../..)
 MODULE = tools/prefetch
 
 include $(TOP)/build/Makefile.env
@@ -90,20 +90,9 @@ PREFETCH_OBJ = \
 	$(addsuffix .$(OBJX),$(PREFETCH_SRC))
 
 PREFETCH_LIB = \
-	-ssraschema \
-	-dsraxf \
-	-dvxf \
-	-lvdb \
 	-lkapp \
-	-lkdb \
-	-lvfs \
-	-ssrapath \
-	-lkrypto \
-	-lkfg \
-	-lkfs \
-	-lksrch \
-	-lklib \
-	-lkproc \
+	-lncbi-vdb \
+	-lxml2 \
 	-lm
 
 

@@ -60,6 +60,156 @@ struct KSysDir;
 #define IO_REPARSE_TAG_SYMLINK 0xA000000C
 #endif
 
+
+/* Missing functions from our text library
+ * size is bytes; max_chars is number of elements
+ */
+
+/* utf16_utf32
+ *  converts UTF16 text to a single UTF32 character
+ *  returns the number of UTF16 words consumed, such that:
+ *    return > 0 means success
+ *    return == 0 means insufficient input
+ *    return < 0 means bad input or bad argument
+ */
+static
+int utf16_utf32 ( uint32_t *dst, const wchar_t *begin, const wchar_t *end )
+{
+    uint32_t ch;
+    const wchar_t *src, *stop;
+
+    if ( dst == NULL || begin == NULL || end == NULL )
+        return -1;
+
+    if ( begin == end )
+        return 0;
+
+    /* windows utf16 */
+
+    ch = (uint32_t)(begin [0]);
+
+    if ((ch < 0xD800) || (ch <= 0xE000))
+    {
+        *dst = ch;
+        return 1;
+    }
+    else
+    {
+        uint32_t ch;
+
+        /* need at least 2 words */
+        if (begin >= end)
+            return -1;
+
+        /* extreme checks */
+        if (((begin[0] & 0xFC00) != 0xD8) ||
+            ((begin[1] & 0xFC00) != 0xDC))
+            return -1;
+
+        ch = (begin[0] & 0x03FF) << 10 |
+            (begin[1] & 0x03FF);
+        return 2;
+    }
+}
+
+
+/* utf32_utf16
+ *  converts a single UTF32 character to UTF16 text
+ *  returns the number of UTF16 words generated, such that:
+ *    return > 0 means success
+ *    return == 0 means insufficient output
+ *    return < 0 means bad character or bad argument
+ */
+static 
+int utf32_utf16 ( wchar_t *begin, wchar_t *end, uint32_t ch )
+{
+    if (ch < 0x10000)
+    {
+        if ((ch <= 0xDFFF) && (ch >= 0xD800))
+            return -1;
+
+        begin[0] = (uint16_t)ch;
+        return 1;
+    }
+    else if ((ch >= 0x10FFFF) || (end <= begin))
+        return -1;
+    else
+    {
+        uint32_t cch;
+
+        cch = ch - 0x10000;
+        /* cch <= 0xFFFFF since ch < 0x10FFFF */
+
+        begin[0] = 0xD800 | (cch >> 10); /* upper 10 bits */
+        begin[1] = 0xDC00 | (cch & 0x3FF); /* lower 10 bita */
+        return 2;
+    }
+}
+
+
+static int wstrcase_cmp (const wchar_t * a, size_t asize,
+                         const wchar_t * b, size_t bsize,
+                         uint32_t max_chars)
+{
+    uint32_t num_chars;
+    const wchar_t *aend, *bend;
+
+    assert ( a != NULL && b != NULL );
+
+    /* set up end limit triggers */
+    aend = a + asize;
+    bend = b + bsize;
+
+    num_chars = 0;
+
+    while ( a < aend && b < bend )
+    {
+        uint32_t ach, bch;
+
+        /* read a character from a */
+        int len = utf16_utf32 ( & ach, a, aend );
+        if ( len <= 0 )
+        {
+            asize -= ( size_t ) ( aend - a );
+            break;
+        }
+        a += len;
+
+        /* read a character from b */
+        len = utf16_utf32 ( & bch, b, bend );
+        if ( len <= 0 )
+        {
+            bsize -= ( size_t ) ( bend - b );
+            break;
+        }
+        b += len;
+
+        /* compare characters with case */
+        if ( ach != bch )
+        {
+            /* only go lower case if they differ */
+            ach = towlower ( ( wint_t ) ach );
+            bch = towlower ( ( wint_t ) bch );
+
+            if ( ach != bch )
+            {
+                if ( ach < bch )
+                    return -1;
+                return 1;
+            }
+        }
+
+        /* if char count is sufficient, we're done */
+        if ( ++ num_chars == max_chars )
+            return 0;
+    }
+
+    /* one or both reached end < max_chars */
+    if (asize < bsize)
+        return -1;
+    return asize > bsize;
+}
+
 /*--------------------------------------------------------------------------
  * KSysDirEnum
  *  a Windows directory enumerator
@@ -176,7 +326,13 @@ typedef VNamelist KSysDirListing;
 static
 int KSysDirListingSort ( const void *a, const void *b )
 {
-    return strcmp ( * ( const char** ) a, * ( const char** ) b );
+    size_t A,B,M;
+    A = wchar_string_size (a);
+    B = wchar_string_size (b);
+    /* close enough for max chars? */
+    M = (A>B) ? A : B;
+
+    return wstrcase_cmp (a, A, b, B, M);
 }
 
 static
@@ -588,7 +744,7 @@ rc_t KSysDirMakePath ( const KSysDir* self, enum RCContext ctx, bool canon,
                 return RC ( rcFS, rcDirectory, ctx, rcPath, rcInvalid );
 
             /* rewrite drive letter */
-            temp_utf8_buffer [ 0 ] = toupper ( temp_utf8_buffer [ 1 ] );
+            temp_utf8_buffer [ 0 ] = tolower ( temp_utf8_buffer [ 1 ] );
             temp_utf8_buffer [ 1 ] = ':';
         }
     }
@@ -645,7 +801,7 @@ rc_t KSysDirMakePath ( const KSysDir* self, enum RCContext ctx, bool canon,
     return 0;
 }
 
-rc_t KSysDirOSPath ( const KSysDir *self,
+LIB_EXPORT rc_t KSysDirOSPath ( const KSysDir *self,
     wchar_t *real, size_t real_size, const char *path, va_list args )
 {
     return KSysDirMakePath ( self, rcLoading, true, real, real_size, path, args );
@@ -905,7 +1061,8 @@ rc_t KSysDirRelativePath ( const KSysDir *self, enum RCContext ctx,
     const wchar_t *r = root + self->root;
     const wchar_t *p = path + self->root;
 
-    for ( ; * r == * p; ++ r, ++ p )
+    /* stop gap fix..  not actually comparing the utf16 values correctly */
+    for ( ; towlower (*r) == towlower (*p); ++ r, ++ p )
     {
         /* disallow identical paths */
         if ( * r == 0 )
@@ -1004,7 +1161,7 @@ rc_t CC KSysDirResolvePath ( const KSysDir *self, bool absolute,
         wchar_t colon = ':';
         bool is_on_same_drive_letter = ( iswascii ( temp[ 0 ] ) && iswascii ( self->path[ 0 ] ) &&
                                          ( temp[ 1 ] == colon ) && ( self->path[ 1 ] == colon ) &&
-                                         ( temp[ 0 ] == self->path[ 0 ] ) );
+                                         ( towlower ( temp[ 0 ] ) == towlower ( self->path[ 0 ] ) ) );
         if ( is_on_same_drive_letter )
         {
             rc = KSysDirRelativePath( self, rcResolving, self->path, temp, sizeof temp );
@@ -1118,7 +1275,8 @@ rc_t CC KSysDirResolveAlias ( const KSysDir *self, bool absolute,
         {
             /* the path in full is an absolute path
                if outside of chroot, it's a bad link */
-            if ( memcmp( temp.path, self->path, self->root + 1 ) != 0 )
+            if (wstrcase_cmp (temp.path, self->root + 1,
+                              self->path, self->root + 1,self->root + 1) != 0)
                 return RC( rcFS, rcDirectory, rcResolving, rcLink, rcInvalid );
 
             /* this is the absolute path length */
@@ -1222,15 +1380,19 @@ rc_t CC KSysDirResolveAlias ( const KSysDir *self, bool absolute,
         rc = KSysDirCanonPath( &full, rcResolving, full.path, len );
         if ( rc == 0 )
         {
+            size_t f, s;
+
+            f = wchar_string_size (full.path);
+            s = wchar_string_size (self->path);
             /* the path in full is an absolute path
                if outside of chroot, it's a bad link */
-            if ( memcmp( full.path, self->path, self->root + 1 ) != 0 )
+            if ( wstrcase_cmp (full.path, f, self->path, s, self->root + 1 ) != 0 )
             {
                 return RC( rcFS, rcDirectory, rcResolving, rcLink, rcInvalid );
             }
 
             /* this is the absolute path length */
-            len = strlen( &full.path[self->root] );
+            len = wchar_string_size( &full.path[self->root] );
 
             /* if not requesting absolute, make self relative */
             if( !absolute )
@@ -1238,12 +1400,12 @@ rc_t CC KSysDirResolveAlias ( const KSysDir *self, bool absolute,
             rc = KSysDirRelativePath( self, rcResolving, self->path, full.path, sizeof full.path /*len*/ );
                 if ( rc != 0 )
                     return rc;
-                len = strlen(full.path);
+                len = wchar_string_size(full.path);
             }
             if ( ( size_t ) len >= rsize )
                 return RC(rcFS, rcDirectory, rcResolving, rcBuffer, rcInsufficient );
 
-            strcpy ( resolved, & full . path [ self -> root ] );
+            wcscpy ( resolved, & full . path [ self -> root ] );
         }
 #endif
     return rc;

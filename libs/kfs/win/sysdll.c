@@ -195,7 +195,7 @@ LIB_EXPORT rc_t CC KDyldRelease ( const KDyld *self )
         {
         case krefWhack:
             return KDyldWhack ( ( KDyld* ) self );
-        case krefLimit:
+        case krefNegative:
             return RC ( rcFS, rcDylib, rcReleasing, rcRange, rcExcessive );
         }
     }
@@ -229,7 +229,7 @@ rc_t KDyldSever ( const KDyld *self )
         {
         case krefWhack:
             return KDyldWhack ( ( KDyld* ) self );
-        case krefLimit:
+        case krefNegative:
             return RC ( rcFS, rcDylib, rcReleasing, rcRange, rcExcessive );
         }
     }
@@ -316,7 +316,7 @@ LIB_EXPORT rc_t CC KDyldHomeDirectory ( const KDyld *self, const KDirectory **di
              * a type safe way to do this */
             BOOL success = GetModuleHandleEx ( GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
                                                | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                                               (LPCSTR)func, & h );
+                                               ( const TCHAR * )func, & h );
             if ( success )
             {
                 wchar_t fname [ MAX_PATH ];
@@ -679,7 +679,7 @@ LIB_EXPORT rc_t CC KDylibRelease ( const KDylib *self )
         {
         case krefWhack:
             return KDylibWhack ( ( KDylib* ) self );
-        case krefLimit:
+        case krefNegative:
             return RC ( rcFS, rcDylib, rcReleasing, rcRange, rcExcessive );
         }
     }
@@ -720,7 +720,7 @@ rc_t KDylibSever ( const KDylib *self )
         {
         case krefWhack:
             return KDylibWhack ( ( KDylib* ) self );
-        case krefLimit:
+        case krefNegative:
             return RC ( rcFS, rcDylib, rcReleasing, rcRange, rcExcessive );
         }
     }
@@ -821,7 +821,7 @@ rc_t KDlsetWhack ( KDlset *self )
 LIB_EXPORT rc_t CC KDyldMakeSet ( const KDyld *self, KDlset **setp )
 {
     rc_t rc = 0;
-
+    
     if ( setp == NULL )
         rc = RC ( rcFS, rcDylib, rcConstructing, rcParam, rcNull );
     else
@@ -842,13 +842,14 @@ LIB_EXPORT rc_t CC KDyldMakeSet ( const KDyld *self, KDlset **setp )
 #if ! ALWAYS_ADD_EXE
                 {   
                     KDylib *jni;
-                    const char* libname = LIBNAME(LIBPREFIX, "vdb_jni.", SHLIBEXT);
-                    if ( KDyldLoadLib ( ( KDyld* ) self, & jni, libname ) == 0 )
+                    const char* libname = "vdb_jni.dll";
+                    rc = KDyldLoadLib ( ( KDyld* ) self, & jni, libname );
+                    if ( rc == 0 )
                     {
                         rc = KDlsetAddLib ( set, jni );
                         KDylibRelease ( jni );
                     }
-                    if (rc == 0)
+                    /*if (rc == 0)*/ /* if JNI code is not there, C tools should not suffer */
                     {
                         * setp = set;
                         return 0;
@@ -906,7 +907,7 @@ LIB_EXPORT rc_t CC KDlsetRelease ( const KDlset *self )
         {
         case krefWhack:
             return KDlsetWhack ( ( KDlset* ) self );
-        case krefLimit:
+        case krefNegative:
             return RC ( rcFS, rcDylib, rcReleasing, rcRange, rcExcessive );
         }
     }
@@ -927,7 +928,7 @@ rc_t KDlsetAddLibInt ( KDlset *self, KDylib *lib )
     if ( rc == 0 )
     {
         void *ignore;
-
+        
         rc = VectorInsertUnique ( & self -> name,
             lib, NULL, KDylibSort );
         if ( rc == 0 )
@@ -1070,7 +1071,7 @@ LIB_EXPORT rc_t CC KSymAddrRelease ( const KSymAddr *self )
         {
         case krefWhack:
             return KSymAddrWhack ( ( KSymAddr* ) self );
-        case krefLimit:
+        case krefNegative:
             return RC ( rcFS, rcDylib, rcReleasing, rcRange, rcExcessive );
         }
     }
@@ -1275,7 +1276,7 @@ LIB_EXPORT rc_t CC KDlsetLastSymbol ( const KDlset *self, KSymAddr **sym, const 
     bool ( CC * test ) ( const KSymAddr *sym, void *data ), void *data )
 {
     rc_t rc;
-
+    
     if ( sym == NULL )
         rc = RC ( rcFS, rcDylib, rcSelecting, rcParam, rcNull );
     else

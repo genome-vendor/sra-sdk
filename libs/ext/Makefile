@@ -33,7 +33,10 @@ include $(TOP)/build/Makefile.shell
 #
 SUBDIRS = \
 	zlib \
-	bzip2
+	bzip2 \
+	curl
+
+include $(TOP)/build/Makefile.targets
 
 default: $(SUBDIRS)
 
@@ -41,67 +44,6 @@ $(SUBDIRS):
 	@ $(MAKE) -C $@
 
 .PHONY: default $(SUBDIRS)
-
-#-------------------------------------------------------------------------------
-# all
-#
-SUBDIRS_ALL = $(addsuffix _all,$(SUBDIRS))
-
-all: $(SUBDIRS_ALL)
-
-$(SUBDIRS_ALL):
-	@ $(MAKE) -C $(subst _all,,$@) all
-
-.PHONY: all $(SUBDIRS_ALL)
-
-#-------------------------------------------------------------------------------
-# std
-#
-SUBDIRS_STD = $(addsuffix _std,$(SUBDIRS))
-
-std: $(SUBDIRS_STD)
-
-$(SUBDIRS_STD):
-	@ $(MAKE) -C $(subst _std,,$@) std
-
-.PHONY: std $(SUBDIRS_STD)
-
-#-------------------------------------------------------------------------------
-# clean
-#
-SUBDIRS_CLEAN = $(addsuffix _clean,$(SUBDIRS))
-
-clean: $(SUBDIRS_CLEAN)
-
-$(SUBDIRS_CLEAN):
-	@ $(MAKE) -C $(subst _clean,,$@) clean
-
-.PHONY: clean $(SUBDIRS_CLEAN)
-
-#-------------------------------------------------------------------------------
-# deep-clean
-#
-SUBDIRS_DEEP_CLEAN = $(addsuffix _deep_clean,$(SUBDIRS))
-
-deep-clean: $(SUBDIRS_DEEP_CLEAN)
-
-$(SUBDIRS_DEEP_CLEAN):
-	@ $(MAKE) -C $(subst _deep_clean,,$@) deep-clean
-
-.PHONY: deep-clean $(SUBDIRS_DEEP_CLEAN)
-
-
-#-------------------------------------------------------------------------------
-# tag
-#
-SUBDIRS_TAG = $(addsuffix _tag,$(SUBDIRS))
-
-tag: $(SUBDIRS_TAG)
-
-$(SUBDIRS_TAG):
-	@ $(MAKE) -C $(subst _tag,,$@) tag
-
-.PHONY: tag $(SUBDIRS_TAG)
 
 
 #-------------------------------------------------------------------------------

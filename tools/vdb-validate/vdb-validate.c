@@ -31,14 +31,6 @@
 
 #include <kapp/main.h>
 #include <kapp/args.h>
-#include <klib/out.h>
-#include <klib/log.h>
-#include <klib/rc.h>
-#include <klib/namelist.h>
-#include <klib/container.h>
-#include <klib/debug.h>
-#include <klib/data-buffer.h>
-#include <klib/sort.h>
 
 #include <kdb/manager.h>
 #include <kdb/database.h>
@@ -57,6 +49,7 @@
 #include <vdb/vdb-priv.h> /* VTableOpenKTableRead */
 
 #include <krypto/encfile.h> /* KEncFileValidate */
+#include <krypto/wgaencrypt.h> /* KEncFileValidate */
 
 #include <kfs/kfs-priv.h>
 #include <kfs/sra.h>
@@ -68,6 +61,17 @@
 #include <sra/srapath.h>
 #include <sra/sradb.h>
 #include <sra/sraschema.h>
+
+#include <klib/out.h>
+#include <klib/log.h>
+#include <klib/rc.h>
+#include <klib/namelist.h>
+#include <klib/container.h>
+#include <klib/text.h> /* String */
+#include <klib/status.h> /* STSMSG */
+#include <klib/debug.h>
+#include <klib/data-buffer.h>
+#include <klib/sort.h>
 
 #include <sysalloc.h>
 
@@ -494,11 +498,12 @@ static rc_t EncFileReadAll(const char *name,
     const KFile *f = NULL;
 
     rc = VFSManagerMake(&mgr);
-    if (rc != 0)
-    {   (void)LOGERR(klogErr, rc, "Failed to VFSManagerMake()"); }
+    if (rc != 0) {
+        LOGERR(klogErr, rc, "Failed to VFSManagerMake()");
+    }
 
     if (rc == 0) {
-        rc = VPathMake(&path, name);
+        rc = VFSManagerMakePath (mgr, &path, name);
         if (rc != 0) {
             (void)PLOGERR(klogErr, (klogErr, rc,
                 "Failed to VPathMake($(name))", "name=%s", name));
@@ -529,6 +534,7 @@ static rc_t EncFileReadAll(const char *name,
     return rc;
 }
 
+
 #if 0
 static rc_t verify_encryption(const KDirectory *dir, const char *name,
     bool *enc, bool *sra)
@@ -543,8 +549,9 @@ static rc_t verify_encryption(const KDirectory *dir, const char *name,
     *sra = true;
 
     rc = KDirectoryOpenFileRead(dir, &f, name);
-    if (rc == 0)
-    {   rc = KFileReadAll(f, 0, &buffer, sizeof buffer, &num_read); }
+    if (rc == 0) {
+        rc = KFileReadAll(f, 0, &buffer, sizeof buffer, &num_read);
+    }
 
     if (rc == 0) {
         size_t sz = num_read < 8 ? num_read : 8;
@@ -1483,7 +1490,7 @@ static
 rc_t dbcc ( const vdb_validate_params *pb, const char *path, bool is_file )
 {
     char *names;
-    KPathType pathType;
+    KPathType pathType = kptNotFound;
     node_t *nodes = NULL;
     const char *obj_type, *obj_name;
 
@@ -1563,42 +1570,72 @@ rc_t vdb_validate_file ( const vdb_validate_params *pb, const KDirectory *dir, c
     else
     {
         bool is_sra = false;
-        bool encrypted = false;
+        enum EEncrypted {
+            eNo,
+            eEncrypted,
+            eWGA
+        } encrypted = eNo;
 
         size_t num_read;
         char buffer [ 4096 ];
         rc = KFileReadAll ( f, 0, buffer, sizeof buffer, & num_read );
         if ( rc != 0 )
             PLOGERR ( klogErr, ( klogErr, rc, "File '$(fname)' could not be read", "fname=%s", relpath ) );
-        else
-        {
+        else {
             /* special kludge to prevent code from looking too far at header */
             size_t hdr_bytes = num_read;
             if ( num_read > 8 )
                 hdr_bytes = 8;
 
             /* check for encrypted file */
-            if ( KFileIsEnc ( buffer, hdr_bytes ) == 0 )
-            {
-                encrypted = true;
+            if ( KFileIsEnc ( buffer, hdr_bytes ) == 0 ) {
+                encrypted = eEncrypted;
+            }
+            else if ( KFileIsWGAEnc ( buffer, hdr_bytes ) == 0 ) {
+                encrypted = eWGA;
+            }
 
-                PLOGMSG ( klogInfo, ( klogInfo, "Validating encrypted file '$(fname)'...", "fname=%s", relpath ) );
-                rc = KEncFileValidate ( f );
-                if ( rc != 0 )
-                {
-                    PLOGERR ( klogErr, ( klogErr, rc, "Encrypted file '$(fname)' could not be validated", "fname=%s", relpath ) );
+            if (encrypted != eNo) {
+                PLOGMSG ( klogInfo, ( klogInfo,
+                    "Validating $(type)encrypted file '$(fname)'...",
+                    "type=%s,fname=%s",
+                    encrypted == eWGA ? "WGA " : " ", relpath ) );
+                switch (encrypted) {
+                    case eEncrypted:
+                        rc = KEncFileValidate(f);
+                        break;
+                    case eWGA: {
+                        VFSManager *mgr = NULL;
+                        rc = VFSManagerMake(&mgr);
+                        if (rc != 0) {
+                            LOGERR(klogInt, rc, "Cannot VFSManagerMake");
+                        }
+                        else {
+                            rc = VFSManagerWGAValidateHack(mgr, f, relpath);
+                        }
+                        VFSManagerRelease(mgr);
+                        break;
+                    }
+                    default:
+                        assert(0);
                 }
-                else
-                {
-                    PLOGMSG ( klogInfo, ( klogInfo, "Encrypted file '$(fname)' appears valid", "fname=%s", relpath ) );
+                if ( rc != 0 ) {
+                    PLOGERR ( klogErr, ( klogErr, rc,
+                        "Encrypted file '$(fname)' could not be validated",
+                        "fname=%s", relpath ) );
+                }
+                else {
+                    PLOGMSG ( klogInfo, ( klogInfo,
+                        "Encrypted file '$(fname)' appears valid",
+                        "fname=%s", relpath ) );
 
-                    rc = EncFileReadAll ( relpath, buffer, sizeof buffer, & num_read );
+                    rc = EncFileReadAll ( relpath, buffer, sizeof buffer,
+                        & num_read );
                     if ( rc == 0 && KFileIsSRA ( buffer, num_read ) == 0 )
                         is_sra = true;
                 }
             }
-            else if ( KFileIsSRA ( buffer, num_read ) == 0 )
-            {
+            else if ( KFileIsSRA ( buffer, num_read ) == 0 ) {
                 is_sra = true;
             }
         }
@@ -1668,13 +1705,29 @@ rc_t CC vdb_validate_dir ( const KDirectory *dir, uint32_t type, const char *nam
     return 0;
 }
 
-static rc_t disableRemoteResolution() {
-    rc_t rc = 0;
+#define rcResolver   rcTree
+static bool NotFoundByResolver(rc_t rc) {
+    if (GetRCModule(rc) == rcVFS) {
+        if (GetRCTarget(rc) == rcResolver) {
+            if (GetRCContext(rc) == rcResolving) {
+                if (GetRCState(rc) == rcNotFound) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
 
+static rc_t vdb_validate(const vdb_validate_params *pb, const char *aPath) {
+    bool bad = false;
+    const String *local = NULL;
     VFSManager *mgr = NULL;
     VResolver *resolver = NULL;
+    const char *path = aPath;
+    KPathType pt = kptNotFound;
 
-    rc = VFSManagerMake(&mgr);
+    rc_t rc = VFSManagerMake(&mgr);
     if (rc != 0) {
         LOGERR(klogInt, rc, "Cannot VFSManagerMake");
         return rc;
@@ -1688,60 +1741,96 @@ static rc_t disableRemoteResolution() {
         VResolverRemoteEnable(resolver, vrAlwaysDisable);
     }
 
-    RELEASE(VResolver, resolver);
+    /* what type of thing is this path? */
+    pt = KDirectoryPathType(pb->wd, path);
+
+    if ((pt & ~kptAlias) == kptNotFound) {
+        const VPath *pLocal = NULL;
+        VPath *acc = NULL;
+        bad = true;
+        rc = VFSManagerMakePath (mgr, &acc, path);
+        if (rc != 0) {
+            PLOGERR(klogErr, (klogErr, rc,
+                "VPathMake($(path)) failed", PLOG_S(path), path));
+        }
+        else {
+            rc = VResolverLocal(resolver, acc, &pLocal);
+            if (rc != 0 && NotFoundByResolver(rc)) {
+                bad = false;
+                PLOGMSG(klogInfo, (klogInfo,
+                    "'$(fname)' could not be found", "fname=%s", path));
+            }
+        }
+
+        if (rc == 0) {
+            rc = VPathMakeString(pLocal, &local);
+            if (rc != 0) {
+                PLOGERR(klogErr, (klogErr, rc,
+                    "VPathMake(local $(path)) failed", PLOG_S(path), path));
+            }
+        }
+
+        if (rc == 0) {
+            path = local->addr;
+            PLOGMSG(klogInfo, (klogInfo,
+                "Validating '$(path)'...", PLOG_S(path), path));
+            pt = KDirectoryPathType(pb -> wd, path);
+            bad = false;
+        }
+
+        RELEASE(VPath, acc);
+        RELEASE(VPath, pLocal);
+    }
     RELEASE(VFSManager, mgr);
+    RELEASE(VResolver, resolver);
+
+    if (rc == 0) {
+        switch (pt & ~kptAlias) {
+            case kptNotFound:
+                rc = RC(rcExe, rcPath, rcValidating, rcPath, rcNotFound);
+                bad = true;
+                break;
+            case kptBadPath:
+                rc = RC(rcExe, rcPath, rcValidating, rcPath, rcInvalid);
+                bad = true;
+                break;
+            case kptFile:
+                rc = vdb_validate_file(pb, pb->wd, path);
+                break;
+            case kptDir:
+                switch(KDBManagerPathType (pb->kmgr, path)) {
+                    case kptDatabase:
+                        rc = vdb_validate_database(pb, pb->wd, path);
+                        break;
+                    case kptTable:
+                    case kptPrereleaseTbl:
+                        rc = vdb_validate_table(pb, pb->wd, path);
+                        break;
+                    case kptIndex:
+                    case kptColumn:
+                        rc = RC(rcExe, rcPath, rcValidating,
+                            rcType, rcUnsupported);
+                        bad = true;
+                        break;
+                    default:
+                        rc = KDirectoryVisit(pb -> wd, false,
+                            vdb_validate_dir, (void*)pb, path);
+                        break;
+                }
+                break;
+            default:
+                break;
+        }
+    }
+
+    free((void*)local);
+
+    if (bad) {
+        PLOGMSG ( klogWarn, ( klogWarn,
+            "Path '$(fname)' could not be validated", "fname=%s", path ) );
+    }
 
     return rc;
-}
-
-static
-rc_t vdb_validate ( const vdb_validate_params *pb, const char *path )
-{
-    KPathType pt = kptNotFound;
-
-    rc_t rc = disableRemoteResolution();
-    if (rc != 0) {
-        return rc;
-    }
-
-    /* what type of thing is this path? */
-    pt = KDirectoryPathType ( pb -> wd, path );
-    switch ( pt & ~ kptAlias )
-    {
-    case kptNotFound:
-        rc = RC ( rcExe, rcPath, rcValidating, rcPath, rcNotFound );
-        break;
-    case kptBadPath:
-        rc = RC ( rcExe, rcPath, rcValidating, rcPath, rcInvalid );
-        break;
-    case kptFile:
-        return vdb_validate_file ( pb, pb -> wd, path );
-    case kptDir:
-        switch ( KDBManagerPathType ( pb -> kmgr, path ) )
-        {
-        case kptDatabase:
-            return vdb_validate_database ( pb, pb -> wd, path );
-        case kptTable:
-        case kptPrereleaseTbl:
-            return vdb_validate_table ( pb, pb -> wd, path );
-        case kptIndex:
-        case kptColumn:
-            rc = RC ( rcExe, rcPath, rcValidating, rcType, rcUnsupported );
-            break;
-        default:
-            return KDirectoryVisit ( pb -> wd, false,
-                vdb_validate_dir, ( void* ) pb, path );
-        }
-        break;
-
-    default:
-        return 0;
-    }
-
-    PLOGMSG ( klogWarn, ( klogWarn,
-        "Path '$(fname)' could not be validated", "fname=%s", path ) );
-
-    return 0;
 }
 
 static char const* const defaultLogLevel = 
@@ -1763,7 +1852,7 @@ rc_t CC UsageSummary(const char *prog_name)
                      , prog_name );
 }
 
-static char const *help_text[] = 
+/*static char const *help_text[] = 
 {
     "Check components md5s if present, "
             "fail unless other checks are requested (default: yes)", NULL,
@@ -1772,24 +1861,71 @@ static char const *help_text[] =
     "Continue checking object for all possible errors (default: no)", NULL,
     "Check data referential integrity for databases (default: no)", NULL,
     "Check index-only with blobs CRC32 (default: no)", NULL
-};
+};*/
+
+#define OPTION_md5 "md5"
+#define ALIAS_md5  "5"
+static const char *USAGE_MD5[] = { "Check components md5s if present, "
+    "fail unless other checks are requested (default: yes)", NULL };
+/*
+#define ALIAS_MD5  "M"
+#define OPTION_MD5 "MD5"
+*/
+#define OPTION_blob_crc "blob-crc"
+#define ALIAS_blob_crc  "b"
+static const char *USAGE_BLOB_CRC[] =
+{ "Check blobs CRC32 (default: yes)", NULL };
+
+#define ALIAS_BLOB_CRC  "B"
+#define OPTION_BLOB_CRC "BLOB-CRC"
+
+#if CHECK_INDEX
+#define ALIAS_INDEX  "i"
+#define OPTION_INDEX "index"
+static const char *USAGE_INDEX[] = { "Check 'skey' index (default: no)", NULL };
+#endif
+
+#define ALIAS_EXHAUSTIVE  "x"
+#define OPTION_EXHAUSTIVE "exhaustive"
+static const char *USAGE_EXHAUSTIVE[] =
+{ "Continue checking object for all possible errors (default: false)", NULL };
+
+#define OPTION_ref_int "referential-integrity"
+#define ALIAS_ref_int  "d"
+static const char *USAGE_REF_INT[] =
+{ "Check data referential integrity for databases (default: yes)", NULL };
+
+#define ALIAS_REF_INT  "I"
+#define OPTION_REF_INT "REFERENTIAL-INTEGRITY"
+
+static const char *USAGE_DRI[] =
+{ "Do not check data referential integrity for databases", NULL };
+
+static const char *USAGE_IND_ONLY[] =
+{ "Check index-only with blobs CRC32 (default: no)", NULL };
 
 static OptDef options [] = 
-{
-    { "md5"       , "5", NULL, &help_text[0], 1, false, false }
-  , { "blob-crc"  , "b", NULL, &help_text[2], 1, false, false }
+{                                                    /* needs_value, required */
+/*  { OPTION_MD5     , ALIAS_MD5     , NULL, USAGE_MD5     , 1, true , false }*/
+    { OPTION_BLOB_CRC, ALIAS_BLOB_CRC, NULL, USAGE_BLOB_CRC, 1, true , false }
 #if CHECK_INDEX
-  , { "index"     , "i", NULL, &help_text[4], 1, false, false }
+  , { OPTION_INDEX   , ALIAS_INDEX   , NULL, USAGE_INDEX   , 1, false, false }
 #endif
-  , { "exhaustive", "x", NULL, &help_text[6], 1, false, false }
-  , { "referential-integrity", "d", NULL, &help_text[8], 1, false, false }
+  , { OPTION_EXHAUSTIVE,
+                   ALIAS_EXHAUSTIVE, NULL, USAGE_EXHAUSTIVE, 1, false, false }
+  , { OPTION_REF_INT , ALIAS_REF_INT , NULL, USAGE_REF_INT , 1, true , false }
 
-    /* should be the last ones here: not printed by --help */
-  , { "dri"       , NULL, NULL, &help_text[8], 1, false, false }
-  , { "index-only",NULL, NULL, &help_text[10], 1, false, false }
+    /* not printed by --help */
+  , { "dri"          , NULL          , NULL, USAGE_DRI     , 1, false, false }
+  , { "index-only"   ,NULL           , NULL, USAGE_IND_ONLY, 1, false, false }
+
+    /* obsolete options for backward compatibility */
+  , { OPTION_md5     , ALIAS_md5     , NULL, USAGE_MD5     , 1, false, false }
+  , { OPTION_blob_crc, ALIAS_blob_crc, NULL, USAGE_BLOB_CRC, 1, false, false }
+  , { OPTION_ref_int , ALIAS_ref_int , NULL, USAGE_REF_INT , 1, false, false }
 };
-
-#define NUM_SILENT_TRAILING_OPTIONS 2
+/*
+#define NUM_SILENT_TRAILING_OPTIONS 5
 
 static const char *option_params [] =
 {
@@ -1803,10 +1939,10 @@ static const char *option_params [] =
   , NULL
   , NULL
 };
-
+*/
 rc_t CC Usage ( const Args * args )
 {
-    uint32_t i;
+/*  uint32_t i; */
     const char *progname, *fullpath;
     rc_t rc = ArgsProgram ( args, & fullpath, & progname );
     if ( rc != 0 )
@@ -1817,9 +1953,20 @@ rc_t CC Usage ( const Args * args )
     KOutMsg ( "  Examine directories, files and VDB objects,\n"
               "  reporting any problems that can be detected.\n"
               "\n"
+              "Components md5s are always checked if present.\n"
+              "\n"
               "Options:\n"
         );
 
+/*  HelpOptionLine(ALIAS_MD5     , OPTION_MD5     , "yes | no", USAGE_MD5); */
+    HelpOptionLine(ALIAS_BLOB_CRC, OPTION_BLOB_CRC, "yes | no", USAGE_BLOB_CRC);
+#if CHECK_INDEX
+    HelpOptionLine(ALIAS_INDEX   , OPTION_INDEX   , "yes | no", USAGE_INDEX);
+#endif
+    HelpOptionLine(ALIAS_REF_INT , OPTION_REF_INT , "yes | no", USAGE_REF_INT);
+    HelpOptionLine(ALIAS_EXHAUSTIVE, OPTION_EXHAUSTIVE, NULL, USAGE_EXHAUSTIVE);
+
+/*
 #define NUM_LISTABLE_OPTIONS \
     ( sizeof options / sizeof options [ 0 ] - NUM_SILENT_TRAILING_OPTIONS )
 
@@ -1828,7 +1975,7 @@ rc_t CC Usage ( const Args * args )
         HelpOptionLine ( options [ i ] . aliases, options [ i ] . name,
             option_params [ i ], options [ i ] . help );
     }
-    
+*/
     HelpOptionsStandard ();
     
     HelpVersion ( fullpath, KAppVersion () );
@@ -1844,35 +1991,78 @@ uint32_t CC KAppVersion ( void )
 static
 rc_t parse_args ( vdb_validate_params *pb, Args *args )
 {
+    const char *dummy = NULL;
     rc_t rc;
     uint32_t cnt;
 
     pb -> md5_chk = true;
-
-    rc = ArgsOptionCount ( args, "md5", & cnt );
-    if ( rc != 0 )
+    ref_int_check = pb -> blob_crc
+        = pb -> md5_chk_explicit = md5_required = true;
+/*
+    rc = ArgsOptionCount(args, OPTION_MD5, &cnt);
+    if (rc != 0) {
+        LOGERR(klogErr, rc, "Failure to get '" OPTION_MD5 "' argument");
         return rc;
-    pb -> md5_chk_explicit = md5_required = cnt != 0;
-
-    rc = ArgsOptionCount ( args, "blob-crc", & cnt );
-    if ( rc != 0 )
+    }
+    if (cnt != 0) {
+        rc = ArgsOptionValue(args, OPTION_MD5, 0, &dummy);
+        if (rc != 0) {
+            LOGERR(klogErr, rc, "Failure to get '" OPTION_MD5 "' argument");
+            return rc;
+        }
+        assert(dummy && dummy[0]);
+        if (dummy[0] == 'n') {
+            pb -> md5_chk_explicit = md5_required = false;
+        }
+    }
+*/
+    rc = ArgsOptionCount( args, OPTION_BLOB_CRC, &cnt);
+    if (rc != 0) {
+        LOGERR(klogErr, rc, "Failure to get '" OPTION_BLOB_CRC "' argument");
         return rc;
-    pb -> blob_crc = cnt != 0;
+    }
+    if (cnt != 0) {
+        rc = ArgsOptionValue(args, OPTION_BLOB_CRC, 0, &dummy);
+        if (rc != 0) {
+            LOGERR(klogErr, rc,
+                "Failure to get '" OPTION_BLOB_CRC "' argument");
+            return rc;
+        }
+        assert(dummy && dummy[0]);
+        if (dummy[0] == 'n') {
+            pb -> blob_crc = false;
+        }
+    }
 
     rc = ArgsOptionCount ( args, "exhaustive", & cnt );
     if ( rc != 0 )
         return rc;
     exhaustive = cnt != 0;
 
-    rc = ArgsOptionCount ( args, "referential-integrity", & cnt );
-    if ( rc != 0 )
+    rc = ArgsOptionCount(args, OPTION_REF_INT, &cnt);
+    if (rc != 0) {
+        LOGERR(klogErr, rc, "Failure to get '" OPTION_REF_INT "' argument");
         return rc;
-    ref_int_check = cnt != 0;
+    }
+    if (cnt != 0) {
+        rc = ArgsOptionValue(args, OPTION_REF_INT, 0, &dummy);
+        if (rc != 0) {
+            LOGERR(klogErr, rc,
+                "Failure to get '" OPTION_REF_INT "' argument");
+            return rc;
+        }
+        assert(dummy && dummy[0]);
+        if (dummy[0] == 'n') {
+            ref_int_check = false;
+        }
+    }
 
     rc = ArgsOptionCount ( args, "dri", & cnt );
     if ( rc != 0 )
         return rc;
-    ref_int_check = cnt != 0;
+    if (cnt != 0) {
+        ref_int_check = false;
+    }
 
 #if CHECK_INDEX
     rc = ArgsOptionCount ( args, "index", & cnt );
@@ -1970,6 +2160,15 @@ rc_t CC KMain ( int argc, char *argv [] )
                     else
                     {
                         uint32_t i;
+                        STSMSG(2, ("exhaustive = %d", exhaustive));
+                        STSMSG(2, ("ref_int_check = %d", ref_int_check));
+                        STSMSG(2, ("md5_required = %d", md5_required));
+                        STSMSG(2, ("P {"));
+                        STSMSG(2, ("\tmd5_chk = %d", pb.md5_chk));
+                        STSMSG(2, ("\tmd5_chk_explicit = %d",
+                            pb.md5_chk_explicit));
+                        STSMSG(2, ("\tblob_crc = %d", pb.blob_crc));
+                        STSMSG(2, ("}"));
                         for ( i = 0; i < pcount; ++ i )
                         {
                             rc_t rc2;
@@ -1997,259 +2196,3 @@ rc_t CC KMain ( int argc, char *argv [] )
 
     return rc;
 }
-
-
-
-
-
-#if 0
-
-
-rc_t CC KMain ( int argc, char *argv [] )
-{
-    Args * args;
-    char *src_dir_path = NULL;
-    char *src_path = NULL;
-    char *obj_name = NULL;
-    bool md5_chk = true, md5_chk_explicit = false;
-    bool blob_crc = false;
-    bool index_chk = false;
-    bool is_file = false;
-    const KDirectory *src_dir = NULL;
-    char path_buffer [ 4096 ];
-
-    rc_t rc = KLogLevelSet ( klogInfo );
-
-    if ( rc == 0 )
-    {
-        rc = ArgsMakeAndHandle ( & args, argc, argv, 1,
-            options, sizeof options / sizeof options [ 0 ] );
-    }
-    
-    while (rc == 0)
-    {
-        uint32_t pcount;
-        rc = ArgsParamCount(args, &pcount);
-        if ( rc != 0 )
-            break;
-
-        if (pcount == 1)
-        {
-            KDirectory *dir;
-            rc = KDirectoryNativeDir(&dir);
-            if (rc == 0)
-            {
-                char const *value;
-                
-                rc = ArgsParamValue (args, 0, &value); if (rc) break;
-                src_dir_path = strdup(value);
-                src_path = strdup(value);
-                obj_name = strrchr(src_dir_path, '/');
-                if ( obj_name != NULL && obj_name [ 1 ] == 0 )
-                {
-                    * obj_name = 0;
-                    obj_name = strrchr(src_dir_path, '/');
-                }
-                if (obj_name != NULL)
-                {
-                    if (obj_name == src_dir_path) {
-                        src_dir_path[0] = '/';
-                        src_dir_path[1] = '\0';
-                    }
-                    *obj_name++ = '\0';
-                }
-                else
-                {
-                    SRAPath *pmgr = NULL;
-
-                    /* check for accession */
-                    rc = SRAPathMake ( & pmgr, dir );
-                    if ( rc == 0 )
-                    {
-                        rc = SRAPathFind(pmgr,
-                            src_path, path_buffer, sizeof path_buffer);
-                        if ( rc == 0 )
-                        {
-                            /* use mapped path */
-                            free(src_path);
-                            src_path = strdup(path_buffer);
-                            free(src_dir_path);
-                            src_dir_path = strdup(path_buffer);
-                            obj_name = strrchr(src_dir_path, '/');
-                            if ( obj_name == NULL )
-                                obj_name = src_dir_path;
-                            else
-                            {
-                                if ( obj_name == src_dir_path ) {
-                                    src_dir_path[0] = '/';
-                                    src_dir_path[1] = '\0';
-                                }
-                                * obj_name ++ = '\0';
-                            }
-                        }
-                        
-                        (void)SRAPathRelease ( pmgr );
-                    }
-                    
-                    if ( rc != 0 )
-                    {
-                        /* appears to be a simple name */
-                        obj_name = strdup(src_dir_path);
-                        src_dir_path[0] = '.';
-                        src_dir_path[1] = '\0';
-                    }
-                }
-                
-                rc = KDirectoryOpenDirRead(dir, &src_dir, false, src_dir_path);
-                KDirectoryRelease(dir);
-                if (rc) {
-                    (void)PLOGERR(klogErr, (klogErr, rc,
-                        "Failed to open '$(dir)'", "dir=%s", src_dir_path));
-                    break;
-                }
-                else {
-                    uint32_t const obj_type = KDirectoryPathType(src_dir,
-                        obj_name) & (~((uint32_t)kptAlias));
-                    
-                    switch (obj_type) {
-                    case kptFile:
-                        is_file = true;
-                        break;
-                    default:
-                        break;
-                    }
-                }
-            }
-        }
-        else {
-            MiniUsage(args);
-            ArgsWhack(args);
-            exit(EXIT_FAILURE);
-        }
-        
-        rc = ArgsOptionCount(args, "md5", &pcount); if (rc) break;
-        md5_chk_explicit = md5_required = (pcount == 1);
-        if (pcount > 1) {
-            KOutMsg("argument given too many times\n");
-            MiniUsage(args);
-            break;
-        }
-        
-        rc = ArgsOptionCount(args, "blob-crc", &pcount); if (rc) break;
-        blob_crc = (pcount == 1);
-        if (pcount > 1) {
-            KOutMsg("argument given too many times\n");
-            MiniUsage(args);
-            break;
-        }
-        
-        rc = ArgsOptionCount(args, "exhaustive", &pcount); if (rc) break;
-        exhaustive = (pcount == 1);
-        if (pcount > 1) {
-            KOutMsg("argument given too many times\n");
-            MiniUsage(args);
-            break;
-        }
-        
-        rc = ArgsOptionCount(args, "dri", &pcount); if (rc) break;
-        ref_int_check = (pcount == 1);
-        if (pcount > 1) {
-            KOutMsg("argument given too many times\n");
-            MiniUsage(args);
-            break;
-        }
-        
-#if CHECK_INDEX
-        rc = ArgsOptionCount(args, "index", &pcount); if (rc) break;
-        index_chk = (pcount == 1);
-        if (pcount > 1) {
-            KOutMsg("argument given too many times\n");
-            MiniUsage(args);
-            break;
-        }
-#endif
-
-        rc = ArgsOptionCount(args, "index-only", &pcount);
-        if (rc) {
-            break;
-        }
-        if (pcount > 0) {
-            s_IndexOnly = blob_crc = true;
-        }
-            
-
-        if (blob_crc || index_chk)
-        {
-            /* if blob or index is requested,
-               md5 is off unless explicitly requested */
-            md5_chk = md5_chk_explicit;
-        }
-        
-        {
-            KPathType pathType = kptBadPath;
-            Bool enc = false;
-            rc = dbcc(src_path, src_dir, obj_name,
-                      (md5_chk ? 1 : 0)|(blob_crc ? 2 : 0)|(index_chk ? 4 : 0),
-                      & pathType, is_file, &enc);
-            if ( pathType == kptDatabase )
-            {
-                if (rc != 0) {
-                    (void)PLOGERR(klogErr, (klogErr, rc,
-                                            "Database '$(db)' check failed", PLOG_S(db), obj_name));
-                }
-                else {
-                    (void)PLOGMSG(klogInfo, (klogInfo,
-                                             "Database '$(db)' is consistent", PLOG_S(db), obj_name));
-                }
-            }
-            else if ( pathType == kptTable )
-            {
-                if (rc != 0) {
-                    (void)PLOGERR(klogErr, (klogErr, rc, "Table '$(table)' "
-                                            "check failed", PLOG_S(table), obj_name));
-                }
-                else {
-                    (void)PLOGMSG(klogInfo, (klogInfo, "Table '$(table)' "
-                                             "is consistent", PLOG_S(table), obj_name));
-                }
-            }
-            else if (pathType != kptFile)
-            {
-                if (rc != 0) {
-                    if (UIError(rc, NULL, NULL)) {
-                        const char *c = UIDatabaseGetErrorString(rc);
-                        if (c != NULL)
-                        {   (void)LOGMSG(klogInfo, c); }
-                        else {
-                            (void)PLOGERR(klogErr, (klogErr, rc, "'$(table)' "
-                                                    "check failed", PLOG_S(table), obj_name));
-                        }
-                        if (enc) {
-                            rc = 0;
-                            (void)PLOGMSG(klogInfo, (klogInfo, "File '$(f)' "
-                                                     "is consistent", PLOG_S(f), obj_name));
-                        }
-                        else {
-                            (void)PLOGERR(klogErr, (klogErr, rc, "File '$(f)'"
-                                                    " check failed", PLOG_S(f), obj_name));
-                        }
-                    }
-                }
-                else {
-                    rc = RC(rcExe, rcPath, rcValidating, rcType, rcUnknown);
-                    (void)PLOGERR(klogErr, (klogErr, rc,
-                                            "Object $(table)' check failed: it has un unknown type",
-                                            PLOG_S(table), obj_name));
-                }
-            }
-        }
-        break;
-    }
-    
-    free(src_path);
-    KDirectoryRelease(src_dir);
-    
-    return rc;
-}
-
-#endif

@@ -35,6 +35,7 @@
 #include <klib/log.h>
 #include <klib/rc.h>
 #include <klib/printf.h>
+#include <os-native.h>
 #include <sysalloc.h>
 
 #include <limits.h>
@@ -126,7 +127,7 @@ LIB_EXPORT rc_t CC KDatabaseRelease ( const KDatabase *self )
         {
         case krefWhack:
             return KDatabaseWhack ( ( KDatabase* ) self );
-        case krefLimit:
+        case krefNegative:
             return RC ( rcDB, rcDatabase, rcReleasing, rcRange, rcExcessive );
         }
     }
@@ -158,7 +159,7 @@ rc_t KDatabaseSever ( const KDatabase *self )
         {
         case krefWhack:
             return KDatabaseWhack ( ( KDatabase* ) self );
-        case krefLimit:
+        case krefNegative:
             return RC ( rcDB, rcDatabase, rcReleasing, rcRange, rcExcessive );
         }
     }
