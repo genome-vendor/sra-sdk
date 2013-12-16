@@ -24,54 +24,43 @@
 *
 */
 
-/*
-SRR125365
-SRR292195
-SRR413283
-SRR600096
-SRR619505
-SRR953827
-/home/klymenka/ncbi/public/sra/SRR619505
-/home/klymenka/ncbi/public/sra/SRR619505.sra
-/netmnt/traces04/sra2/SRR/000122/SRR125365
-/netmnt/traces04/sra2/SRR/000586/SRR600096
-/netmnt/traces04/sra3/SRR/000403/SRR413283
-/netmnt/traces04/sra4/SRR/000345/SRR353827
-/netmnt/traces04/sra5/SRR/000604/SRR619505
-/netmnt/traces04/sra7/SRR/000285/SRR292195
-/netmnt/traces04/sra7/SRR/000285/SRR292195/col
-/netmnt/traces04/sra7/SRR/000285/SRR292195/col/
-/netmnt/traces04/sra7/SRR/000285/SRR292195/col/READ
-/netmnt/traces04/sra7/SRR/000285/SRR292195/col/READ/md
-/netmnt/traces04/sra7/SRR/000285/SRR292195/col/READ/md5
-/netmnt/traces04/sra7/SRR/000285/SRR292195/idx
-/netmnt/traces04/sra7/SRR/000285/SRR292195/idx/skey
-/panfs/traces01/sra_backup/SRA/sra_trash/duplicatedOn_sra-s/sra0/SRR005459
-http://ftp-trace.ncbi.nlm.nih.gov/sra/sra-instant/reads/ByRun/sra/SRR/SRR619/SRR619505/SRR619505.sra
-*/
-
 #include <kapp/main.h> /* KMain */
-#include <kdb/manager.h> /* kptDatabase */
-#include <vdb/manager.h> /* VDBManager */
+
+#include <kfg/config.h> /* KConfig */
+#include <kfg/kart.h> /* Kart */
+#include <kfg/repository.h> /* KRepositoryMgr */
+
+#include <vfs/manager.h> /* VFSManager */
+#include <vfs/path.h> /* VPath */
+#include <vfs/resolver.h> /* VResolver */
+
 #include <vdb/database.h> /* VDatabase */
 #include <vdb/dependencies.h> /* VDBDependencies */
+#include <vdb/manager.h> /* VDBManager */
+
+#include <kns/curl-file.h> /* KCurlFileMake */
+#include <kns/manager.h> /* KNSManager */
+
 #include <kdb/manager.h> /* kptDatabase */
-#include <vfs/manager.h> /* VFSManager */
-#include <vfs/resolver.h> /* VResolver */
-#include <vfs/path.h> /* VPath */
-#include <kns/kns_mgr.h> /* KNSManager */
-#include <kfg/config.h> /* KConfig */
+
 #include <kfs/directory.h> /* KDirectory */
 #include <kfs/file.h> /* KFile */
-#include <klib/printf.h> /* string_vprintf */
+
 #include <klib/log.h> /* KLogHandlerSet */
 #include <klib/out.h> /* KOutMsg */
-#include <klib/text.h> /* String */
+#include <klib/printf.h> /* string_vprintf */
 #include <klib/rc.h>
+#include <klib/text.h> /* String */
+
+#include <sysalloc.h>
+
 #include <assert.h>
 #include <ctype.h> /* isprint */
 #include <stdlib.h> /* calloc */
 #include <string.h> /* memset */
+
+VFS_EXTERN rc_t CC VResolverProtocols ( VResolver * self,
+    VRemoteProtocols protocols );
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
@@ -86,16 +75,22 @@ typedef enum {
     eResolve = 2,
     eDependMissing = 4,
     eDependAll = 8,
-    eAll = 16
+    eCurl = 16,
+    eAll = 32
 } Type;
 typedef struct {
     KConfig *cfg;
     KDirectory *dir;
     const VDBManager *mgr;
+    const KRepositoryMgr *repoMgr;
     VResolver *resolver;
     uint8_t tests;
     bool recursive;
     bool noVDBManagerPathType;
+    bool noRfs;
+
+    bool allowCaching;
+    VResolverEnableState cacheState;
 } Main;
 
 uint32_t CC KAppVersion(void) { return 0; }
@@ -105,9 +100,8 @@ const char UsageDefaultName[] = "test-sra";
 rc_t CC UsageSummary(const char *prog_name) {
     return KOutMsg(
         "Usage:\n"
-        "    %s [+crdDa] [-crdDa] [options] name [ name... ]\n"
-        "    %s -R [-N] name [ name... ]\n",
-        prog_name, prog_name);
+        "    %s [+crdDa] [-crdDa] [-R] [-N] [-C] [options] name [ name... ]\n",
+        prog_name);
 }
 
 rc_t CC Usage(const Args *args) {
@@ -131,13 +125,15 @@ rc_t CC Usage(const Args *args) {
         "[-tests] - remove tests\n\n"
         "Tests:\n"
         "  c - print configuration\n"
+        "  k - print curl info\n"
         "  r - call VResolver\n"
         "  d - call ListDependencies(missing)\n"
         "  D - call ListDependencies(all)\n"
         "  a - all tests\n\n"
         "If no tests were specified then all tests will be run\n\n"
         "-R - check object type recursively\n"
-        "-N - do not call VDBManagerPathType\n\n"
+        "-N - do not call VDBManagerPathType\n"
+        "-C - do not disable caching (default: from configuration)\n\n"
         "More options:\n");
     if (rc == 0 && rc2 != 0) {
         rc = rc2;
@@ -153,7 +149,7 @@ static bool testArg(const char *arg, uint8_t *testOn, uint8_t *testOff) {
     uint8_t *res = NULL;
 
 /*  const char tests[] = "ctrdDa"; */
-    const char tests[] = "crdDa";
+    const char tests[] = "crdDka";
 
     assert(arg && testOn && testOff);
     if (arg[0] != '+' && arg[0] != '-') {
@@ -235,6 +231,8 @@ static bool MainHasTest(const Main *self, Type type) {
 }
 
 static void MainPrint(const Main *self) {
+    return;
+
     assert(self);
 
     if (MainHasTest(self, eCfg)) {
@@ -277,6 +275,10 @@ static rc_t MainInitObjects(Main *self) {
     }
 
     if (rc == 0) {
+        rc = KConfigMakeRepositoryMgrRead(self->cfg, &self->repoMgr);
+    }
+
+    if (rc == 0) {
         rc = VFSManagerMake(&mgr);
     }
 
@@ -285,7 +287,9 @@ static rc_t MainInitObjects(Main *self) {
     }
 
     if (rc == 0) {
-        VResolverCacheEnable(resolver, vrAlwaysDisable);
+        if (!self->allowCaching) {
+            self->cacheState = VResolverCacheEnable(resolver, vrAlwaysDisable);
+        }
     }
 
     if (rc == 0) {
@@ -300,9 +304,8 @@ static rc_t MainInitObjects(Main *self) {
 }
 
 static
-rc_t _MainInit(Main *self, int argc, char *argv[], int *argi, char **argv2)
+void _MainInit(Main *self, int argc, char *argv[], int *argi, char **argv2)
 {
-    rc_t rc = 0;
     int i = 0;
 
     uint8_t testsOn = 0;
@@ -322,23 +325,17 @@ rc_t _MainInit(Main *self, int argc, char *argv[], int *argi, char **argv2)
     self->tests = processTests(testsOn, testsOff);
 
     MainPrint(self);
-
-    rc = MainInitObjects(self);
-
-    return rc;
 }
 
-static char** MainInit(Main *self, rc_t *rc,
-    int argc, char *argv[], int *argi)
-{
+static char** MainInit(Main *self, int argc, char *argv[], int *argi) {
     char **argv2 = calloc(argc, sizeof *argv2);
 
-    assert(self && rc);
+    assert(self);
 
     memset(self, 0, sizeof *self);
 
     if (argv2 != NULL) {
-        *rc = _MainInit(self, argc, argv, argi, argv2);
+        _MainInit(self, argc, argv, argi, argv2);
     }
 
     return argv2;
@@ -350,7 +347,7 @@ static rc_t MainPrintConfig(const Main *self) {
     assert(self);
 
     if (rc == 0) {
-        rc = KConfigPrint(self->cfg);
+        rc = KConfigPrint(self->cfg, 0);
         if (rc != 0) {
             OUTMSG(("KConfigPrint() = %R", rc));
         }
@@ -524,10 +521,13 @@ static rc_t _KDirectoryReport(const KDirectory *self,
                 OUTMSG(("KFileSize(%s)=%R ", name, rc));
             }
             else {
-                OUTMSG(("%lu ", sz));
+                OUTMSG(("%,lu ", sz));
                 *size = sz;
             }
         }
+    }
+    else {
+        OUTMSG(("- "));
     }
 
     RELEASE(KFile, f);
@@ -551,6 +551,42 @@ static rc_t _VDBManagerReport(const VDBManager *self,
     return _KDBPathTypePrint("", *type, " ");
 }
 
+static
+rc_t _KDirectoryFileHeaderReport(const KDirectory *self, const char *path)
+{
+    rc_t rc = 0;
+    char hdr[8] = "";
+    const KFile *f = NULL;
+    size_t num_read = 0;
+    size_t i = 0;
+
+    assert(self && path);
+
+    rc = KDirectoryOpenFileRead(self, &f, path);
+    if (rc != 0) {
+        OUTMSG(("KDirectoryOpenFileRead(%s) = %R\n", path, rc));
+        return rc;
+    }
+
+    rc = KFileReadAll(f, 0, hdr, sizeof hdr, &num_read);
+    if (rc != 0) {
+        OUTMSG(("KFileReadAll(%s, 8) = %R\n", path, rc));
+    }
+
+    for (i = 0; i < num_read && rc == 0; ++i) {
+        if (isprint(hdr[i])) {
+            OUTMSG(("%c", hdr[i]));
+        }
+        else {
+            OUTMSG(("\\X%02X", hdr[i]));
+        }
+    }
+    OUTMSG((" "));
+
+    RELEASE(KFile, f);
+    return rc;
+}
+
 static rc_t MainReport(const Main *self,
     const char *name, int64_t *size, KPathType *type, bool *alias)
 {
@@ -562,6 +598,10 @@ static rc_t MainReport(const Main *self,
 
     if (!self->noVDBManagerPathType) { /* && MainHasTest(self, eType)) { */
         _VDBManagerReport(self->mgr, name, type);
+    }
+
+    if (type != NULL && *type == kptFile) {
+        _KDirectoryFileHeaderReport(self->dir, name);
     }
 
     return rc;
@@ -581,8 +621,118 @@ static bool NotFoundByResolver(rc_t rc) {
     return false;
 }
 
-static rc_t MainResolveLocal(const Main *self,
-    const char *name, const VPath* acc, int64_t *size)
+typedef enum {
+      ePathLocal
+    , ePathRemote
+    , ePathCache
+} EPathType;
+static rc_t MainPathReport(const Main *self, rc_t rc, const VPath *path,
+    EPathType type, const char *name, const VPath* remote, int64_t *size,
+    bool fasp, const KFile *fRemote)
+{
+    switch (type) {
+        case ePathLocal:
+            OUTMSG(("Local: "));
+            break;
+        case ePathRemote:
+            OUTMSG(("Remote %s: ", fasp ? "fasp" : "http"));
+            break;
+        case ePathCache:
+            OUTMSG(("Cache %s: ", fasp ? "fasp" : "http"));
+            if (remote == NULL) {
+                OUTMSG(("skipped\n"));
+                return rc;
+            }
+            break;
+    }
+    if (rc != 0) {
+        if (NotFoundByResolver(rc)) {
+            OUTMSG(("not found\n"));
+            rc = 0;
+        }
+        else {
+            switch (type) {
+                case ePathLocal:
+                    OUTMSG(("VResolverLocal(%s) = %R\n", name, rc));
+                    break;
+                case ePathRemote:
+                    OUTMSG(("VResolverRemote(%s) = %R\n", name, rc));
+                    break;
+                case ePathCache:
+                    OUTMSG(("VResolverCache(%s) = %R\n", name, rc));
+                    break;
+            }
+        }
+    }
+    else {
+        const String *s = NULL;
+        rc_t rc = VPathMakeString(path, &s);
+        if (rc == 0) {
+            OUTMSG(("%S ", s));
+            switch (type) {
+                case ePathLocal:
+                case ePathCache:
+                    rc = MainReport(self, s->addr, size, NULL, NULL);
+                    break;
+                case ePathRemote: {
+                    uint64_t sz = 0;
+                    if (!fasp && fRemote != NULL) {
+                        rc = KFileSize(fRemote, &sz);
+                        if (rc != 0) {
+                            OUTMSG(("KFileSize(%s)=%R ", name, rc));
+                        }
+                        else {
+                            OUTMSG(("%,lu ", sz));
+                            *size = sz;
+                        }
+                    }
+                    break;
+                }
+            }
+            OUTMSG(("\n"));
+        }
+        else {
+            const char *s = "";
+            switch (type) {
+                case ePathLocal:
+                    s = "Local";
+                    break;
+                case ePathCache:
+                    s = "Cache";
+                    break;
+                case ePathRemote:
+                    s = "Remote";
+                    break;
+                default:
+                    assert(0);
+                    break;
+            }
+            OUTMSG(("VPathMakeUri(VResolver%s(%s)) = %R\n", s, name, rc));
+        }
+        if (type == ePathCache) {
+            char cachecache[PATH_MAX] = "";
+            if (rc == 0) {
+                rc = string_printf(cachecache,
+                    sizeof cachecache, NULL, "%s.cache", s->addr);
+                if (rc != 0) {
+                    OUTMSG(("string_printf(%s) = %R\n", s->addr, rc));
+                }
+            }
+
+            if (rc == 0) {
+                OUTMSG(("Cache.cache %s: ", fasp ? "fasp" : "http"));
+                OUTMSG(("%s ", cachecache));
+                rc = MainReport(self, cachecache, NULL, NULL, NULL);
+                OUTMSG(("\n"));
+            }
+        }
+        free((void*)s);
+    }
+    return rc;
+}
+
+static rc_t MainResolveLocal(const Main *self, const VResolver *resolver,
+    const char *name, const VPath *acc, int64_t *size)
 {
     rc_t rc = 0;
 
@@ -590,41 +740,24 @@ static rc_t MainResolveLocal(const Main *self,
 
     assert(self);
 
-    OUTMSG(("Local: "));
-
-    rc = VResolverLocal(self->resolver, acc, &local);
-    if (rc != 0) {
-        if (NotFoundByResolver(rc)) {
-            OUTMSG(("not found\n"));
-            rc = 0;
-        }
-        else {
-            OUTMSG(("VResolverLocal(%s) = %R\n", name, rc));
-        }
+    if (resolver == NULL) {
+        resolver = self->resolver;
     }
-    else {
-        const String *s = NULL;
+/*
+    OUTMSG(("Local: "));*/
 
-        rc_t rc = VPathMakeString(local, &s);
-        if (rc == 0) {
-            OUTMSG(("%.*s ", s->size, s->addr));
-            rc = MainReport(self, s->addr, size, NULL, NULL);
-            OUTMSG(("\n"));
-        } else {
-            OUTMSG(("VPathMakeString(VResolverLocal(%s)) = %R\n",
-                name, rc));
-        }
-
-        free((void*)s);
-    }
+    rc = VResolverLocal(resolver, acc, &local);
+    rc = MainPathReport(self,
+        rc, local, ePathLocal, name, NULL, NULL, false, NULL);
 
     RELEASE(VPath, local);
 
     return rc;
 }
 
-static rc_t MainResolveRemote(const Main *self, const char *name,
-    const VPath* acc, const VPath **remote, int64_t *size)
+static rc_t MainResolveRemote(const Main *self, VResolver *resolver,
+    const char *name, const VPath* acc, const VPath **remote, int64_t *size,
+    bool fasp)
 {
     rc_t rc = 0;
 
@@ -632,123 +765,267 @@ static rc_t MainResolveRemote(const Main *self, const char *name,
 
     assert(self && size);
 
-    OUTMSG(("Remote: "));
-
-    rc = VResolverRemote(self->resolver, acc, remote, &f);
-    if (rc != 0) {
-        if (NotFoundByResolver(rc)) {
-            OUTMSG(("not found\n"));
-            rc = 0;
-        }
-        else {
-            OUTMSG(("VResolverRemote(%s) = %R\n", name, rc));
-        }
-    }
-    else {
-        const String *s = NULL;
-        rc_t rc = VPathMakeString(*remote, &s);
-        if (rc == 0) {
-            uint64_t sz = 0;
-            OUTMSG(("%.*s ", s->size, s->addr));
-            rc = KFileSize(f, &sz);
-            if (rc != 0) {
-                OUTMSG(("KFileSize(%s)=%R ", name, rc));
-            }
-            else {
-                OUTMSG(("%lu ", sz));
-                *size = sz;
-            }
-            OUTMSG(("\n"));
-        } else {
-            OUTMSG(("VPathMakeString(VResolverRemote(%s)) = %R\n",
-                name, rc));
-        }
-        free((void*)s);
+    if (resolver == NULL) {
+        resolver = self->resolver;
     }
 
+    rc = VResolverRemote(resolver,
+        fasp ? eProtocolFaspHttp : eProtocolHttp, acc, remote, &f);
+    rc = MainPathReport(self,
+        rc, *remote, ePathRemote, name, NULL, size, fasp, f);
     RELEASE(KFile, f);
 
     return rc;
 }
 
-static rc_t MainResolveCache(const Main *self,
-    const char *name, const VPath* remote)
+static rc_t MainResolveCache(const Main *self, const VResolver *resolver,
+    const char *name, const VPath* remote, bool fasp)
 {
     rc_t rc = 0;
+    const VPath* cache = NULL;
 
     assert(self);
     
-    OUTMSG(("Cache: "));
-    
     if (remote == NULL) {
-        OUTMSG(("skipped\n"));
+        rc = MainPathReport(self,
+            rc, cache, ePathCache, name, remote, NULL, fasp, NULL);
     }
     else {
-        VResolverEnableState enabled = VResolverCacheEnable(self->resolver, vrAlwaysEnable);
-        const VPath* cache = NULL;
         uint64_t file_size = 0;
-        rc = VResolverCache(self->resolver, remote, &cache, file_size);
-        VResolverCacheEnable(self->resolver, enabled);
-        if (rc != 0) {
-            if (NotFoundByResolver(rc)) {
-                OUTMSG(("not found\n"));
-                rc = 0;
-            }
-            else {
-                OUTMSG(("VResolverCache(%s) = %R\n", name, rc));
-            }
-        }
-        else {
-            const String *s = NULL;
-            rc_t rc = VPathMakeString(cache, &s);
-            if (rc == 0) {
-                OUTMSG(("%.*s ", s->size, s->addr));
-                rc = MainReport(self, s->addr, NULL, NULL, NULL);
-                OUTMSG(("\n"));
-            } else {
-                OUTMSG((
-                    "VPathMakeString(VResolverCache(%s, %d)) = %R\n",
-                    name, file_size, rc));
-            }
-            free((void*)s);
+
+        if (resolver == NULL) {
+            resolver = self->resolver;
         }
 
+        if (!self->allowCaching) {
+            VResolverCacheEnable(resolver, self->cacheState);
+        }
+        rc = VResolverCache(resolver, remote, &cache, file_size);
+        rc = MainPathReport(self,
+            rc, cache, ePathCache, name, remote, NULL, fasp, NULL);
+
         RELEASE(VPath, cache);
+        if (!self->allowCaching) {
+            VResolverCacheEnable(resolver, vrAlwaysDisable);
+        }
     }
 
     return rc;
 }
 
-static rc_t MainResolve(const Main *self,
+typedef enum {
+      eQueryAll
+    , eQueryLocal
+    , eQueryRemote
+} EQueryType ;
+static rc_t VResolverQueryByType(const Main *self, const VResolver *resolver,
+    const char *name, const VPath *query,
+    bool fasp, VRemoteProtocols protocols, EQueryType type)
+{
+    rc_t rc = 0;
+    rc_t rc2 = 0;
+    const VPath *local = NULL;
+    const VPath *remote = NULL;
+    const VPath *cache = NULL;
+    const VPath **pLocal = NULL;
+    const VPath **pRemote = NULL;
+    const VPath **pCache = NULL;
+
+    switch (type) {
+        case eQueryLocal:
+        case eQueryAll:
+            pLocal = &local;
+        default:
+            break;
+    }
+
+    switch (type) {
+        case eQueryRemote:
+        case eQueryAll:
+            pRemote = &remote;
+            pCache = &cache;
+        default:
+            break;
+    }
+
+    if (pCache != NULL && !self->allowCaching) {
+        VResolverCacheEnable(resolver, vrAlwaysEnable);
+    }
+
+    rc = VResolverQuery(resolver, protocols, query, pLocal, pRemote, pCache);
+    OUTMSG(("\nVResolverQuery(%s, %s, local%s, remote%s, cache%s)= %R\n",
+        name, protocols == eProtocolHttp ? "Http" : "FaspHttp", 
+        pLocal == NULL ? "=NULL" : "", pRemote == NULL ? "=NULL" : "",
+        pCache == NULL ? "=NULL" : "", rc));
+    if (rc == 0) {
+        if (local != NULL) {
+            rc2 = MainPathReport(self,
+                rc, local, ePathLocal, name, NULL, NULL, false, NULL);
+        }
+        if (remote != NULL) {
+            rc2 = MainPathReport(self,
+                rc, remote, ePathRemote, name, NULL, NULL, fasp, NULL);
+        }
+        if (cache != NULL) {
+            rc2 = MainPathReport(self,
+                rc, cache, ePathCache, name, remote, NULL, fasp, NULL);
+        }
+    }
+
+    RELEASE(VPath, local);
+    RELEASE(VPath, remote);
+    RELEASE(VPath, cache);
+
+    if (pCache != NULL && !self->allowCaching) {
+        VResolverCacheEnable(resolver, self->cacheState);
+    }
+
+    return rc;
+}
+
+static rc_t MainResolveQuery(const Main *self, const VResolver *resolver,
+    const char *name, const VPath *query, bool fasp)
+{
+    rc_t rc = 0;
+    rc_t rc2 = 0;
+
+    VRemoteProtocols protocols = eProtocolHttp;
+    if (fasp) {
+        protocols = eProtocolFaspHttp;
+    }
+    else {
+        protocols = eProtocolHttp;
+    }
+
+    if (resolver == NULL) {
+        resolver = self->resolver;
+    }
+
+    rc2 = VResolverQueryByType(self, resolver, name, query, fasp, protocols,
+        eQueryAll);
+    if (rc2 != 0 && rc == 0) {
+        rc = rc2;
+    }
+
+    rc2 = VResolverQueryByType(self, resolver, name, query, fasp, protocols,
+        eQueryLocal);
+    if (rc2 != 0 && rc == 0) {
+        rc = rc2;
+    }
+
+    rc2 = VResolverQueryByType(self, resolver, name, query, fasp, protocols,
+        eQueryRemote);
+    if (rc2 != 0 && rc == 0) {
+        rc = rc2;
+    }
+
+    return rc;
+}
+
+static rc_t MainResolve(const Main *self, const KartItem *item,
     const char *name, int64_t *localSz, int64_t *remoteSz)
 {
     rc_t rc = 0;
 
     VPath* acc = NULL;
+    VResolver* resolver = NULL;
 
     assert(self);
 
     if (rc == 0) {
-        rc = VPathMake(&acc, name);
+        VFSManager *mgr = NULL;
+        rc = VFSManagerMake(& mgr);
         if (rc != 0) {
-            OUTMSG(("VPathMake(%s) = %R\n", name, rc));
+            OUTMSG(("VFSManagerMake = %R\n", rc));
+        }
+        else {
+            if (item == NULL) {
+                rc = VFSManagerMakePath(mgr, &acc, name);
+                if (rc != 0) {
+                    OUTMSG(("VFSManagerMakePath(%s) = %R\n", name, rc));
+                }
+            }
+            else {
+                const KRepository *p_protected = NULL;
+                uint64_t oid = 0;
+                uint64_t project = 0;
+                if (rc == 0) {
+                    rc = KartItemProjIdNumber(item, &project);
+                    if (rc != 0) {
+                        OUTMSG(("KartItemProjectIdNumber = %R\n", rc));
+                    }
+                }
+                if (rc == 0) {
+                    rc = KartItemItemIdNumber(item, &oid);
+                    if (rc != 0) {
+                        OUTMSG(("KartItemItemIdNumber = %R\n", rc));
+                    }
+                }
+                if (rc == 0) {
+                    rc = VFSManagerMakeOidPath(mgr, &acc, oid);
+                    if (rc != 0) {
+                        OUTMSG(("VFSManagerMakePath(%d) = %R\n", oid, rc));
+                    }
+                }
+                if (rc == 0) {
+                    rc = KRepositoryMgrGetProtectedRepository(self->repoMgr, 
+                        project, &p_protected);
+                    if (rc != 0) {
+                        OUTMSG((
+                            "KRepositoryMgrGetProtectedRepository(%d) = %R\n",
+                            project, rc));
+                    }
+                }
+                if (rc == 0) {
+                    rc = KRepositoryMakeResolver(p_protected, &resolver,
+                        self->cfg);
+                    if (rc != 0) {
+                        OUTMSG((
+                            "KRepositoryMakeResolver(%d) = %R\n", project, rc));
+                    }
+                }
+                RELEASE(KRepository, p_protected);
+            }
+            RELEASE(VFSManager, mgr);
         }
     }
 
     if (rc == 0) {
         const VPath* remote = NULL;
 
-        rc_t rc2 = MainResolveLocal(self, name, acc, localSz);
+        rc_t rc2 = MainResolveLocal(self, resolver, name, acc, localSz);
         if (rc2 != 0 && rc == 0) {
             rc = rc2;
         }
 
-        rc2 = MainResolveRemote(self, name, acc, &remote, remoteSz);
+        rc2 = MainResolveRemote(self, resolver, name, acc, &remote, remoteSz,
+            false);
         if (rc2 != 0 && rc == 0) {
             rc = rc2;
         }
 
-        rc2 = MainResolveCache(self, name, remote);
+        rc2 = MainResolveCache(self, resolver, name, remote, false);
+        if (rc2 != 0 && rc == 0) {
+            rc = rc2;
+        }
+
+        rc2 = MainResolveRemote(self, resolver, name, acc, &remote, remoteSz,
+            true);
+        if (rc2 != 0 && rc == 0) {
+            rc = rc2;
+        }
+
+        rc2 = MainResolveCache(self, resolver, name, remote, true);
+        if (rc2 != 0 && rc == 0) {
+            rc = rc2;
+        }
+
+        rc2 = MainResolveQuery(self, resolver, name, acc, false);
+        if (rc2 != 0 && rc == 0) {
+            rc = rc2;
+        }
+
+        rc2 = MainResolveQuery(self, resolver, name, acc, true);
         if (rc2 != 0 && rc == 0) {
             rc = rc2;
         }
@@ -756,7 +1033,8 @@ static rc_t MainResolve(const Main *self,
         RELEASE(VPath, remote);
     }
 
-    RELEASE(VPath, acc);
+    RELEASE(VPath, acc); 
+    RELEASE(VResolver, resolver);
 
     return rc;
 }
@@ -781,10 +1059,17 @@ rc_t MainDepend(const Main *self, const char *name, bool missing)
     }
 
     if (rc == 0) {
-        rc = VDatabaseListDependencies(db, &dep, missing);
+        if (!self->allowCaching) {
+            VResolverCacheEnable(self->resolver, self->cacheState);
+        }
+        rc = VDatabaseListDependenciesWithCaching(db,
+            &dep, missing, !self->allowCaching);
         if (rc != 0) {
             OUTMSG(("VDatabaseListDependencies(%s, %s) = %R\n",
                 name, missing ? "missing" : "all", rc));
+        }
+        if (!self->allowCaching) {
+            VResolverCacheEnable(self->resolver, vrAlwaysDisable);
         }
     }
 
@@ -816,7 +1101,7 @@ rc_t MainDepend(const Main *self, const char *name, bool missing)
             }
             else {
                 OUTMSG(("VDBDependenciesSeqId(%s, %s, %i)=%R ",
-                    name, missing ? "missing" : "all", i, rc));
+                    name, missing ? "missing" : "all", i, rc2));
                 if (rc == 0) {
                     rc = rc2;
                 }
@@ -828,7 +1113,7 @@ rc_t MainDepend(const Main *self, const char *name, bool missing)
             }
             else {
                 OUTMSG(("VDBDependenciesName(%s, %s, %i)=%R ",
-                    name, missing ? "missing" : "all", i, rc));
+                    name, missing ? "missing" : "all", i, rc2));
                 if (rc == 0) {
                     rc = rc2;
                 }
@@ -840,7 +1125,7 @@ rc_t MainDepend(const Main *self, const char *name, bool missing)
             }
             else {
                 OUTMSG(("VDBDependenciesCircular(%s, %s, %i)=%R ",
-                    name, missing ? "missing" : "all", i, rc));
+                    name, missing ? "missing" : "all", i, rc2));
                 if (rc == 0) {
                     rc = rc2;
                 }
@@ -855,7 +1140,7 @@ rc_t MainDepend(const Main *self, const char *name, bool missing)
             }
             else {
                 OUTMSG(("VDBDependenciesType(%s, %s, %i)=%R ",
-                    name, missing ? "missing" : "all", i, rc));
+                    name, missing ? "missing" : "all", i, rc2));
                 if (rc == 0) {
                     rc = rc2;
                 }
@@ -867,7 +1152,7 @@ rc_t MainDepend(const Main *self, const char *name, bool missing)
             }
             else {
                 OUTMSG(("VDBDependenciesLocal(%s, %s, %i)=%R ",
-                    name, missing ? "missing" : "all", i, rc));
+                    name, missing ? "missing" : "all", i, rc2));
                 if (rc == 0) {
                     rc = rc2;
                 }
@@ -875,11 +1160,11 @@ rc_t MainDepend(const Main *self, const char *name, bool missing)
 
             rc2 = VDBDependenciesPath(dep, &s, i);
             if (rc2 == 0) {
-                OUTMSG(("pathLocal=%s,", s == NULL ? "notFound" : s));
+                OUTMSG(("\n\tpathLocal=%s,", s == NULL ? "notFound" : s));
             }
             else {
                 OUTMSG(("VDBDependenciesPath(%s, %s, %i)=%R ",
-                    name, missing ? "missing" : "all", i, rc));
+                    name, missing ? "missing" : "all", i, rc2));
                 if (rc == 0) {
                     rc = rc2;
                 }
@@ -887,11 +1172,40 @@ rc_t MainDepend(const Main *self, const char *name, bool missing)
 
             rc2 = VDBDependenciesPathRemote(dep, &s, i);
             if (rc2 == 0) {
-                OUTMSG(("pathRemote=%s,", s == NULL ? "notFound" : s));
+                if (s == NULL) {
+                    OUTMSG(("\n\tpathRemote: notFound "));
+                }
+                else {
+                    OUTMSG(("\n\tpathRemote: %s ", s));
+                    if (!self->noRfs) {
+                        const KFile *f = NULL;
+                        rc2 = KCurlFileMake(&f, s, false);
+                        if (rc2 != 0) {
+                            OUTMSG(("KCurlFileMake=%R", rc2));
+                            if (rc == 0) {
+                                rc = rc2;
+                            }
+                        }
+                        if (rc2 == 0) {
+                            uint64_t sz = 0;
+                            rc2 = KFileSize(f, &sz);
+                            if (rc2 != 0) {
+                                OUTMSG(("KFileSize=%R", rc2));
+                                if (rc == 0) {
+                                    rc = rc2;
+                                }
+                            }
+                            else {
+                                OUTMSG(("%,lu", sz));
+                            }
+                        }
+                        RELEASE(KFile, f);
+                    }
+                }
             }
             else {
                 OUTMSG(("VDBDependenciesPathRemote(%s, %s, %i)=%R ",
-                    name, missing ? "missing" : "all", i, rc));
+                    name, missing ? "missing" : "all", i, rc2));
                 if (rc == 0) {
                     rc = rc2;
                 }
@@ -899,11 +1213,34 @@ rc_t MainDepend(const Main *self, const char *name, bool missing)
 
             rc2 = VDBDependenciesPathCache(dep, &s, i);
             if (rc2 == 0) {
-                OUTMSG(("pathCache=%s", s == NULL ? "notFound" : s));
+                OUTMSG(("\n\tpathCache: %s ", s == NULL ? "notFound" : s));
+                if (s != NULL) {
+                    char cachecache[PATH_MAX] = "";
+                    rc2 = MainReport(self, s, NULL, NULL, NULL);
+                    OUTMSG(("\n"));
+                    if (rc == 0) {
+                        rc = rc2;
+                    }
+                    if (rc2 == 0) {
+                        rc2 = string_printf(cachecache,
+                            sizeof cachecache, NULL, "%s.cache", s);
+                        if (rc2 != 0) {
+                            if (rc == 0) {
+                                rc = rc2;
+                            }
+                            OUTMSG(("string_printf(%s) = %R\n", s, rc2));
+                        }
+                    }
+                    if (rc == 0) {
+                        OUTMSG(("\tpathCache.cache: "));
+                        OUTMSG(("%s ", cachecache));
+                        rc = MainReport(self, cachecache, NULL, NULL, NULL);
+                    }
+                }
             }
             else {
                 OUTMSG(("VDBDependenciesPathCache(%s, %s, %i)=%R ",
-                    name, missing ? "missing" : "all", i, rc));
+                    name, missing ? "missing" : "all", i, rc2));
                 if (rc == 0) {
                     rc = rc2;
                 }
@@ -921,13 +1258,16 @@ rc_t MainDepend(const Main *self, const char *name, bool missing)
 
 static rc_t PrintCurl() {
     KNSManager *mgr = NULL;
+
     rc_t rc = KNSManagerMake(&mgr);
     if (rc != 0) {
         OUTMSG(("KNSManagerMake = %R\n", rc));
     }
+
     if (rc == 0) {
         rc_t rc = KNSManagerAvail(mgr);
         OUTMSG(("KNSManagerAvail = %R", rc));
+
         if (rc == 0) {
             const char *version_string = NULL;
             rc = KNSManagerCurlVersion(mgr, &version_string);
@@ -939,11 +1279,17 @@ static rc_t PrintCurl() {
             }
         }
     }
+
     RELEASE(KNSManager, mgr);
+
     return rc;
 }
 
-static rc_t MainExec(const Main *self, const char *aArg, ...) {
+#define kptKartITEM (kptAlias - 1)
+
+static
+rc_t MainExec(const Main *self, const KartItem *item, const char *aArg, ...)
+{
     rc_t rc = 0;
     rc_t rce = 0;
 
@@ -960,22 +1306,28 @@ static rc_t MainExec(const Main *self, const char *aArg, ...) {
 
     assert(self);
 
-    rc = string_vprintf(arg, sizeof arg, &num_writ, aArg, args);
-    if (rc != 0) {
-        OUTMSG(("string_vprintf(%s)=%R\n", aArg, rc));
-        return rc;
+    if (item != NULL) {
+        type = kptKartITEM;
     }
-    assert(num_writ < sizeof arg);
 
-    OUTMSG(("\n"));
-    rc = printString(arg);
-    if (rc != 0) {
-        OUTMSG(("printString=%R\n", rc));
-        return rc;
+    else {
+        rc = string_vprintf(arg, sizeof arg, &num_writ, aArg, args);
+        if (rc != 0) {
+            OUTMSG(("string_vprintf(%s)=%R\n", aArg, rc));
+            return rc;
+        }
+        assert(num_writ < sizeof arg);
+
+        OUTMSG(("\n"));
+        rc = printString(arg);
+        if (rc != 0) {
+            OUTMSG(("printString=%R\n", rc));
+            return rc;
+        }
+        OUTMSG((" "));
+        rc = MainReport(self, arg, &directSz, &type, &alias);
+        OUTMSG(("\n"));
     }
-    OUTMSG((" "));
-    rc = MainReport(self, arg, &directSz, &type, &alias);
-    OUTMSG(("\n"));
 
     if (self->recursive && type == kptDir && !alias) {
         uint32_t i = 0;
@@ -999,7 +1351,7 @@ static rc_t MainExec(const Main *self, const char *aArg, ...) {
                     arg, i, rc));
             }
             else {
-                rc_t rc2 = MainExec(self, "%s/%s", arg, name);
+                rc_t rc2 = MainExec(self, NULL, "%s/%s", arg, name);
                 if (rc2 != 0 && rce == 0) {
                     rce = rc2;
                 }
@@ -1008,44 +1360,83 @@ static rc_t MainExec(const Main *self, const char *aArg, ...) {
         RELEASE(KNamelist, list);
     }
     else {
-        if (MainHasTest(self, eResolve)) {
-            rc_t rc2 = MainResolve(self, arg, &localSz, &remoteSz);
-            if (rc == 0 && rc2 != 0) {
-                rc = rc2;
+        bool isKart = false;
+        Kart *kart = NULL;
+        if (type == kptFile) {
+            rc_t rc = KartMake(self->dir, arg, &kart, &isKart);
+            if (rc != 0) {
+                OUTMSG(("KartMake = %R\n", rc));
             }
         }
 
-        if (type == kptDatabase || type == kptNotFound) {
-            if (MainHasTest(self, eDependMissing)) {
-                rc_t rc2 = MainDepend(self, arg, true);
+        if (isKart) {
+            const KartItem *item = NULL;
+            while (true) {
+                rc_t rc2 = 0;
+                RELEASE(KartItem, item);
+                rc2 = KartMakeNextItem(kart, &item);
+                if (rc2 != 0) {
+                    OUTMSG(("KartMakeNextItem = %R\n", rc2));
+                    if (rce == 0) {
+                        rce = rc2;
+                    }
+                    break;
+                }
+                if (item == NULL) {
+                    break;
+                }
+                rc2 = MainExec(self, item, NULL);
+                if (rc2 != 0 && rce == 0) {
+                    rce = rc2;
+                }
+            }
+            KartRelease(kart);
+            kart = NULL;
+        }
+        else {
+            if (MainHasTest(self, eResolve)) {
+                rc_t rc2 = MainResolve(self, item, arg, &localSz, &remoteSz);
                 if (rc == 0 && rc2 != 0) {
                     rc = rc2;
                 }
             }
 
-            if (MainHasTest(self, eDependAll)) {
-                rc_t rc2 = MainDepend(self, arg, false);
-                if (rc == 0 && rc2 != 0) {
-                    rc = rc2;
+            if (item == NULL) {
+                if (type == kptDatabase || type == kptNotFound) {
+                    if (MainHasTest(self, eDependMissing)) {
+                        rc_t rc2 = MainDepend(self, arg, true);
+                        if (rc == 0 && rc2 != 0) {
+                            rc = rc2;
+                        }
+                    }
+
+                    if (MainHasTest(self, eDependAll)) {
+                        rc_t rc2 = MainDepend(self, arg, false);
+                        if (rc == 0 && rc2 != 0) {
+                            rc = rc2;
+                        }
+                    }
                 }
             }
-        }
 
-        if (MainHasTest(self, eResolve) && (
-            (directSz != -1 && localSz != -1 && directSz != localSz) ||
-            (remoteSz != -1 && localSz != -1 && localSz != remoteSz)))
-        {
-            OUTMSG(("FILE SIZES DO NOT MATCH: "));
-            if (directSz != -1 && localSz != -1 && directSz != remoteSz) {
-                OUTMSG(("direct=%ld != remote=%ld. ", directSz, remoteSz));
+            if (MainHasTest(self, eResolve) && (
+                (directSz != -1 && localSz != -1 && directSz != localSz) ||
+                (remoteSz != -1 && localSz != -1 && localSz != remoteSz))
+               )
+            {
+                OUTMSG(("FILE SIZES DO NOT MATCH: "));
+                if (directSz != -1 && localSz != -1 && directSz != remoteSz)
+                {
+                    OUTMSG(("direct=%ld != remote=%ld. ", directSz, remoteSz));
+                }
+                if (remoteSz != -1 && localSz != -1 && localSz != remoteSz) {
+                    OUTMSG(("local=%ld != remote=%ld. ", localSz, remoteSz));
+                }
+                OUTMSG(("\n"));
             }
-            if (remoteSz != -1 && localSz != -1 && localSz != remoteSz) {
-                OUTMSG(("local=%ld != remote=%ld. ", localSz, remoteSz));
-            }
+
             OUTMSG(("\n"));
         }
-
-        OUTMSG(("\n"));
     }
 
     if (rce != 0 && rc == 0) {
@@ -1061,23 +1452,34 @@ static rc_t MainFini(Main *self) {
 
     RELEASE(VResolver, self->resolver);
     RELEASE(KConfig, self->cfg);
+    RELEASE(KRepositoryMgr, self->repoMgr);
     RELEASE(VDBManager, self->mgr);
     RELEASE(KDirectory, self->dir);
 
     return rc;
 }
 
-#define ALIAS_REC  "R"
-#define OPTION_REC "recursive"
-static const char* USAGE_REC[] = { "check object type recursively", NULL };
+#define OPTION_CACHE "allow-caching"
+#define ALIAS_CACHE  "C"
+static const char* USAGE_CACHE[] = { "do not disable caching", NULL };
 
-#define ALIAS_NO_VDB  "N"
+#define OPTION_NO_RFS "no-rfs"
+static const char* USAGE_NO_RFS[]
+    = { "do not check remote file size for dependencies", NULL };
+
 #define OPTION_NO_VDB "no-vdb"
+#define ALIAS_NO_VDB  "N"
 static const char* USAGE_NO_VDB[] = { "do not call VDBManagerPathType", NULL };
 
+#define OPTION_REC "recursive"
+#define ALIAS_REC  "R"
+static const char* USAGE_REC[] = { "check object type recursively", NULL };
+
 OptDef Options[] = {                             /* needs_value, required */
-    { OPTION_REC   , ALIAS_REC   , NULL, USAGE_REC   , 1, false, false },
-    { OPTION_NO_VDB, ALIAS_NO_VDB, NULL, USAGE_NO_VDB, 1, false, false }
+    { OPTION_CACHE , ALIAS_CACHE , NULL, USAGE_CACHE , 1, false, false },
+    { OPTION_NO_RFS, NULL        , NULL, USAGE_NO_RFS, 1, false, false },
+    { OPTION_NO_VDB, ALIAS_NO_VDB, NULL, USAGE_NO_VDB, 1, false, false },
+    { OPTION_REC   , ALIAS_REC   , NULL, USAGE_REC   , 1, false, false }
 };
 
 rc_t CC KMain(int argc, char *argv[]) {
@@ -1089,11 +1491,27 @@ rc_t CC KMain(int argc, char *argv[]) {
     int argi = 0;
 
     Main prms;
-    char **argv2 = MainInit(&prms, &rc, argc, argv, &argi);
+    char **argv2 = MainInit(&prms, argc, argv, &argi);
 
     if (rc == 0) {
         rc = ArgsMakeAndHandle(&args, argi, argv2, 1,
             Options, sizeof Options / sizeof Options[0]);
+    }
+
+    if (rc == 0) {
+        rc = ArgsOptionCount(args, OPTION_CACHE, &pcount);
+        if (rc) {
+            LOGERR(klogErr, rc, "Failure to get '" OPTION_CACHE "' argument");
+        }
+        else {
+            if (pcount > 0) {
+                prms.allowCaching = true;
+            }
+        }
+    }
+
+    if (rc == 0) {
+        rc = MainInitObjects(&prms);
     }
 
     if (MainHasTest(&prms, eCfg)) {
@@ -1103,16 +1521,18 @@ rc_t CC KMain(int argc, char *argv[]) {
         }
     }
 
-    PrintCurl();
+    if (MainHasTest(&prms, eCurl)) {
+        PrintCurl();
+    }
 
     if (rc == 0) {
-        rc = ArgsOptionCount(args, OPTION_REC, &pcount);
+        rc = ArgsOptionCount(args, OPTION_NO_RFS, &pcount);
         if (rc) {
-            LOGERR(klogErr, rc, "Failure to get '" OPTION_REC "' argument");
+            LOGERR(klogErr, rc, "Failure to get '" OPTION_NO_RFS "' argument");
         }
         else {
             if (pcount > 0) {
-                prms.recursive = true;
+                prms.noRfs = true;
             }
         }
     }
@@ -1130,6 +1550,18 @@ rc_t CC KMain(int argc, char *argv[]) {
     }
 
     if (rc == 0) {
+        rc = ArgsOptionCount(args, OPTION_REC, &pcount);
+        if (rc) {
+            LOGERR(klogErr, rc, "Failure to get '" OPTION_REC "' argument");
+        }
+        else {
+            if (pcount > 0) {
+                prms.recursive = true;
+            }
+        }
+    }
+
+    if (rc == 0) {
         rc = ArgsParamCount(args, &pcount);
     }
 
@@ -1137,7 +1569,7 @@ rc_t CC KMain(int argc, char *argv[]) {
         const char *name = NULL;
         rc3 = ArgsParamValue(args, i, &name);
         if (rc3 == 0) {
-            rc_t rc2 = MainExec(&prms, name);
+            rc_t rc2 = MainExec(&prms, NULL, name);
             if (rc == 0 && rc2 != 0) {
                 rc = rc2;
             }
@@ -1148,6 +1580,7 @@ rc_t CC KMain(int argc, char *argv[]) {
     }
 
     RELEASE(Args, args);
+
     {
         rc_t rc2 = MainFini(&prms);
         if (rc == 0 && rc2 != 0) {

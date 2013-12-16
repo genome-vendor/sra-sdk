@@ -196,7 +196,7 @@ rc_t DB_Fini(const SParam* p, DB_Handle* h, bool drop)
         h->wev_dnb = NULL;
         h->ev_dnb = NULL;
         PLOGMSG(klogInfo, (klogInfo, "Fini calculating reference coverage", "severity=status"));
-        if( (rc2 = ReferenceMgr_Release(h->rmgr, !drop, NULL, drop ? false : true)) != 0 && !drop ) {
+        if( (rc2 = ReferenceMgr_Release(h->rmgr, !drop, NULL, drop ? false : true, Quitting)) != 0 && !drop ) {
             drop = true;
             rc = rc2;
 	    LOGERR(klogErr, rc, "Failed calculating reference coverage");

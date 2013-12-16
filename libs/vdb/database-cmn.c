@@ -126,7 +126,7 @@ LIB_EXPORT rc_t CC VDatabaseRelease ( const VDatabase *self )
         {
         case krefWhack:
             return VDatabaseWhack ( ( VDatabase* ) self );
-        case krefLimit:
+        case krefNegative:
             return RC ( rcVDB, rcDatabase, rcReleasing, rcRange, rcExcessive );
         }
     }
@@ -158,7 +158,7 @@ rc_t VDatabaseSever ( const VDatabase *self )
         {
         case krefWhack:
             return VDatabaseWhack ( ( VDatabase* ) self );
-        case krefLimit:
+        case krefNegative:
             return RC ( rcVDB, rcDatabase, rcReleasing, rcRange, rcExcessive );
         }
     }

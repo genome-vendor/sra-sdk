@@ -60,7 +60,7 @@ static rc_t vdco_set_str( char **dst, const char *src )
     {
         return RC( rcVDB, rcNoTarg, rcWriting, rcParam, rcNull );
     }
-    len = strlen( src );
+    len = string_size( src );
     if ( len == 0 )
     {
         return RC( rcVDB, rcNoTarg, rcWriting, rcItem, rcEmpty );
@@ -70,7 +70,7 @@ static rc_t vdco_set_str( char **dst, const char *src )
     {
         return RC( rcVDB, rcNoTarg, rcWriting, rcMemory, rcExhausted );
     }
-    strcpy( *dst, src );
+    string_copy( *dst, len+1, src, len );
     return 0;
 }
 
@@ -103,6 +103,7 @@ static void vdco_init_values( p_dump_context ctx )
     ctx->print_num_elem = false;
     ctx->objver_requested = false;
     ctx->objtype_requested = false;
+    ctx->check_curl = false;
 }
 
 rc_t vdco_init( dump_context **ctx )
@@ -418,6 +419,7 @@ static void vdco_evaluate_options( const Args *my_args,
     ctx->sum_num_elem = vdco_get_bool_option( my_args, OPTION_NUMELEMSUM, false );
     ctx->show_blobbing = vdco_get_bool_option( my_args, OPTION_SHOW_BLOBBING, false );
     ctx->enum_phys = vdco_get_bool_option( my_args, OPTION_ENUM_PHYS, false );
+    ctx->check_curl = vdco_get_bool_option( my_args, OPTION_CHECK_CURL, false );
 
     vdco_set_table( ctx, vdco_get_str_option( my_args, OPTION_TABLE ) );
     vdco_set_columns( ctx, vdco_get_str_option( my_args, OPTION_COLUMNS ) );

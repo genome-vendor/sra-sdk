@@ -32,7 +32,7 @@
 #include <klib/text.h>
 #include <klib/printf.h>
 #include <klib/data-buffer.h>
-#include <kns/kns_mgr.h>
+#include <kns/manager.h>
 #include <kns/KCurlRequest.h>
 
 #include "kns_mgr_priv.h"
@@ -48,14 +48,14 @@
 static const char kcurlrequest_classname [] = "KCurlRequest";
 
 
-struct KCurlRequest
+typedef struct KCurlRequest
 {
     KRefcount refcount;
     const struct KNSManager * kns_mgr;
     CURL * curl_handle;
     KDataBuffer fields;
     uint64_t fields_chars;
-};
+} KCurlRequest;
 
 
 static rc_t KCurlRequestSetUrl( struct KCurlRequest *self, const char * url )
@@ -91,7 +91,7 @@ static rc_t set_verbose( struct KCurlRequest *self )
 }
 
 
-LIB_EXPORT rc_t CC KNSManagerMakeRequest( const struct KNSManager *kns_mgr, struct KCurlRequest **self, const char * url, bool verbose )
+LIB_EXPORT rc_t CC KNSManagerMakeCurlRequest( const struct KNSManager *kns_mgr, struct KCurlRequest **self, const char * url, bool verbose )
 {
     rc_t rc = 0;
     struct KCurlRequest *tmp = calloc ( sizeof *tmp, 1 );

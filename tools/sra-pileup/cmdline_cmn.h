@@ -105,10 +105,12 @@ typedef struct prepare_ctx
     const ReferenceObj *refobj;
     const char * spot_group;
     bool omit_qualities;
+    bool read_tlen;
     bool use_primary_alignments;
     bool use_secondary_alignments;
     bool use_evidence_alignments;
     void * data;
+    const char *path;
     rc_t ( CC * on_section ) ( struct prepare_ctx * ctx, uint32_t start, uint32_t end );
 } prepare_ctx;
 

@@ -638,7 +638,7 @@ table NCBI:WGS:view:scaffold #1 = NCBI:WGS:tbl:scaffold #1
     readonly column INSDC:coord:zero READ_START
         = out_read_start;
     INSDC:coord:zero out_read_start
-        = ( INSDC:coord:zero ) < U32 > integral ( .COMPONENT_LEN );
+        = ( INSDC:coord:zero ) < U32 > integral_0 ( .COMPONENT_LEN );
     readonly column INSDC:coord:len READ_LEN
         = .COMPONENT_LEN;
     readonly column INSDC:SRA:xread_type READ_TYPE

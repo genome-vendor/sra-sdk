@@ -68,7 +68,7 @@ enum LoaderModes {
 
 typedef struct CommonWriterSettings
 {
-    unsigned numfiles;
+    uint64_t numfiles;
     char const *inpath;
     char const *outpath;
     char const *tmpfs;
@@ -91,12 +91,13 @@ typedef struct CommonWriterSettings
     uint64_t maxAlignCount;
     size_t cache_size;
 
-    unsigned errCount;
-    unsigned maxErrCount;
-    unsigned maxWarnCount_NoMatch;
-    unsigned maxWarnCount_DupConflict;
-    unsigned pid;
-    unsigned minMatchCount; /* minimum number of matches to count as an alignment */
+    uint64_t errCount;
+    uint64_t maxErrCount;
+    uint64_t maxErrPct;
+    uint64_t maxWarnCount_NoMatch;
+    uint64_t maxWarnCount_DupConflict;
+    uint64_t pid;
+    uint64_t minMatchCount; /* minimum number of matches to count as an alignment */
     int minMapQual;
     enum LoaderModes mode;
     uint32_t maxSeqLen;
@@ -119,6 +120,9 @@ typedef struct CommonWriterSettings
     bool hasTI;
     bool acceptHardClip;
     INSDC_SRA_platform_id platform;
+    bool parseSpotName;
+    bool compressQuality;
+    uint64_t maxMateDistance;
 } CommonWriterSettings;
 
 /*--------------------------------------------------------------------------
@@ -142,15 +146,15 @@ typedef struct SpotAssembler {
     uint32_t idCount[NUM_ID_SPACES];
     uint32_t key2id_hash[NUM_ID_SPACES];
     
-    unsigned key2id_max;
-    unsigned key2id_name_max;
-    unsigned key2id_name_alloc;
-    unsigned key2id_count;
+    size_t key2id_max;
+    size_t key2id_name_max;
+    size_t key2id_name_alloc;
+    size_t key2id_count;
     
-    unsigned key2id_name[NUM_ID_SPACES];
+    size_t key2id_name[NUM_ID_SPACES];
     /* this array is kept in name order */
     /* this maps the names to key2id and idCount */
-    unsigned key2id_oid[NUM_ID_SPACES];
+    size_t key2id_oid[NUM_ID_SPACES];
     
     unsigned pass;
     bool isColorSpace;
@@ -177,7 +181,7 @@ typedef struct CommonWriter {
 rc_t CommonWriterInit(CommonWriter* self, struct VDBManager *mgr, struct VDatabase *db, const CommonWriterSettings* settings);
 
 rc_t CommonWriterArchive(CommonWriter* self, const struct ReaderFile *);
-rc_t CommonWriterComplete(CommonWriter* self, bool quitting);
+rc_t CommonWriterComplete(CommonWriter* self, bool quitting, uint64_t maxDistance);
 
 rc_t CommonWriterWhack(CommonWriter* self);
 

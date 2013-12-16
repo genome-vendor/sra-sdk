@@ -26,6 +26,8 @@
 
 #include <loader/common-reader-priv.h>
 
+#include <sysalloc.h>
+
 #include <assert.h>
 #include <stdlib.h>
 
@@ -55,7 +57,7 @@ rc_t CC ReaderFileRelease ( const ReaderFile *self )
         {
         case krefWhack:
             return self->vt.v1->destroy( (ReaderFile *)self );
-        case krefLimit:
+        case krefNegative:
             return RC ( RC_MODULE, rcFile, rcReleasing, rcRange, rcExcessive );
         }
     }

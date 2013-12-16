@@ -127,6 +127,8 @@ rc_t VColumnReadBlob ( const VColumn *self, struct VBlob const **blob, int64_t r
 rc_t VColumnReadCachedBlob ( const VColumn *self, struct VBlob const *blob, int64_t row_id,
    uint32_t *elem_bits, const void **base, uint32_t *boff, uint32_t *row_len );
 
+rc_t VColumnIsStatic ( const VColumn *self, bool *is_static );
+
 /*--------------------------------------------------------------------------
  * WColumn
  *  column with input buffer

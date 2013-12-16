@@ -316,6 +316,18 @@ then
     CMD="$CMD -lpthread"
 fi
 
+# add in xml
+if [ $HAVE_XML -ne 0 ]
+then
+    CMD="$CMD -lxml2"
+fi
+
+# add in math library
+if [ $HAVE_M -ne 0 ]
+then
+    CMD="$CMD -lm"
+fi
+
 # produce shared library
 echo $CMD
 $CMD || exit $?

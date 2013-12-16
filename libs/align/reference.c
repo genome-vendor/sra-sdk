@@ -75,7 +75,7 @@ const TableReaderColumn ReferenceList_cols[] =
     { 0, "(INSDC:4na:bin)READ",     { NULL }, 0, ercol_Skip },
     { 0, "SEQ_LEN",                 { NULL }, 0, 0 },
     { 0, "PRIMARY_ALIGNMENT_IDS",   { NULL }, 0, ercol_Skip },
-    { 0, "SECONDARY_ALIGNMENT_IDS", { NULL }, 0, ercol_Skip },
+    { 0, "SECONDARY_ALIGNMENT_IDS", { NULL }, 0, ercol_Skip | ercol_Optional },
     { 0, "EVIDENCE_INTERVAL_IDS",   { NULL }, 0, ercol_Skip | ercol_Optional },
     { 0, "OVERLAP_REF_POS",         { NULL }, 0, ercol_Optional },
     { 0, "OVERLAP_REF_LEN",         { NULL }, 0, ercol_Optional },
@@ -397,6 +397,13 @@ LIB_EXPORT rc_t CC ReferenceList_MakeCursor( const ReferenceList** cself, const 
                             }
                             if ( rc == 0 )
                             {
+                                INSDC_coord_len cur_seq_len = h[ 2 ].base.coord_len[ 0 ];
+                                if ( cur_seq_len == 0 )
+                                {
+                                    /* assign it to max-seq-len */
+                                    cur_seq_len = h[ 4 ].base.coord_len[ 0 ];
+                                }
+
                                 if ( h[ 6 ].len > 0 )
                                 {/** CMP_READ > 0 -- truly local ***/
                                     node->read_present = true; 
@@ -407,6 +414,7 @@ LIB_EXPORT rc_t CC ReferenceList_MakeCursor( const ReferenceList** cself, const 
                                     node->read_present = false;
                                     read_determination_done = true;
                                 } /*** else still not sure **/
+
                                 if ( read_determination_done && iname != NULL )
                                 {
                                     /* scroll to last row for this reference projecting the seq_len */
@@ -422,13 +430,13 @@ LIB_EXPORT rc_t CC ReferenceList_MakeCursor( const ReferenceList** cself, const 
                                             so we step back 2 rows in table from this ref end row
                                             and also skip rows already scanned for read presence */
                                             r_count -= ( start - r_start ) + 2;
-                                            node->seq_len += h[ 2 ].base.coord_len[ 0 ] * r_count;
+                                            node->seq_len += cur_seq_len * r_count;
                                             start += r_count;
                                             count -= r_count;
                                         }
                                     }
                                 }
-                                node->seq_len += h[ 2 ].base.coord_len[ 0 ];
+                                node->seq_len += cur_seq_len;
                                 node->end_rowid = start;
                             }
                         }
@@ -955,7 +963,7 @@ LIB_EXPORT rc_t CC ReferenceObj_External( const ReferenceObj* cself, bool* exter
             if ( rc == 0 )
             {
                 *path = NULL;
-                rc = RefSeqMgr_Exists( rmgr, cself->seqid, strlen( cself->seqid ), NULL );
+                rc = RefSeqMgr_Exists( rmgr, cself->seqid, string_size( cself->seqid ), NULL );
                 if ( GetRCObject( rc ) == rcTable && GetRCState( rc ) == rcNotFound )
                 {
                     rc = 0;
@@ -1189,6 +1197,7 @@ struct PlacementIterator
     int32_t min_mapq;
 
     const VCursor* align_curs;
+    void * placement_ctx;           /* source-specific context */
 };
 
 
@@ -1274,7 +1283,7 @@ LIB_EXPORT rc_t CC ReferenceObj_MakePlacementIterator ( const ReferenceObj* csel
     int32_t min_mapq,
     struct VCursor const *ref_cur, struct VCursor const *align_cur, align_id_src ids,
     const PlacementRecordExtendFuncs *ext_0, const PlacementRecordExtendFuncs *ext_1,
-    const char * spot_group )
+    const char * spot_group, void * placement_ctx )
 {
     rc_t rc = 0;
     PlacementIterator* o = NULL;
@@ -1300,6 +1309,7 @@ LIB_EXPORT rc_t CC ReferenceObj_MakePlacementIterator ( const ReferenceObj* csel
             /* o->wrapped_around = false; */
             ReferenceObj_AddRef( o->obj );
             o->min_mapq = min_mapq;
+            o->placement_ctx = placement_ctx;
 
             if ( ext_0 != NULL )
             {
@@ -1370,7 +1380,9 @@ LIB_EXPORT rc_t CC ReferenceObj_MakePlacementIterator ( const ReferenceObj* csel
                 o->ref_window_len = ref_window_len;
 
                 /* in reference-rows */
-                o->last_ref_row_of_window_rel = ( ( ref_window_start + ref_window_len ) / mgr->max_seq_len );
+                o->last_ref_row_of_window_rel = ref_window_start;
+                o->last_ref_row_of_window_rel += ref_window_len;
+                o->last_ref_row_of_window_rel /= mgr->max_seq_len;
                 o->rowcount_of_ref = ( cself->end_rowid - cself->start_rowid );
 
                 /* get effective starting offset based on overlap
@@ -1379,7 +1391,7 @@ LIB_EXPORT rc_t CC ReferenceObj_MakePlacementIterator ( const ReferenceObj* csel
                 if ( rc == 0 )
                 {
                     int64_t ref_pos_overlapped = calc_overlaped( o, ids );
-                    ALIGN_DBG( "ref_pos_overlapped: %li", ref_pos_overlapped );
+                    ALIGN_DBG( "ref_pos_overlapped: %,li", ref_pos_overlapped );
 
                     /* the absolute row where we are reading from */
                     o->cur_ref_row_rel = ( ref_pos_overlapped / mgr->max_seq_len ) - 1;
@@ -1389,10 +1401,15 @@ LIB_EXPORT rc_t CC ReferenceObj_MakePlacementIterator ( const ReferenceObj* csel
                     o->ids_col = &o->ref_cols[ids == primary_align_ids ? ereflst_cn_PRIMARY_ALIGNMENT_IDS :
                             ( ids == secondary_align_ids ? ereflst_cn_SECONDARY_ALIGNMENT_IDS : ereflst_cn_EVIDENCE_INTERVAL_IDS ) ];
 
-                    ALIGN_DBG( "iter.last_ref_row_of_window_rel: %li", o->last_ref_row_of_window_rel );
-                    ALIGN_DBG( "iter.rowcount_of_ref: %li", o->rowcount_of_ref );
-                    ALIGN_DBG( "iter.cur_ref_row_rel: %li", o->cur_ref_row_rel );
+                    ALIGN_DBG( "iter.last_ref_row_of_window_rel: %,li", o->last_ref_row_of_window_rel );
+                    ALIGN_DBG( "iter.rowcount_of_ref: %,li", o->rowcount_of_ref );
+                    ALIGN_DBG( "iter.cur_ref_row_rel: %,li", o->cur_ref_row_rel );
                 }
+            }
+
+            if ( rc != 0 )
+            {
+                ReferenceObj_Release( o->obj );
             }
         }
     }
@@ -1401,7 +1418,7 @@ LIB_EXPORT rc_t CC ReferenceObj_MakePlacementIterator ( const ReferenceObj* csel
     {
         enter_spotgroup ( o, spot_group );
         *iter = o;
-/*        ALIGN_DBG( "iter for %s:%s opened 0x%p", cself->seqid, cself->name, o ); */
+        ALIGN_DBG( "iter for %s:%s opened 0x%p", cself->seqid, cself->name, o );
     }
     else
     {
@@ -1495,7 +1512,7 @@ LIB_EXPORT rc_t CC PlacementIteratorRefObj( const PlacementIterator * self,
 static void CC PlacementRecordVector_dump( void *item, void *data )
 {
     const PlacementRecord* i = ( const PlacementRecord* )item;
-    ALIGN_DBG( " {%u, %u, %li}", i->pos, i->len, i->id );
+    ALIGN_DBG( " {pos:%,u, len:%,u, id:%,li}", i->pos, i->len, i->id );
 }
 #endif
 
@@ -1565,7 +1582,7 @@ static rc_t allocate_populate_rec( const PlacementIterator *cself,
         /* use callback or fixed size to discover the size of portions 0 and 1 */
         if ( cself->ext_0.alloc_size != NULL )
         {
-            rc = cself->ext_0.alloc_size( curs, id, &size0, cself->ext_0.data );
+            rc = cself->ext_0.alloc_size( curs, id, &size0, cself->ext_0.data, cself->placement_ctx );
             if ( rc != 0 )
                 return rc;
         }
@@ -1574,7 +1591,7 @@ static rc_t allocate_populate_rec( const PlacementIterator *cself,
 
         if ( cself->ext_1.alloc_size != NULL )
         {
-            rc = cself->ext_1.alloc_size( curs, id, &size1, cself->ext_1.data );
+            rc = cself->ext_1.alloc_size( curs, id, &size1, cself->ext_1.data, cself->placement_ctx );
             if ( rc != 0 )
                 return rc;
         }
@@ -1636,7 +1653,8 @@ static rc_t allocate_populate_rec( const PlacementIterator *cself,
                 rc = cself->ext_0.populate( obj, pr, curs,
                                             cself->ref_window_start,
                                             cself->ref_window_len,
-                                            cself->ext_0.data );
+                                            cself->ext_0.data,
+                                            cself->placement_ctx );
                 if ( rc != 0 && cself->ext_0.destroy != NULL )
                 {
                     void *obj = PlacementRecordCast ( pr, placementRecordExtension0 );
@@ -1650,7 +1668,8 @@ static rc_t allocate_populate_rec( const PlacementIterator *cself,
                 rc = cself->ext_1.populate( obj, pr, curs, 
                                             cself->ref_window_start,
                                             cself->ref_window_len,
-                                            cself->ext_1.data );
+                                            cself->ext_1.data,
+                                            cself->placement_ctx );
                 if ( rc != 0 )
                 {
                     if ( cself->ext_1.destroy != NULL )
@@ -1799,8 +1818,10 @@ LIB_EXPORT rc_t CC PlacementIteratorNextAvailPos( const PlacementIterator *cself
 
             self->cur_ref_row_rel++;   /* increment row offset */
 
-            ALIGN_DBG( "ref row: %li-%li-%li",
+#if 0
+            ALIGN_DBG( "ref row: ref-start-row-id:%li - curr-rel-row:%li - of:%li",
                        self->obj->start_rowid, self->cur_ref_row_rel, self->last_ref_row_of_window_rel );
+#endif
 
             if ( self->cur_ref_row_rel > self->last_ref_row_of_window_rel )
                 rc = SILENT_RC( rcAlign, rcType, rcSelecting, rcRange, rcDone );
@@ -1831,12 +1852,14 @@ LIB_EXPORT rc_t CC PlacementIteratorNextAvailPos( const PlacementIterator *cself
             uint32_t count = VectorLength( &cself->ids );
             if ( count > 0 )
             {
-                PlacementRecord* r = VectorLast( &cself->ids );
+                PlacementRecord * r = VectorLast( &cself->ids );
                 rc = 0;
                 if ( pos != NULL ) { *pos = r->pos; }
                 if ( len != NULL ) { *len = r->len; }
 
-/*                ALIGN_DBG( "PlacementIteratorNextAvailPos( pos=%u, n=%u )", r->pos, count ); */
+#if 0
+                ALIGN_DBG( "PlacementIteratorNextAvailPos( id=%,li, pos=%,u, n=%,u )", r->id, r->pos, count );
+#endif
                 if ( !( cself->obj->circular ) && ( r->pos >= ( cself->ref_window_start + cself->ref_window_len ) ) )
                 {
                     /* the alignment !starts! after the end of the of the requested window! */
@@ -1844,7 +1867,9 @@ LIB_EXPORT rc_t CC PlacementIteratorNextAvailPos( const PlacementIterator *cself
                 }
             }
             else
+            {
                 ALIGN_DBG( "PlacementIteratorNextAvailPos( no placements )", 0 );
+            }
         }
     }
 

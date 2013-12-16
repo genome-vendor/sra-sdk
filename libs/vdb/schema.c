@@ -570,7 +570,7 @@ LIB_EXPORT rc_t CC VSchemaRelease ( const VSchema *self )
         {
         case krefWhack:
             return VSchemaWhack ( ( VSchema* ) self );
-        case krefLimit:
+        case krefNegative:
             return RC ( rcVDB, rcMgr, rcReleasing, rcRange, rcExcessive );
         }
     }
@@ -601,7 +601,7 @@ rc_t VSchemaSever ( const VSchema *self )
         {
         case krefWhack:
             return VSchemaWhack ( ( VSchema* ) self );
-        case krefLimit:
+        case krefNegative:
             return RC ( rcVDB, rcMgr, rcReleasing, rcRange, rcExcessive );
         }
     }

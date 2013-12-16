@@ -48,12 +48,13 @@ typedef struct num_gen_node
 } num_gen_node;
 typedef num_gen_node* p_num_gen_node;
 
+
 typedef struct num_gen
 {
     Vector nodes;
     uint32_t node_count;
     uint64_t curr_node;
-    uint32_t curr_node_sub_pos;
+    uint64_t curr_node_sub_pos;
 } num_gen;
 
 rc_t vdn_make( num_gen** generator );
@@ -69,5 +70,9 @@ bool vdn_check_range( num_gen* generator,
 bool vdn_start( num_gen* generator );
 bool vdn_next( num_gen* generator, uint64_t* value );
 bool vdn_range_defined( num_gen* generator );
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

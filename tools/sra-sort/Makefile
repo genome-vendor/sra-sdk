@@ -122,18 +122,8 @@ SRA_SORT_OBJ = \
 
 SRA_SORT_LIB = \
 	-lkapp \
-	$(UPDATE_SCHEMA_LIBS) \
-	-dalign-reader \
-	-dksrch \
-	-ssraschema \
-	-lwvdb \
-	-lwkdb \
-	-lvfs \
-	-lkrypto \
-	-lkfg \
-	-lkfs \
-	-lkproc \
-	-lklib \
+	-lncbi-wvdb \
+	-lxml2 \
 	-lm
 
 $(BINDIR)/sra-sort: $(SRA_SORT_OBJ)

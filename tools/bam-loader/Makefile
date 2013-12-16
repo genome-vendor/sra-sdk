@@ -33,14 +33,9 @@ INT_TOOLS = \
 EXT_TOOLS = \
 	bam-load
 
-TEST_TOOLS = \
-	wb-test-bam-loader    
-
 ALL_TOOLS = \
 	$(INT_TOOLS) \
 	$(EXT_TOOLS)
-
-RUNTESTS_OVERRIDE=1
 
 include $(TOP)/build/Makefile.env
 
@@ -58,10 +53,7 @@ endif
 $(ALL_TOOLS): vers-includes
 	@ $(MAKE_CMD) $(BINDIR)/$@
 
-$(TEST_TOOLS): makedirs
-	@ $(MAKE_CMD) $(TEST_BINDIR)/$@
-
-.PHONY: all std $(ALL_TOOLS) $(TEST_TOOLS)
+.PHONY: all std $(ALL_TOOLS)
 
 #-------------------------------------------------------------------------------
 # std
@@ -86,15 +78,6 @@ clean: stdclean
 .PHONY: clean
 
 #-------------------------------------------------------------------------------
-# tag
-#
-tag: \
-	$(addsuffix _tag,$(ALL_TOOLS))
-
-.PHONY: tag $(addsuffix _tag,$(ALL_TOOLS))
-
-
-#-------------------------------------------------------------------------------
 # bam-load.2.*
 #
 BAMLOAD_SRC = \
@@ -108,28 +91,11 @@ BAMLOAD_OBJ = \
 	$(addsuffix .$(OBJX),$(BAMLOAD_SRC))
 
 BAMLOAD_LIB = \
-	-lload \
 	-lkapp \
-	-lncbi-bam \
-	-lalign-writer \
-	-lwvdb \
-	-lwkdb \
-	-dwaxf \
-	-dwsraxf \
-	-dwvxf \
-	-lksrch \
-	-lvfs \
-	-lkrypto \
-	-lkfg \
-	-lkfs \
-	-lklib \
-	-lkq \
-	-lkproc \
-	-lm \
-	-lz
+	-lload \
+	-lncbi-wvdb \
+	-lxml2 \
+	-lm
 
 $(BINDIR)/bam-load: $(BAMLOAD_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(BAMLOAD_LIB)
-
-bam-load_tag:
-	@ $(TOP)/build/tag-module.sh $(MODULE) bam-load $(BAMLOAD_OBJ)

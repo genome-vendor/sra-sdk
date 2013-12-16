@@ -28,15 +28,17 @@ TOP ?= $(shell ../../build/abspath.sh ../..)
 MODULE = libs/kns
 
 INT_LIBS = \
-
-EXT_LIBS = \
+	libkns \
 	libkurl
 
 ALL_LIBS = \
-	$(INT_LIBS) \
-	$(EXT_LIBS)
+	$(INT_LIBS)
+
+TEST_TOOLS = \
 
 include $(TOP)/build/Makefile.env
+
+RWORKDIR = $(TOP)/$(MODULE)
 
 #-------------------------------------------------------------------------------
 # outer targets
@@ -49,8 +51,8 @@ all std: makedirs
 $(INT_LIBS): makedirs
 	@ $(MAKE_CMD) $(ILIBDIR)/$@
 
-$(EXT_LIBS): makedirs
-	@ $(MAKE_CMD) $(LIBDIR)/$@
+$(TEST_TOOLS): makedirs
+	@ $(MAKE_CMD) $(TEST_BINDIR)/$@
 
 .PHONY: all std $(ALL_LIBS)
 
@@ -58,8 +60,7 @@ $(EXT_LIBS): makedirs
 # std
 #
 $(TARGDIR)/std: \
-	$(addprefix $(ILIBDIR)/,$(INT_LIBS)) \
-	$(addprefix $(LIBDIR)/,$(EXT_LIBS))
+	$(addprefix $(ILIBDIR)/,$(INT_LIBS))
 
 .PHONY: $(TARGDIR)/std
 
@@ -71,12 +72,42 @@ clean: stdclean
 .PHONY: clean
 
 #-------------------------------------------------------------------------------
+# kns
+#
+$(ILIBDIR)/libkns: $(addprefix $(ILIBDIR)/libkns.,$(ILIBEXT))
+
+KNS_NO_HTTP_SRC = \
+	kns_manager \
+	stream \
+	stream-from-files \
+	stream-from-streams \
+	endpoint \
+	sysendpoint \
+	syssock \
+	sysstream \
+	sysmgr
+
+KNS_SRC = \
+	$(KNS_NO_HTTP_SRC) \
+	http
+
+KNS_OBJ = \
+	$(addsuffix .$(LOBX),$(KNS_SRC))
+
+KNS_LIB = \
+    -lkfs \
+	-dklib
+
+$(ILIBDIR)/libkns.$(LIBX): $(KNS_OBJ)
+	$(LD) --slib -o $@ $^ $(KNS_LIB)
+
+
+#-------------------------------------------------------------------------------
 # kurl
 #
-$(LIBDIR)/libkurl: $(addprefix $(LIBDIR)/libkurl.,$(LIBEXT))
+$(ILIBDIR)/libkurl: $(addprefix $(ILIBDIR)/libkurl.,$(ILIBEXT))
 
 KURL_SRC = \
-	kns_manager \
 	KCurlFile \
 	KCurlRequest \
 	url-fetcher \
@@ -87,12 +118,10 @@ KURL_OBJ = \
 	$(addsuffix .$(LOBX),$(KURL_SRC))
 
 KURL_LIB = \
-	-dklib \
+	-skns \
 	-dkfs \
+	-dklib \
 	-dz
 
-$(LIBDIR)/libkurl.$(SHLX): $(KURL_OBJ)
-	$(LD) --dlib --vers $(SRCDIR) -o $@ $^ $(KURL_LIB)
-
-$(LIBDIR)/libkurl.$(LIBX): $(KURL_OBJ)
-	$(LD) --slib --vers $(SRCDIR) -o $@ $^ $(KURL_LIB)
+$(ILIBDIR)/libkurl.$(LIBX): $(KURL_OBJ)
+	$(LD) --slib -o $@ $^ $(KURL_LIB)

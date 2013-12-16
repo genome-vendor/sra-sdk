@@ -96,22 +96,10 @@ CGLOAD_OBJ = \
 	$(addsuffix .$(OBJX),$(CGLOAD_SRC))
 
 CGLOAD_LIB = \
-	-lload \
 	-lkapp \
-	-lalign-writer \
-	-dwaxf \
-	-dwsraxf \
-	-dwvxf \
-	-lwvdb \
-	-lwkdb \
-	-lvfs \
-	-lkrypto \
-	-lksrch \
-	-lkfg \
-	-lkfs \
-	-lklib \
-	-lkq \
-	-lkproc \
+	-lload \
+	-lncbi-wvdb \
+	-lxml2 \
 	-lm
 
 $(BINDIR)/cg-load: $(CGLOAD_OBJ)

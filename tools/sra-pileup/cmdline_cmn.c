@@ -28,12 +28,15 @@
 
 #include <kapp/args.h>
 
+#include <vdb/report.h> /* ReportResetTable */
+
 #include <klib/rc.h>
 #include <klib/log.h>
 #include <klib/out.h>
 
 #include <sra/srapath.h>
 
+#include <vfs/manager.h>
 #include <vfs/path.h>
 #include <vfs/path-priv.h>
 
@@ -41,7 +44,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
-#include <assert.h>
 
 #include <os-native.h>
 #include <sysalloc.h>
@@ -190,9 +192,9 @@ void print_common_helplines( void )
 {
     HelpOptionLine ( ALIAS_REF, OPTION_REF, "name[:from-to]", ref_usage );
     HelpOptionLine ( ALIAS_OUTF, OPTION_OUTF, "output-file", outf_usage );
-    HelpOptionLine ( ALIAS_TABLE, OPTION_TABLE, "table", table_usage );
-    HelpOptionLine ( ALIAS_BZIP, OPTION_BZIP, "bzip", bzip_usage );
-    HelpOptionLine ( ALIAS_GZIP, OPTION_GZIP, "gzip", gzip_usage );
+    HelpOptionLine ( ALIAS_TABLE, OPTION_TABLE, "shortcut", table_usage );
+    HelpOptionLine ( ALIAS_BZIP, OPTION_BZIP, NULL, bzip_usage );
+    HelpOptionLine ( ALIAS_GZIP, OPTION_GZIP, NULL, gzip_usage );
 }
 
 
@@ -753,6 +755,12 @@ static rc_t split_vpath_into_path_and_readgroup( VPath *vpath, const char *argum
 static rc_t test_split_vpath_into_path_and_readgroup( VPath *vpath, const char *argument, char ** path, char ** attribute )
 {
     rc_t rc = 0;
+#if 1
+    if ( VPathFromUri ( vpath ) )
+        rc = split_vpath_into_path_and_readgroup ( vpath, argument, path, attribute );
+    else
+        rc = split_argument ( argument, path, attribute, '=' );
+#else
     VPUri_t uri_type = VPathGetUri_t( vpath );
     switch ( uri_type )
     {
@@ -776,6 +784,7 @@ static rc_t test_split_vpath_into_path_and_readgroup( VPath *vpath, const char *
             rc = split_vpath_into_path_and_readgroup( vpath, argument, path, attribute );
             break;
     }
+#endif
     return rc;
 }
 
@@ -792,15 +801,23 @@ static rc_t split_argument_into_path_and_readgroup( const char *argument, char *
     }
     else
     {
-        VPath * vpath;
-        rc_t rc = VPathMake( &vpath, argument );
+        VFSManager * mgr;
+        rc_t rc = VFSManagerMake ( & mgr );
+
         *path = NULL;
         *attribute = NULL;
 
         if ( rc == 0 )
         {
-            rc = test_split_vpath_into_path_and_readgroup( vpath, argument, path, attribute );
-            VPathRelease( vpath );
+            VPath * vpath;
+            rc = VFSManagerMakePath ( mgr, &vpath, argument );
+            if ( rc == 0 )
+            {
+                rc = test_split_vpath_into_path_and_readgroup( vpath, argument, path, attribute );
+                VPathRelease( vpath );
+            }
+
+            VFSManagerRelease ( mgr );
         }
     }
     return rc;
@@ -949,7 +966,11 @@ static rc_t prepare_db_table( prepare_ctx *ctx,
         rc = VDBManagerOpenTableRead ( vdb_mgr, &ctx->seq_tab, NULL, "%s", path );
         if ( rc != 0 )
         {
-            LOGERR( klogInt, rc, "VDBManagerOpenTableRead() failed" );
+            PLOGERR(klogInt, (klogInt, rc, "failed to open '$(path)'",
+                "path=%s", path));
+        }
+        else {
+            ReportResetTable(path, ctx->seq_tab);
         }
     }
     else
@@ -958,6 +979,9 @@ static rc_t prepare_db_table( prepare_ctx *ctx,
         if ( rc != 0 )
         {
             LOGERR( klogInt, rc, "VDatabaseOpenTableRead( SEQUENCE ) failed" );
+        }
+        else {
+            ReportResetDatabase(path, ctx->db);
         }
     }
     return rc;

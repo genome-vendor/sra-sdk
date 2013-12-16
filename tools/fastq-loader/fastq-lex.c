@@ -596,6 +596,7 @@ goto find_rule; \
 * ===========================================================================
 *
 */
+    #include <sysalloc.h>
     #include <ctype.h>
     
     #include <klib/rc.h>

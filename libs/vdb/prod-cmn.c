@@ -238,12 +238,13 @@ rc_t VSimpleProdSerial2Blob ( VSimpleProd *self, VBlob **rslt, int64_t id, uint3
             /* create a new, fluffy blob having rowmap and headers */
             VBlob *y;
 #if LAUNCH_PAGEMAP_THREAD
-	    if(self->curs->pagemap_thread == NULL){
-		VCursor *curs = (VCursor*) self->curs;
-		if(--curs->launch_cnt<=0){
-			VCursorLaunchPagemapThread(curs);
-		}
-	    }
+            if(self->curs->pagemap_thread == NULL){
+                VCursor *curs = (VCursor*) self->curs;
+                if(--curs->launch_cnt<=0){
+                    /* ignoring errors because we operate with or without thread */
+                    VCursorLaunchPagemapThread(curs);
+                }
+            }
 #endif
 		
             rc = VBlobCreateFromData ( & y, sblob -> start_id, sblob -> stop_id,
@@ -788,10 +789,9 @@ rc_t VFunctionProdCallPageFunc( VFunctionProd *self, VBlob **rslt, int64_t id,
 
 
         if(b->pm == NULL){
-		rc=PageMapProcessGetPagemap(&self->curs->pmpr,&b->pm);
-		if(rc != 0) return rc;
-	}
-
+            rc=PageMapProcessGetPagemap(&self->curs->pmpr,(PageMap**)(&b->pm));
+            if(rc != 0) return rc;
+        }
         
         if (prod->control) {
             param[i].variant = vrdControl;
@@ -1052,7 +1052,11 @@ rc_t VFunctionProdCallBlobFuncDecoding( VFunctionProd *self, VBlob *rslt,
          * are fixed row-length so we know the data size
          * we are relying on the blob deserialization code
          * to set the page map up correctly */
-        hdr = BlobHeadersCreateDummyHeader(0, 0, 0, BlobRowCount(sblob) * PageMapGetIdxRowInfo(sblob->pm, 0, 0));
+        if (sblob->pm == NULL) {
+            hdr = BlobHeadersCreateDummyHeader(0, 0, 0, (sblob->data.elem_bits * sblob->data.elem_count + 7) >> 3);
+        }
+        else
+            hdr = BlobHeadersCreateDummyHeader(0, 0, 0, BlobRowCount(sblob) * PageMapGetIdxRowInfo(sblob->pm, 0, 0));
         /* leave rslt->headers null so that the next
          * stage will also create a dummy header */
     }
@@ -1171,9 +1175,9 @@ rc_t VFunctionProdCallBlobNFunc( VFunctionProd *self, VBlob **rslt,
     {
 	int i;
 	for(i=0;i<argc;i++){
-		VBlob *vb=argv[i];
+		VBlob const *vb=argv[i];
 		if(vb->pm == NULL){
-			rc=PageMapProcessGetPagemap(&self->curs->pmpr,&vb->pm);
+			rc=PageMapProcessGetPagemap(&self->curs->pmpr,(PageMap**)(&vb->pm));
 			if(rc != 0) return rc;
 		}
 	}
@@ -2251,4 +2255,57 @@ rc_t VProductionReadBlob ( const VProduction *cself, VBlob **vblob, int64_t id, 
 #endif
 
 #endif /* PROD_CACHE */
+}
+
+/* IsStatic
+ *  trace all the way to a physical production
+ */
+rc_t VProductionIsStatic ( const VProduction *self, bool *is_static )
+{
+    rc_t rc;
+
+    assert ( is_static != NULL );
+    * is_static = false;
+
+    if ( self == NULL )
+        rc = RC ( rcVDB, rcColumn, rcAccessing, rcSelf, rcNull );
+    else
+    {
+        for ( rc = 0; self != NULL; )
+        {
+            switch ( self -> var )
+            {
+            case prodSimple:
+                self = ( ( const VSimpleProd*) self ) -> in;
+                break;
+            case prodFunc:
+            case prodScript:
+            {
+                const VFunctionProd *fp = ( const VFunctionProd* ) self;
+                uint32_t start = VectorStart ( & fp -> parms );
+                uint32_t end = VectorLength ( & fp -> parms );
+                for ( end += start; start < end; ++ start )
+                {
+                    self = ( const VProduction* ) VectorGet ( & fp -> parms, start );
+                    if ( self != NULL )
+                    {
+                        rc = VProductionIsStatic ( self, is_static );
+                        if ( rc != 0 || * is_static )
+                            break;
+                    }
+                }
+                return rc;
+            }
+            case prodPhysical:
+                return VPhysicalIsStatic ( ( ( const VPhysicalProd* ) self ) -> phys, is_static );
+            case prodColumn:
+                self = NULL;
+                break;
+            default:
+                return RC ( rcVDB, rcProduction, rcReading, rcType, rcUnknown );
+            }
+        }
+    }
+
+    return rc;
 }

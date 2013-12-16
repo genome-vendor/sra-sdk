@@ -95,6 +95,7 @@ KAR_OBJ = \
 KAR_LIB = \
 	-skapp \
 	-lvfs \
+	-lkurl \
 	-lkfg \
 	-lkrypto \
 	-lkfs \
@@ -120,15 +121,8 @@ SRA_KAR_OBJ = \
 
 SRA_KAR_LIB = \
 	-skapp \
-	-lsradb \
-	-lvdb \
-	-lkdb \
-	-lvfs \
-	-lkfg \
-	-lkrypto \
-	-lkfs \
-	-lkproc \
-	-lklib \
+	-lncbi-vdb \
+	-lxml2 \
 	-lm
 
 $(BINDIR)/sra-kar: $(SRA_KAR_OBJ)

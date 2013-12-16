@@ -86,15 +86,6 @@ clean: stdclean
 .PHONY: clean
 
 #-------------------------------------------------------------------------------
-# tag
-#
-tag: \
-	$(addsuffix _tag,$(ALL_TOOLS))
-
-.PHONY: tag $(addsuffix _tag,$(ALL_TOOLS))
-
-
-#-------------------------------------------------------------------------------
 # rcexplain - explain a return code observed in debugger
 #
 RCEXPLAIN_SRC = \
@@ -106,8 +97,9 @@ RCEXPLAIN_OBJ = \
 RCEXPLAIN_LIB = \
 	-skapp \
 	-svfs \
-	-skfg \
+	-skurl \
 	-skrypto \
+	-skfg \
 	-skfs \
 	-sksproc \
 	-sklib
@@ -126,15 +118,10 @@ KDBMETA_OBJ = \
 	$(addsuffix .$(OBJX),$(KDBMETA_SRC))
 
 KDBMETA_LIB = \
-	-ssrapath \
 	-skapp \
-	-lwkdb \
-	-lvfs \
-	-lkfg \
-	-lkrypto \
-	-lkfs \
-	-lkproc \
-	-lklib
+	-lncbi-wvdb \
+	-lxml2 \
+	-lm
 
 $(BINDIR)/kdbmeta: $(KDBMETA_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(KDBMETA_LIB)
@@ -151,16 +138,9 @@ VDB_LOCK_OBJ = \
 	$(addsuffix .$(OBJX),$(VDB_LOCK_SRC))
 
 VDB_LOCK_LIB = \
-	-ssrapath \
 	-skapp \
-	-lwvdb \
-	-lwkdb \
-	-lvfs \
-	-lkrypto \
-	-lkfg \
-	-lkfs \
-	-lkproc \
-	-lklib \
+	-lncbi-wvdb \
+	-lxml2 \
 	-lm
 
 $(BINDIR)/vdb-lock: $(VDB_LOCK_OBJ)
@@ -178,16 +158,9 @@ VDB_UNLOCK_OBJ = \
 	$(addsuffix .$(OBJX),$(VDB_UNLOCK_SRC))
 
 VDB_UNLOCK_LIB = \
-	-ssrapath \
 	-skapp \
-	-lwvdb \
-	-lwkdb \
-	-lvfs \
-	-lkrypto \
-	-lkfg \
-	-lkfs \
-	-lkproc \
-	-lklib \
+	-lncbi-wvdb \
+	-lxml2 \
 	-lm
 
 $(BINDIR)/vdb-unlock: $(VDB_UNLOCK_OBJ)
@@ -204,19 +177,9 @@ T_OBJ = \
 	$(addsuffix .$(OBJX),$(T_SRC))
 
 T_LIB = \
-	-dalign-reader \
-	$(READONLY_SCHEMA_LIBS) \
-	-dksrch \
-	-lsradb \
-	-lvdb \
-	-lkdb \
 	-lkapp \
-	-lvfs \
-	-lkrypto \
-	-lkfg \
-	-lkfs \
-	-lkproc \
-	-lklib \
+	-lncbi-vdb \
+	-lxml2 \
 	-lm
 
 $(BINDIR)/test-sra: $(T_OBJ)
@@ -235,8 +198,9 @@ VDB_PASSWD_OBJ = \
 VDB_PASSWD_LIB = \
 	-skapp \
 	-lvfs \
-	-lkfg \
+	-lkurl \
 	-lkrypto \
+	-lkfg \
 	-lkfs \
 	-sksproc \
 	-lklib

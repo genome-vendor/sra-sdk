@@ -500,7 +500,7 @@ static rc_t parse_and_add_matepair_dist( Vector * dist_vector, const char * s )
 }
 
 
-bool filter_by_matepair_dist( samdump_opts * opts, int32_t tlen )
+bool filter_by_matepair_dist( const samdump_opts * opts, int32_t tlen )
 {
     bool res = false;
 
@@ -665,7 +665,7 @@ static rc_t gather_flag_options( Args * args, samdump_opts * opts )
 
         /* do some mode logic ... */
         if ( !dump_cg_mappings &&
-             ( opts->dump_cga_tools_mode || opts->dump_cg_evidence || opts->dump_cg_ev_dnb ) )
+             ( opts->dump_cga_tools_mode || opts->dump_cg_evidence || opts->dump_cg_ev_dnb || opts->dump_cg_sam ) )
         {
             opts->dump_primary_alignments = false;
             opts->dump_secondary_alignments = false;
@@ -713,7 +713,7 @@ static rc_t gather_flag_options( Args * args, samdump_opts * opts )
 
         /* do we have to transform cigar into cg-style ( has B/N ) */
         /* do we have to transform cg-data(length of read/patterns in cigar) into valid SAM (cigar/READ/QUALITY) */
-        rc = gather_2_bool( args, OPT_CIGAR_CG, OPT_CIGAR_CG, &cigar_cg, &cigar_cg_merge );
+        rc = gather_2_bool( args, OPT_CIGAR_CG, OPT_CIGAR_CG_M, &cigar_cg, &cigar_cg_merge );
         if ( rc != 0 ) return rc;
         if ( cigar_cg )
             opts->cigar_treatment = ct_cg_style;
@@ -777,9 +777,26 @@ static rc_t gather_flag_options( Args * args, samdump_opts * opts )
     rc = get_bool_option( args, OPT_CG_NAMES, &opts->print_cg_names );
     if ( rc != 0 ) return rc;
 
+    /* do we use a mate-cache */
+    rc = get_bool_option( args, OPT_NO_MATE_CACHE, &opts->use_mate_cache );
+    if ( rc != 0 ) return rc;
+    opts->use_mate_cache = !opts->use_mate_cache;
+
+    /* do we use a mate-cache */
+    rc = get_bool_option( args, OPT_LEGACY, &opts->force_legacy );
+    if ( rc != 0 ) return rc;
+
+    rc = get_bool_option( args, OPT_NEW, &opts->force_new );
+    if ( rc != 0 ) return rc;
+
+    if ( opts->force_new && opts->force_legacy )
+        opts->force_new = false;
+
     /* do we have to merge cigar ( and read/qual ) for cg-operations in cigar */
     rc = get_bool_option( args, OPT_CIGAR_CG_M, &opts->merge_cg_cigar );
+    if ( rc != 0 ) return rc;
 
+    rc = get_bool_option( args, OPT_RNA_SPLICE, &opts->rna_splicing );
     return rc;
 }
 
@@ -1111,7 +1128,7 @@ static rc_t CC report_reference_cb( const char * name, Vector * ranges, void *da
 }
 
 
-void report_options( samdump_opts * opts )
+void report_options( const samdump_opts * opts )
 {
     rc_t rc;
     uint32_t len;
@@ -1176,7 +1193,7 @@ void report_options( samdump_opts * opts )
 
     KOutMsg( "number of regions     : %u\n",  opts->region_count );
     if ( opts->region_count > 0 )
-        foreach_reference( &opts->regions, report_reference_cb, NULL );
+        foreach_reference( (BSTree *)&opts->regions, report_reference_cb, NULL );
 
     if ( opts->qname_prefix == NULL )
         KOutMsg( "qname-prefix          : NONE\n" );
@@ -1244,8 +1261,11 @@ void report_options( samdump_opts * opts )
     KOutMsg( "outputbuffer-size     : %u\n",  opts->output_buffer_size );
     KOutMsg( "cursor-cache-size     : %u\n",  opts->cursor_cache_size );
 
+    KOutMsg( "use mate-cache        : %s\n",  opts->use_mate_cache ? "YES" : "NO" );
+    KOutMsg( "force legacy code     : %s\n",  opts->force_legacy ? "YES" : "NO" );
     KOutMsg( "use min-mapq          : %s\n",  opts->use_min_mapq ? "YES" : "NO" );
     KOutMsg( "min-mapq              : %i\n",  opts->min_mapq );
+    KOutMsg( "rna-splicing          : %s\n",  opts->rna_splicing ? "YES" : "NO" );
 }
 
 
@@ -1286,13 +1306,13 @@ rc_t gather_options( Args * args, samdump_opts * opts )
 }
 
 
-bool is_this_alignment_requested( samdump_opts * opts, const char *refname, uint32_t refname_len,
+bool is_this_alignment_requested( const samdump_opts * opts, const char *refname, uint32_t refname_len,
                                   uint64_t start, uint64_t end )
 {
     bool res = false;
     if ( opts != NULL )
     {
-        reference_region *rr = find_reference_region_len( &opts->regions, refname, refname_len );
+        reference_region *rr = find_reference_region_len( ( BSTree * )&opts->regions, refname, refname_len );
         if ( rr != NULL )
         {
             Vector *v = &(rr->ranges);
@@ -1311,16 +1331,16 @@ bool is_this_alignment_requested( samdump_opts * opts, const char *refname, uint
 }
 
 
-bool test_limit_reached( samdump_opts * opts )
+bool test_limit_reached( const samdump_opts * opts, uint64_t rows_so_far )
 {
     bool res = false;
     if ( opts->test_rows > 0 )
-        res = ( opts->rows_so_far >= opts->test_rows );
+        res = ( rows_so_far >= opts->test_rows );
     return res;
 }
 
 
-rc_t dump_name( samdump_opts * opts, int64_t seq_spot_id,
+rc_t dump_name( const samdump_opts * opts, int64_t seq_spot_id,
                 const char * spot_group, uint32_t spot_group_len )
 {
     rc_t rc;
@@ -1328,9 +1348,9 @@ rc_t dump_name( samdump_opts * opts, int64_t seq_spot_id,
     if ( opts->print_cg_names )
     {
         if ( spot_group != NULL && spot_group_len != 0 )
-            rc = KOutMsg( "%.*s_1:%d", spot_group_len, spot_group, seq_spot_id );
+            rc = KOutMsg( "%.*s-1:%lu", spot_group_len, spot_group, seq_spot_id );
         else
-            rc = KOutMsg( "%d", seq_spot_id );
+            rc = KOutMsg( "%lu", seq_spot_id );
     }
     else
     {
@@ -1338,26 +1358,26 @@ rc_t dump_name( samdump_opts * opts, int64_t seq_spot_id,
         {
             /* we do have to print a prefix */
             if ( opts->print_spot_group_in_name && spot_group != NULL && spot_group_len > 0 )
-                rc = KOutMsg( "%s.%d.%.*s", opts->qname_prefix, seq_spot_id, spot_group_len, spot_group );
+                rc = KOutMsg( "%s.%lu.%.*s", opts->qname_prefix, seq_spot_id, spot_group_len, spot_group );
             else
             /* we do NOT have to append the spot-group */
-                rc = KOutMsg( "%s.%d", opts->qname_prefix, seq_spot_id );
+                rc = KOutMsg( "%s.%lu", opts->qname_prefix, seq_spot_id );
         }
         else
         {
             /* we do NOT have to print a prefix */
             if ( opts->print_spot_group_in_name && spot_group != NULL && spot_group_len > 0 )
-                rc = KOutMsg( "%d.%.*s", seq_spot_id, spot_group_len, spot_group );
+                rc = KOutMsg( "%lu.%.*s", seq_spot_id, spot_group_len, spot_group );
             else
             /* we do NOT have to append the spot-group */
-                rc = KOutMsg( "%d", seq_spot_id );
+                rc = KOutMsg( "%lu", seq_spot_id );
         }
     }
     return rc;
 }
 
 
-rc_t dump_name_legacy( samdump_opts * opts, const char * name, size_t name_len,
+rc_t dump_name_legacy( const samdump_opts * opts, const char * name, size_t name_len,
                        const char * spot_group, uint32_t spot_group_len )
 {
     rc_t rc;
@@ -1384,7 +1404,7 @@ rc_t dump_name_legacy( samdump_opts * opts, const char * name, size_t name_len,
 }
 
 
-rc_t dump_quality( samdump_opts * opts, char const *quality, uint32_t qual_len, bool reverse )
+rc_t dump_quality( const samdump_opts * opts, char const *quality, uint32_t qual_len, bool reverse )
 {
     rc_t rc = 0;
     bool quantize = ( opts->qual_quant != NULL );
@@ -1434,7 +1454,7 @@ rc_t dump_quality( samdump_opts * opts, char const *quality, uint32_t qual_len, 
 }
 
 
-rc_t dump_quality_33( samdump_opts * opts, char const *quality, uint32_t qual_len, bool reverse )
+rc_t dump_quality_33( const samdump_opts * opts, char const *quality, uint32_t qual_len, bool reverse )
 {
     rc_t rc = 0;
     bool quantize = ( opts->qual_quant != NULL );
@@ -1478,3 +1498,5 @@ rc_t dump_quality_33( samdump_opts * opts, char const *quality, uint32_t qual_le
     }
     return rc;
 }
+
+

@@ -27,11 +27,13 @@
 #include <klib/container.h>
 #include <klib/log.h>
 #include <klib/out.h>
+#include <klib/text.h>
 #include <klib/status.h>
 #include <klib/rc.h>
 #include <klib/vector.h>
 #include <klib/printf.h>
 #include <klib/data-buffer.h>
+#include <vfs/manager.h>
 #include <vfs/path.h>
 #include <vfs/path-priv.h>
 #include <kfs/file.h>
@@ -623,7 +625,7 @@ static void Cache_Unpack( uint64_t val, int64_t mate_id, SCurs const *curs, SCol
         ReferenceObj_Name( curs->cache->ref, &cols[ alg_MATE_REF_NAME ].base.str );
     }
 
-    cols[ alg_MATE_REF_NAME ].len = strlen( cols[ alg_MATE_REF_NAME ].base.str );
+    cols[ alg_MATE_REF_NAME ].len = string_size( cols[ alg_MATE_REF_NAME ].base.str );
 
     if ( ref_proj == 0 )
     {
@@ -993,7 +995,7 @@ static rc_t CC DumpReadGroupsScan( STable const *tbl )
                         else
                         {
                             last_len = cols[ 0 ].len;
-                            strncpy( node->name, cols[ 0 ].base.str, last_len );
+                            string_copy( node->name, ( sizeof node->name ) - 1, cols[ 0 ].base.str, last_len );
                             node->name[ last_len ] = '\0';
                             rc = BSTreeInsertUnique( &tree, &node->node, NULL, ReadGroup_sort );
                             if ( GetRCState( rc ) == rcExists )
@@ -1422,7 +1424,7 @@ rc_t DumpUnalignedSAM( const SCol cols[], uint32_t flags, INSDC_coord_zero readS
         {
             rc = BufferedWriter( NULL, "\tRG:Z:", 6, NULL );
             if ( rc == 0 )
-                rc = BufferedWriter( NULL, readGroup, strlen( readGroup ), NULL );
+                rc = BufferedWriter( NULL, readGroup, string_size( readGroup ), NULL );
         }
         else if ( cols[ seq_SPOT_GROUP ].len > 0 )
         {
@@ -1614,7 +1616,7 @@ rc_t DumpAlignedSAM( SAM_dump_ctx_t *const ctx,
             {
                 rc = BufferedWriter( NULL, "\tRG:Z:", 6, NULL );
                 if ( rc == 0 )
-                    rc = BufferedWriter( NULL, readGroup, strlen( readGroup ), NULL );
+                    rc = BufferedWriter( NULL, readGroup, string_size( readGroup ), NULL );
             }
             else if ( cols[ alg_SPOT_GROUP ].len > 0 )
             {
@@ -3050,7 +3052,7 @@ static rc_t ForEachAlignedRegion( SAM_dump_ctx_t *const ctx, enum e_IDS_opts con
                 
                 for ( include = false, r = 0; r < param->region_qty; ++r )
                 {
-                    if ( sz == strlen( param->region[ r ].name ) &&
+                    if ( sz == string_size( param->region[ r ].name ) &&
                          memcmp( param->region[ r ].name, refname, sz ) == 0 )
                     {
                         include = true;
@@ -3758,13 +3760,13 @@ rc_t ResolvePath( char const *accession, char const ** path )
                 if ( rc == 0 )
                     break;
             }
-            if ( strlen( accession ) >= sizeof( tblpath ) )
+            if ( string_size( accession ) >= sizeof( tblpath ) )
             {
                 rc = RC( rcExe, rcPath, rcResolving, rcBuffer, rcInsufficient );
             }
             else
             {
-                strcpy( tblpath, accession );
+                string_copy( tblpath, ( sizeof tblpath ) - 1, accession, string_size( accession ) );
                 rc = 0;
             }
         } while( false );
@@ -3773,7 +3775,7 @@ rc_t ResolvePath( char const *accession, char const ** path )
     if ( accession != NULL && path != NULL )
     {
         *path = tblpath;
-        strcpy( tblpath, accession );
+        string_copy( tblpath, ( sizeof tblpath ) - 1, accession, string_size( accession ) );
     }
 #endif
 
@@ -3785,7 +3787,7 @@ rc_t ResolvePath( char const *accession, char const ** path )
 static rc_t ProcessPath( VDBManager const *mgr, char const Path[] )
 {
 #if 0
-    unsigned pathlen = strlen( Path );
+    unsigned pathlen = string_size( Path );
     char *readGroup = NULL;
     char *path = NULL;
     unsigned i;
@@ -3869,28 +3871,26 @@ static rc_t ProcessPath( VDBManager const *mgr, char const Path[] )
 
     char * pc;
     rc_t rc = 0;
+    size_t pathlen = string_size ( Path );
 
-    pc = strchr (Path, ':');
+    /* look for scheme */
+    pc = string_chr ( Path, pathlen, ':' );
     if (pc == NULL)
     {
-        unsigned pathlen;
         char *readGroup;
         char *path;
-        unsigned i;
+        size_t i;
 
+        /* no scheme found - must be simple fs path */
     old:
-        pathlen = strlen( Path );
         readGroup = NULL;
         path = NULL;
     
-        /* strip trailing path seperators */
-        for ( i = pathlen; i > 0; )
+        /* strip trailing path separators */
+        for ( i = pathlen; i > 0; -- pathlen )
         {
             int const ch = Path[ --i ];
-        
-            if ( ch == '/' || ch == '\\' )
-                --pathlen;
-            else
+            if ( ch != '/' && ch != '\\' )
                 break;
         }
 
@@ -3901,8 +3901,8 @@ static rc_t ProcessPath( VDBManager const *mgr, char const Path[] )
         
             if ( ch == '=' )
             {
-                unsigned const pos = i + 1;
-                unsigned const len = pathlen - pos;
+                size_t const pos = i + 1;
+                size_t const len = pathlen - pos;
             
                 pathlen = i;
             
@@ -3962,100 +3962,80 @@ static rc_t ProcessPath( VDBManager const *mgr, char const Path[] )
     }
     else
     {
-        VPath * vpath;
-        char * basename;
-        size_t zz;
-        char buffer [8193];
-        char readgroup_ [257];
-        char * readgroup;
-
-        rc = VPathMake (&vpath, Path);
-        if (rc)
-            ; /* LOGERR */
-        else
+        VFSManager * vfs;
+        rc = VFSManagerMake ( & vfs );
+        if ( rc == 0 )
         {
-            VPUri_t uri_t;
-            switch (uri_t = VPathGetUri_t (vpath))
-            {
-            default:
-            case vpuri_invalid:
-                rc = RC (rcExe, rcParam, rcAccessing, rcPath, rcInvalid);
-                break;
-            case vpuri_not_supported:
-                rc = RC (rcExe, rcParam, rcAccessing, rcPath, rcUnsupported);
-                break;
-            case vpuri_none:
-                goto old;
+            VPath * vpath;
+            char * basename;
+            size_t zz;
+            char buffer [8193];
+            char readgroup_ [257];
+            char * readgroup;
 
-            case vpuri_ncbi_vfs:
-            case vpuri_file:
-            case vpuri_ncbi_acc:
-            case vpuri_http:
+            rc = VFSManagerMakePath (vfs, &vpath, Path);
+            VFSManagerRelease ( vfs );
+            if ( rc == 0 )
+            {
+                char * ext;
+
                 rc = VPathReadPath (vpath, buffer, sizeof buffer - 1, &zz);
-                if (rc)
-                    ;
-                else
+                if ( rc == 0 )
                 {
                 loop:
-                    basename = strrchr (buffer, '/');
-                    if (basename)
+                    basename = string_rchr (buffer, zz, '/');
+                    if ( basename == NULL )
+                        basename = buffer;
+                    else
                     {
                         if (basename[1] == '\0')
                         {
                             basename[0] = '\0';
                             goto loop;
                         }
-                        else
-                            ++basename;
+                        ++ basename;
+                        zz -= basename - buffer;
                     }
-                    else
-                        basename = buffer;
 
+                    /* cut off [.lite].[c]sra[.nenc||.ncbi_enc] if any */
+                    ext = string_rchr( basename, zz, '.' );
+                    if ( ext != NULL )
                     {
-                        char * ext;
+                        if ( strcasecmp( ext, ".nenc" ) == 0 || strcasecmp( ext, ".ncbi_enc" ) == 0 )
+                        {
+                            zz -= ext - basename;
+                            *ext = '\0';
+                            ext = string_rchr( basename, zz, '.' );
+                        }
 
-                        /* cut off [.lite].[c]sra[.nenc||.ncbi_enc] if any */
-                        ext = strrchr( basename, '.' );
                         if ( ext != NULL )
                         {
-                            if ( strcasecmp( ext, ".nenc" ) == 0 || strcasecmp( ext, ",ncbi_enc" ) == 0 )
+                            if ( strcasecmp( ext, ".sra" ) == 0 || strcasecmp( ext, ".csra" ) == 0 )
                             {
+                                zz -= ext - basename;
                                 *ext = '\0';
-                                ext = strrchr( basename, '.' );
-                            }
-                            if ( ext != NULL )
-                            {
-                                if ( strcasecmp( ext, ".sra" ) == 0 || strcasecmp( ext, ".csra" ) == 0 )
-                                {
+                                ext = string_rchr( basename, zz, '.' );
+                                if ( ext != NULL && strcasecmp( ext, ".lite" ) == 0 )
                                     *ext = '\0';
-                                    ext = strrchr( basename, '.' );
-                                    if ( ext != NULL && strcasecmp( ext, ".lite" ) == 0 )
-                                        *ext = '\0';
-                                }
                             }
                         }
                     }
-
+                
                     rc = VPathOption (vpath, vpopt_readgroup, readgroup_, 
                                       sizeof readgroup_ - 1, &zz);
-                    if (rc)
-                    {
-                        if (GetRCState (rc) == rcNotFound)
-                        {
-                            rc = 0;
-                            readgroup = NULL;
-                        }
-                    }
-                    else
+                    if ( rc == 0 )
                         readgroup = readgroup_;
+                    else if ( GetRCState ( rc ) == rcNotFound )
+                    {
+                        rc = 0;
+                        readgroup = NULL;
+                    }
 
 
-                    if (rc)
-                        ;
-                    else
+                    if ( rc == 0 )
                     {
                         VDatabase const *db;
-
+                        
                         rc = VDBManagerOpenDBRead( mgr, &db, NULL, Path );
                         if ( rc == 0 )
                         {
@@ -4066,9 +4046,9 @@ static rc_t ProcessPath( VDBManager const *mgr, char const Path[] )
                             rc = ProcessTable( mgr, Path, basename, readgroup );
                     }
                 }
-                break;
+
+                VPathRelease (vpath);
             }
-            VPathRelease (vpath);
         }
     }
     return rc;
@@ -4212,7 +4192,8 @@ OptDef DumpArgs[] =
     { "CG-ev-dnb"  , NULL, NULL, CG_ev_dnb  , 0, false, false },            /* CG-ev-dnb */
     { "CG-mappings", NULL, NULL, CG_mappings, 0, false, false },            /* CG-mappings */
     { "CG-SAM", NULL, NULL, CG_SAM, 0, false, false },                      /* CG-SAM */
-    { "CG-names", NULL, NULL, CG_names, 0, false, false }                   /* CG-names */
+    { "CG-names", NULL, NULL, CG_names, 0, false, false },                  /* CG-names */
+    { "legacy", NULL, NULL, NULL, 0, false, false }
 };
 
 
@@ -4392,7 +4373,7 @@ static rc_t GetComments( Args const *const args, struct params_s *const parms, u
             rc_t const rc = ArgsOptionValue( args, DumpArgs[ earg_comment ].name, i, &parms->comments[ i ] );
             if ( rc != 0 )
             {
-                free( parms->comments );
+                free( ( void * )parms->comments );
                 parms->comments = NULL;
                 return rc;
             }
@@ -4532,7 +4513,7 @@ static rc_t GetRegion( Args const *const args, struct params_s *const parms, uns
             if ( sep != NULL )
                 namelen = sep - valstr;
             else
-                namelen = strlen( valstr );
+                namelen = string_size( valstr );
             
             if ( namelen >= sizeof( r.name ) )
                 return RC( rcExe, rcArgv, rcProcessing, rcParam, rcTooLong );

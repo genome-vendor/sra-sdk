@@ -359,6 +359,54 @@ static KSRAFileAlignment get_alignment (const char * str)
     }
     return sraAlignInvalid;
 }
+
+static
+int CC sort_cmp (const void ** l, const void ** r, void * data)
+{
+    KDirectory * d;
+    uint64_t lz, rz;
+    rc_t rc;
+
+    d = data;
+/*     lz = l; */
+/*     rz = r; */
+
+    rc = KDirectoryFileSize (data, &lz, *l);
+    if (rc == 0)
+    {
+        rc = KDirectoryFileSize (data, &rz, *r);
+        if (rc == 0)
+        {
+            int64_t zdiff;
+
+            zdiff = lz - rz;
+            if (zdiff != 0)
+                return (zdiff < 0) ? -1 : 1;
+            else
+            {
+                size_t lsz = string_size (*l);
+                size_t rsz = string_size (*r);
+
+                return string_cmp (*l, lsz, *r, rsz, lsz+1);
+            }
+        }
+    }
+    return 0; /* dunno just leave it... */
+}
+
+
+static
+rc_t CC sort_size_then_rel_path (const KDirectory * d, struct Vector * v)
+{
+    VectorReorder (v, sort_cmp, (void*)d);
+
+    return 0;
+}
+
+
+
+
+
 static
 rc_t open_dir_as_archive (const char * path, const KFile ** file)
 {
@@ -388,11 +436,13 @@ rc_t open_dir_as_archive (const char * path, const KFile ** file)
         PLOGERR (klogFatal, (klogFatal, rc, "Parameter [$(P)] must be a directory", PLOG_S(P), path));
         return rc;
     case kptDir:
+/*         KOutMsg ("%s: opening dir\n",__func__); */
         rc = KDirectoryVOpenDirRead (kdir, &d, false, path, NULL);
     }
     if (rc == 0)
     {
-        rc = KDirectoryOpenTocFileRead ( d, file, alignment, pnamesFilter, NULL, NULL );
+/*         KOutMsg ("%s: dir to archive\n",__func__); */
+        rc = KDirectoryOpenTocFileRead (d, file, alignment, pnamesFilter, NULL, sort_size_then_rel_path );
         KDirectoryRelease (d);
     }
     return rc;
@@ -652,9 +702,12 @@ rc_t step_through_dir (const KDirectory * dir, const char * path,
                     char * new_path;
                     size_t namelen;
                     size_t new_pathlen;
+                    size_t rsize;
+
                     namelen = strlen (name);
                     new_pathlen = pathlen + 1 + namelen;
-                    new_path = malloc (new_pathlen + 1);
+                    rsize = new_pathlen + 1;
+                    new_path = malloc (rsize);
                     if (new_path != NULL)
                     {
                         char * recur_path;
@@ -667,15 +720,14 @@ rc_t step_through_dir (const KDirectory * dir, const char * path,
                         {
                             memcpy (new_path, path, pathlen);
                             new_path[pathlen] = '/';
-                            memcpy (new_path + pathlen + 1, name, namelen);
-                            new_path[pathlen+1+namelen] = '\0';
+                            memcpy (&new_path[pathlen+1], name, namelen);
+                            new_path[new_pathlen] = '\0';
                         }
-                        recur_path = malloc (pathlen + 1 + namelen + 1);
+                        recur_path = malloc (rsize);
                         if (recur_path != NULL)
                         {
                             rc = KDirectoryVResolvePath (dir, false, recur_path,
-                                                         pathlen + 1 + namelen + 1,
-                                                         new_path, NULL);
+                                                         rsize, new_path, NULL);
 
                             if (rc == 0)
                             {

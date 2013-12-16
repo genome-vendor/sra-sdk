@@ -24,7 +24,7 @@
 
 default: std
 
-TOP ?= $(abspath ../..)
+TOP ?= $(shell ../../build/abspath.sh ../..)
 MODULE = tools/fastq-loader
 
 INT_LIBS = \
@@ -40,9 +40,6 @@ EXT_TOOLS = \
 ALL_TOOLS = \
 	$(INT_TOOLS) \
 	$(EXT_TOOLS)    
-
-TEST_TOOLS = \
-	wb-test-fastq
 
 include $(TOP)/build/Makefile.env
 
@@ -62,15 +59,7 @@ ALL_TOOLS = \
 	$(INT_TOOLS) \
 	$(EXT_TOOLS)
 
-$(TEST_TOOLS): std 
-	@ $(MAKE_CMD) $(TEST_BINDIR)/$@
-
-valgrind: $(TEST_TOOLS)
-	@echo ++++++++++++++++++++++++++++++++++++++++++++++++++++++
-	@echo Run $(TEST_BINDIR)/$(TEST_TOOLS)
-	valgrind $(RUN_REMOTELY) $(TEST_BINDIR)/$(TEST_TOOLS)
-
-.PHONY: all std $(ALL_LIBS) $(TEST_TOOLS) valgrind
+.PHONY: all std $(ALL_LIBS) 
 
 #-------------------------------------------------------------------------------
 # std
@@ -98,7 +87,6 @@ INTERM_SRC = \
 	$(SRCDIR)/fastq-tokens.h 
 
 clean: stdclean
-	@ rm -f $(addsuffix *,$(addprefix $(TEST_BINDIR)/,$(TEST_TOOLS)))
 
 .PHONY: clean
 
@@ -129,13 +117,13 @@ FASTQ_OBJ = \
 	$(addsuffix .$(LOBX),$(FASTQ_SRC))
 
 FASTQ_LIB = \
-	-lkfs \
-	-lklib \
     -lload \
-    -lloader
+    -lloader \
+	-dkfs \
+	-dklib \
 
 ifneq (win,$(OS))
-    FASTQ_LIB += -lkq
+    FASTQ_LIB += -dkq
 endif
 
 $(ILIBDIR)/libfastqloader.$(SHLX): $(INTERM_SRC) $(FASTQ_OBJ)
@@ -144,76 +132,25 @@ $(ILIBDIR)/libfastqloader.$(SHLX): $(INTERM_SRC) $(FASTQ_OBJ)
 $(ILIBDIR)/libfastqloader.$(LIBX): $(INTERM_SRC) $(FASTQ_OBJ)
 	$(LD) --slib -o $@ $^ $(FASTQ_LIB)
 
-libfastqloader_tag:
-	@ $(TOP)/build/tag-module.sh $(MODULE) libfastqloader $(FASTQ_OBJ)
-
 #------------------------------------------------------------------------------
 # fastq-load.3
 #
 FASTQ_LOAD_SRC = \
 	fastq-loader \
-    loader-imp
+    loader-imp \
+	$(FASTQ_SRC)
 
 FASTQ_LOAD_OBJ = \
 	$(addsuffix .$(OBJX),$(FASTQ_LOAD_SRC))
 
-ifneq (win, $(OS))
-    QLIB = -skq
-endif
 FASTQ_LOADER_LIB = \
-    -dwvxf \
-	-dwaxf \
-	-dwsraxf \
-	-sfastqloader \
-	-sloader \
-	-salign-writer \
-	-skapp \
-    -sload \
-    -svfs \
-    -swvdb \
-    -swkdb \
-    -skfg \
-    -skrypto \
-	-lksrch \
-	-lz    \
-    $(QLIB) \
-    -skproc \
-    -skfs \
-	-sklib \
-    -lm
-
+	-lkapp \
+    -lloader \
+    -lload \
+	-lncbi-wvdb \
+	-lxml2 \
+	-lm
 
 $(BINDIR)/latf-load: $(FASTQ_LOAD_OBJ)
 	$(LD) --exe --vers $(SRCDIR)/latf-load.vers -o $@ $^ $(FASTQ_LOADER_LIB)
 
-#-------------------------------------------------------------------------------
-# white-box test
-#
-FASTQ_TEST_SRC = \
-	wb-test-fastq
-
-FASTQ_TEST_OBJ = \
-	$(addsuffix .$(OBJX),$(FASTQ_TEST_SRC))
-
-ifneq (win, $(OS))
-    QLIB = -skq
-endif
-FASTQ_TEST_LIB = \
-	-sfastqloader \
-	-sloader \
-	-salign-writer \
-	-sktst \
-	-skapp \
-    -sload \
-    -swvdb \
-    -swkdb \
-    -svfs \
-    -skfg \
-    -skrypto \
-    $(QLIB) \
-    -skproc \
-    -skfs \
-	-sklib
-
-$(TEST_BINDIR)/wb-test-fastq: $(FASTQ_TEST_OBJ)
-	$(LP) --exe -o $@ $^ $(FASTQ_TEST_LIB)

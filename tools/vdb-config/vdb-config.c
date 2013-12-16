@@ -36,23 +36,27 @@
 #include <vfs/path-priv.h> /* KPathGetCWD */
 #include <kfs/directory.h>
 #include <kfs/file.h>
+#include <kfs/impl.h> /* KDirectoryGetSysDir */
+#include <kfs/kfs-priv.h> /* KSysDirOSPath */
 
-#include <klib/namelist.h>
-#include <klib/text.h> /* strcase_cmp */
 #include <klib/log.h> /* LOGERR */
+#include <klib/namelist.h>
 #include <klib/out.h> /* OUTMSG */
+#include <klib/printf.h> /* string_printf */
 #include <klib/rc.h> /* RC */
+#include <klib/text.h> /* strcase_cmp */
 
 #include <sysalloc.h> /* redefine malloc etc calls */
 #include <os-native.h> /* SHLX */
 
 #include <assert.h>
 #include <errno.h>
-#include <limits.h> /* PATH_MAX */
 #include <stdio.h> /* scanf */
 #include <stdlib.h> /* getenv */
 #include <string.h> /* memset */
 /* #include <unistd.h> access */
+
+#include <limits.h> /* PATH_MAX */
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
@@ -85,6 +89,10 @@ static const char* USAGE_ENV[] = { "print shell variables", NULL };
 #define OPTION_FIL   "files"
 static const char* USAGE_FIL[] = { "print loaded files", NULL };
 
+#define ALIAS_IMP    NULL
+#define OPTION_IMP   "import"
+static const char* USAGE_IMP[] = { "import ngc file", NULL };
+
 #define ALIAS_MOD    "m"
 #define OPTION_MOD   "modules"
 static const char* USAGE_MOD[] = { "print external modules", NULL };
@@ -109,6 +117,7 @@ OptDef Options[] =
     , { OPTION_DIR, ALIAS_DIR, NULL, USAGE_DIR, 1, false, false }
     , { OPTION_ENV, ALIAS_ENV, NULL, USAGE_ENV, 1, false, false }
     , { OPTION_FIL, ALIAS_FIL, NULL, USAGE_FIL, 1, false, false }
+    , { OPTION_IMP, ALIAS_IMP, NULL, USAGE_IMP, 1, true , false }
     , { OPTION_MOD, ALIAS_MOD, NULL, USAGE_MOD, 1, false, false }
     , { OPTION_NEW, ALIAS_NEW, NULL, USAGE_NEW, 1, false, false }
     , { OPTION_OUT, ALIAS_OUT, NULL, USAGE_OUT, 1, true , false }
@@ -148,6 +157,8 @@ rc_t CC Usage(const Args* args) {
     HelpOptionLine (ALIAS_MOD, OPTION_MOD, NULL, USAGE_MOD);
     KOutMsg ("\n");
     HelpOptionLine (ALIAS_SET, OPTION_SET, "name=value", USAGE_SET);
+    KOutMsg ("\n");
+    HelpOptionLine (ALIAS_IMP, OPTION_IMP, "ngc-file", USAGE_IMP);
     KOutMsg ("\n");
     HelpOptionLine (ALIAS_OUT, OPTION_OUT, "x | n", USAGE_OUT);
 
@@ -224,8 +235,9 @@ static rc_t KConfigNodePrintChildNames(bool xml, const KConfigNode* self,
         if (xml) {
             VDB_CONGIG_OUTMSG(("%.*s", (int)num_read, buffer));
         }
-        else
-        {   OUTMSG(("%s = \"%.*s\"\n", aFullpath, (int)num_read, buffer)); }
+        else {
+            OUTMSG(("%s = \"%.*s\"\n", aFullpath, (uint32_t)num_read, buffer));
+        }
     }
     if (hasChildren)
     {   VDB_CONGIG_OUTMSG(("\n"));}
@@ -271,6 +283,8 @@ typedef struct Params {
     bool xml;
 
     const char* setValue;
+
+    const char* ngc;
 
     bool modeSetNode;
     bool modeCreate;
@@ -363,6 +377,19 @@ static rc_t ParamsConstruct(int argc, char* argv[], Params* prm) {
             ++count;
         }
 
+        rc = ArgsOptionCount(args, OPTION_IMP, &pcount);
+        if (rc) {
+            LOGERR(klogErr, rc, "Failure to get '" OPTION_IMP "' argument");
+            break;
+        }
+        if (pcount) {
+            rc = ArgsOptionValue(args, OPTION_IMP, 0, &prm->ngc);
+            if (rc) {
+                LOGERR(klogErr, rc, "Failure to get '" OPTION_IMP "' argument");
+                break;
+            }
+        }
+
         rc = ArgsOptionCount(args, OPTION_MOD, &pcount);
         if (rc) {
             LOGERR(klogErr, rc, "Failure to get '" OPTION_MOD "' argument");
@@ -426,7 +453,7 @@ static rc_t ParamsConstruct(int argc, char* argv[], Params* prm) {
             || ( !prm->modeShowCfg && ! prm->modeShowLoadPath
               && !prm->modeShowEnv && !prm->modeShowFiles
               && !prm->modeShowModules && !prm->modeCreate
-              && !prm->modeSetNode ))
+              && !prm->modeSetNode && !prm->ngc))
             /* show all by default */
         {
             prm->modeShowCfg = prm->modeShowEnv = prm->modeShowFiles = true;
@@ -580,7 +607,7 @@ static rc_t CreateConfig(char* argv0) {
         if (home)
         {   def = home; }
         else {
-            rc = VPathGetCWD(cwd, sizeof cwd);
+            rc = KDirectoryResolvePath ( native, true, cwd, sizeof cwd, "." );
             if (rc == 0 && cwd[0])
             {   def = cwd; }
             else
@@ -705,59 +732,6 @@ static rc_t CreateConfig(char* argv0) {
     return rc;
 }
 
-
-#ifndef _STATIC
-#if 0
-static rc_t CC scan_mod_dir(const KDirectory* dir,
-    uint32_t type, const char* name, void* data)
-{
-    rc_t rc = 0;
-    const char ext[] = SHLX;
-
-    assert(data);
-
-    if (strlen(name) > strlen(ext) + 1 &&
-        name[strlen(name) - strlen(ext) - 1] == '.')
-    {
-        char buf[PATH_MAX + 1];
-        rc = KDirectoryResolvePath
-            (dir, true, buf, sizeof buf, "%s/%s", data, name);
-
-        while (rc == 0) {
-            uint32_t type = KDirectoryPathType(dir, buf);
-            if (type & kptAlias) {
-                rc = KDirectoryResolveAlias
-                    (dir, true, buf, sizeof buf, buf);
-                DISP_RC(rc, name);
-            }
-            else if (rc == 0) {
-                if (type == kptNotFound || type == kptBadPath) {
-                    OUTMSG(("%s: %s\n", buf,
-                        type == kptNotFound ? "not found" : "bad path"));
-                }
-                else { OUTMSG(("%s\n", buf)); }
-                break;
-            }
-        }
-    }
-
-    return rc;
-}
-
-static rc_t ShowModDir(const KDirectory* native, char* path) {
-    rc_t rc = 0;
-    const KDirectory* dir = NULL;
-    assert(native && path);
-    rc = KDirectoryOpenDirRead(native, &dir, false, path);
-    DISP_RC(rc, path);
-    if (rc == 0) {
-        rc = KDirectoryVVisit(dir, false, scan_mod_dir, path, ".", NULL);
-    }
-    return rc;
-}
-#endif
-#endif
-
 static rc_t ShowModules(const KConfig* cfg, const Params* prm) {
     rc_t rc = 0;
 #ifdef _STATIC
@@ -793,51 +767,6 @@ static rc_t ShowModules(const KConfig* cfg, const Params* prm) {
     OUTMSG(("\n"));
     RELEASE(KNamelist, list);
     RELEASE(VDBManager, mgr);
-#endif
-#if 0
-    KDirectory* dir = NULL;
-    const char* paths[] = { "vdb/module/paths", "vdb/wmodule/paths" };
-    int i = 0;
-    assert(cfg);
-    for (i = 0; i < sizeof paths / sizeof paths[0] && rc == 0; ++i) {
-        const KConfigNode* node = NULL;
-        if (rc == 0) {
-            const char* path = paths[i];
-            rc = KConfigOpenNodeRead(cfg, &node, path);
-            if (rc != 0) {
-                if (GetRCState(rc) == rcNotFound) {
-                    rc = 0;
-                    continue;
-                }
-                else {  DISP_RC(rc, path); }
-            }
-            else {
-                char buf[PATH_MAX + 1];
-                size_t num_read = 0;
-                size_t remaining = 0;
-                rc = KConfigNodeRead(node, 0,
-                    buf, sizeof buf, &num_read, &remaining);
-                assert(remaining == 0);
-                assert(num_read <= sizeof buf);
-                DISP_RC(rc, path);
-                if (rc == 0) {
-                    if (num_read < sizeof buf) {
-                        buf[num_read] = '\0';
-                        if (dir == NULL)
-                        {   rc = KDirectoryNativeDir(&dir); }
-                        if (rc == 0) {
-                            OUTMSG(("%s = %s\n", path, buf));
-                            rc = ShowModDir(dir, buf);
-                            if (rc == 0)
-                            {   OUTMSG(("\n")); }
-                        }
-                    }
-                }
-            }
-            RELEASE(KConfigNode, node);
-        }
-    }
-    RELEASE(KDirectory, dir);
 #endif
     return rc;
 }
@@ -1006,11 +935,16 @@ static rc_t ShowConfig(const KConfig* cfg, Params* prm) {
                         sprintf(fullname, "/%s", name);
                     }
                     else {
-                        fullname = strdup(root);
+                        size_t sz = strlen(root) + 2 + strlen(name);
+                        size_t num_writ = 0;
+                        fullname = malloc(sz);
                         if (fullname == NULL) {
                             rc = RC(rcExe,
                                 rcStorage, rcAllocating, rcMemory, rcExhausted);
                         }
+                        rc = string_printf(fullname, sz, &num_writ,
+                            "%s/%s", root, name);
+                        assert(num_writ + 1 == sz);
                     }
                     if (rc == 0) {
                         rc = KConfigNodePrintChildNames
@@ -1117,8 +1051,9 @@ rc_t CC KMain(int argc, char* argv[]) {
     Params prm;
     KConfig* cfg = NULL;
 
-    if (rc == 0)
-    {   rc = ParamsConstruct(argc, argv, &prm); }
+    if (rc == 0) {
+        rc = ParamsConstruct(argc, argv, &prm);
+    }
 
     if (rc == 0) {
         rc = KConfigMake(&cfg, NULL);
@@ -1126,29 +1061,65 @@ rc_t CC KMain(int argc, char* argv[]) {
     }
 
     if (rc == 0) {
-        if (prm.modeSetNode)
-        {   rc = SetNode(cfg, &prm); }
-        if (prm.modeShowCfg)
-        {   rc = ShowConfig(cfg, &prm); }
+        if (prm.ngc) {
+            const char *newRepoParentPath = NULL;
+            rc = KConfigImportNgc(cfg, prm.ngc, NULL, &newRepoParentPath);
+            if (rc == 0) {
+                rc = KConfigCommit(cfg);
+            }
+            if (rc == 0) {
+#if WINDOWS
+                KDirectory *wd = NULL;
+                char system[MAX_PATH] = "";
+                rc_t rc = KDirectoryNativeDir(&wd);
+                if (rc == 0) {
+                    rc = KDirectoryPosixStringToSystemString(wd,
+                        system, sizeof system, newRepoParentPath);
+                    if (rc == 0) {
+                        newRepoParentPath = system;
+                    }
+                }
+#endif          
+                OUTMSG((
+                    "%s was imported\nThe new protected repository is: %s\n",
+                    prm.ngc, newRepoParentPath));
+            }
+        }
+        else if (prm.modeSetNode) {
+            rc_t rc3 = SetNode(cfg, &prm);
+            if (rc3 != 0 && rc == 0) {
+                rc = rc3;
+            }
+        }
+        if (prm.modeShowCfg) {
+            rc_t rc3 = ShowConfig(cfg, &prm);
+            if (rc3 != 0 && rc == 0) {
+                rc = rc3;
+            }
+        }
         if (prm.modeShowFiles) {
             rc_t rc3 = ShowFiles(cfg, &prm);
-            if (rc3 != 0 && rc == 0)
-            {   rc = rc3; }
+            if (rc3 != 0 && rc == 0) {
+                rc = rc3;
+            }
         }
         if (prm.modeShowModules) {
             rc_t rc3 = ShowModules(cfg, &prm);
-            if (rc3 != 0 && rc == 0)
-            {   rc = rc3; }
+            if (rc3 != 0 && rc == 0) {
+                rc = rc3;
+            }
         }
         if (prm.modeShowLoadPath) {
             const char* path = NULL;
             rc_t rc3 = KConfigGetLoadPath(cfg, &path);
             if (rc3 == 0) {
-                if (path != NULL && path[0])
-                {   OUTMSG(("%s\n", path)); }
+                if (path != NULL && path[0]) {
+                    OUTMSG(("%s\n", path));
+                }
             }
-            else if (rc == 0)
-            {   rc = rc3; }
+            else if (rc == 0) {
+                rc = rc3;
+            }
         }
     }
 

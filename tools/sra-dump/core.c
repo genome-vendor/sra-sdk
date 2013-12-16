@@ -28,13 +28,16 @@
 #include <kfg/config.h> /* KConfigDisableUserSettings */
 
 #include <vdb/manager.h> /* VDBManagerRelease */
+#include <kdb/manager.h> /* for different path-types */
 #include <vdb/dependencies.h> /* UIError */
 #include <klib/report.h> /* ReportInit */
 #include <vdb/report.h>
+#include <vdb/database.h>
 #include <klib/container.h>
 #include <klib/log.h>
 #include <klib/out.h>
 #include <klib/status.h>
+#include <klib/text.h>
 #include <kapp/main.h>
 #include <kfs/directory.h>
 #include <sra/sradb-priv.h>
@@ -56,6 +59,7 @@
 typedef struct MaxNReadsValidator_struct
 {
     const SRAColumn* col;
+    uint64_t rejected_spots;
 } MaxNReadsValidator;
 
 
@@ -102,6 +106,7 @@ static rc_t MaxNReadsValidator_GetKey( const SRASplitter* cself,
                 if ( nn > nreads_max )
                 {
                     clear_readmask( readmask );
+                    self->rejected_spots ++;
                     PLOGMSG(klogWarn, (klogWarn, "too many reads $(nreads) at spot id $(row), maximum $(max) supported, skipped",
                                        PLOG_3(PLOG_U64(nreads),PLOG_I64(row),PLOG_U32(max)), nn, spot, nreads_max));
                 }
@@ -115,6 +120,25 @@ static rc_t MaxNReadsValidator_GetKey( const SRASplitter* cself,
     }
     return rc;
 }
+
+
+static rc_t MaxNReadsValidator_Release( const SRASplitter* cself )
+{
+    rc_t rc = 0;
+    MaxNReadsValidator* self = ( MaxNReadsValidator* )cself;
+
+    if ( self == NULL )
+    {
+        rc = RC( rcSRA, rcNode, rcExecuting, rcParam, rcNull );
+    }
+    else if ( !g_legacy_report )
+    {
+        if ( self->rejected_spots > 0 )
+            rc = KOutMsg( "Rejected %lu SPOTS because of to many READS\n", self->rejected_spots );
+    }
+    return rc;
+}
+
 
 typedef struct MaxNReadsValidatorFactory_struct
 {
@@ -159,10 +183,12 @@ static rc_t MaxNReadsValidatorFactory_NewObj( const SRASplitterFactory* cself, c
     else
     {
         rc = SRASplitter_Make( splitter, sizeof(MaxNReadsValidator),
-                               MaxNReadsValidator_GetKey, NULL, NULL, NULL );
+                               MaxNReadsValidator_GetKey, NULL, NULL, MaxNReadsValidator_Release );
         if ( rc == 0 )
         {
-            ( (MaxNReadsValidator*)(*splitter) )->col = self->col;
+            MaxNReadsValidator * filter = ( MaxNReadsValidator * )( * splitter );
+            filter->col = self->col;
+            filter->rejected_spots = 0;
         }
     }
     return rc;
@@ -243,7 +269,7 @@ static rc_t ReadFilterSplitter_GetKeySet( const SRASplitter* cself,
         if ( self->col_rdf != NULL )
         {
             rc = SRAColumnRead( self->col_rdf, spot, (const void **)&rdf, &o, &sz );
-            if ( rc == 0 )
+            if ( rc == 0 && sz > 0 )
             {
                 int32_t j, i = sz / sizeof( INSDC_SRA_read_filter ) / 8;
                 *key = self->keys;
@@ -398,8 +424,9 @@ typedef struct SpotGroupSplitter_struct
 {
     char cur_key[ 256 ];
     const SRAColumn* col;
-    bool split;
     char* const* spot_group;
+    uint64_t rejected_spots;
+    bool split;
 } SpotGroupSplitter;
 
 
@@ -421,7 +448,7 @@ static rc_t SpotGroupSplitter_GetKey( const SRASplitter* cself,
             const char* g = NULL;
             bitsz_t o = 0, sz = 0;
             rc = SRAColumnRead( self->col, spot, (const void **)&g, &o, &sz );
-            if ( rc == 0 )
+            if ( rc == 0 && sz > 0 )
             {
                 sz /= 8;
                 /* truncate trailing \0 */
@@ -450,6 +477,7 @@ static rc_t SpotGroupSplitter_GetKey( const SRASplitter* cself,
                     if ( self->spot_group[ 0 ] != NULL && !found )
                     {
                         /* list not empty and not in list -> skip */
+                        self->rejected_spots ++;
                         *key = NULL;
                     }
                     else if ( !self->split )
@@ -463,6 +491,23 @@ static rc_t SpotGroupSplitter_GetKey( const SRASplitter* cself,
     return rc;
 }
 
+
+static rc_t SpotGroupSplitter_Release( const SRASplitter* cself )
+{
+    rc_t rc = 0;
+    SpotGroupSplitter* self = ( SpotGroupSplitter* )cself;
+
+    if ( self == NULL )
+    {
+        rc = RC( rcSRA, rcNode, rcExecuting, rcParam, rcNull );
+    }
+    else if ( !g_legacy_report )
+    {
+        if ( self->rejected_spots > 0 )
+            rc = KOutMsg( "Rejected %lu SPOTS because of spotgroup filtering\n", self->rejected_spots );
+    }
+    return rc;
+}
 
 typedef struct SpotGroupSplitterFactory_struct
 {
@@ -514,12 +559,14 @@ static rc_t SpotGroupSplitterFactory_NewObj( const SRASplitterFactory* cself, co
     else
     {
         rc = SRASplitter_Make( splitter, sizeof( SpotGroupSplitter ),
-                               SpotGroupSplitter_GetKey, NULL, NULL, NULL );
+                               SpotGroupSplitter_GetKey, NULL, NULL, SpotGroupSplitter_Release );
         if ( rc == 0 )
         {
-            ( (SpotGroupSplitter*)(*splitter) )->col = self->col;
-            ( (SpotGroupSplitter*)(*splitter) )->split = self->split;
-            ( (SpotGroupSplitter*)(*splitter) )->spot_group = self->spot_group;
+            SpotGroupSplitter * filter = ( SpotGroupSplitter * )( * splitter );
+            filter->col = self->col;
+            filter->split = self->split;
+            filter->spot_group = self->spot_group;
+            filter->rejected_spots = 0;
         }
     }
     return rc;
@@ -567,20 +614,40 @@ static rc_t SpotGroupSplitterFactory_Make( const SRASplitterFactory** cself,
 
 
 static rc_t SRADumper_DumpRun( const SRATable* table,
-        spotid_t minSpotId, spotid_t maxSpotId, const SRASplitterFactory* factories )
+        spotid_t minSpotId, spotid_t maxSpotId, const SRASplitterFactory* factories, uint64_t * num_spots )
 {
     rc_t rc = 0, rcr = 0;
     spotid_t spot = 0;
+
+    /* !!! make_readmask is a MACRO defined in factory.h !!! */
     make_readmask( readmask );
     const SRASplitter* root_splitter = NULL;
 
+    if ( num_spots != NULL ) *num_spots = 0;
+
     rc = SRASplitterFactory_NewObj( factories, &root_splitter );
 
-    for( spot = minSpotId; rc == 0 && spot <= maxSpotId; spot++ )
+    for ( spot = minSpotId; rc == 0 && spot <= maxSpotId; spot++ )
     {
         reset_readmask( readmask );
+        /* SRASplitter_AddSpot() defined in factory.c */
         rc = SRASplitter_AddSpot( root_splitter, spot, readmask );
-        rc = rc ? rc : Quitting();
+        if ( rc == 0 )
+        {
+            if ( num_spots != NULL ) (*num_spots)++;
+            rc = Quitting();
+        }
+        else
+        {
+            if ( ( GetRCModule( rc ) == rcXF ) &&
+                 ( GetRCTarget( rc ) == rcFunction ) &&
+                 ( GetRCContext( rc ) == rcExecuting ) &&
+                 ( GetRCObject( rc ) == rcData ) &&
+                 ( GetRCState( rc ) == rcInconsistent ) )
+            {
+                rc = 0;
+            }
+        }
     }
     rcr = SRASplitter_Release( root_splitter );
 
@@ -590,6 +657,7 @@ static rc_t SRADumper_DumpRun( const SRATable* table,
 
 static const SRADumperFmt_Arg KMainArgs[] =
 {
+    { NULL, "no-user-settings", NULL, {"Internal Only", NULL}},
     { "A", "accession", "accession", {"Replaces accession derived from <path> in filename(s) and deflines (only for single table dump)", NULL}},
     { "O", "outdir", "path", {"Output directory, default is working directory ( '.' )", NULL}},
     { "Z", "stdout", NULL, {"Output to stdout, all split data become joined into single stream", NULL}},
@@ -613,7 +681,6 @@ static const SRADumperFmt_Arg KMainArgs[] =
                                  "Current/default is warn", NULL}},
     { "v", "verbose", NULL, {"Increase the verbosity level of the program",
                             "Use multiple times for more verbosity", NULL}},
-    { NULL, "no-user-settings", NULL, {"Do not read any settings on startup. Use VDB_CONFIG environment var to set config file", NULL}},
     { NULL, OPTION_REPORT, NULL, {
 "Control program execution environment report generation (if implemented).",
 "One of (never|error|always). Default is error",
@@ -623,6 +690,7 @@ static const SRADumperFmt_Arg KMainArgs[] =
                                          "All flags if not specified", NULL}},
 #endif
 
+    { NULL, "legacy-report", NULL, { "use legacy style 'Written N spots' for tool" } },
     { NULL, NULL, NULL, {NULL}} /* terminator */
 };
 
@@ -639,44 +707,19 @@ void CC SRADumper_PrintArg( const SRADumperFmt_Arg* arg )
 }
 
 
-static bool CanResolveAccessions( void )
-{
-    bool res = false;
-    SRAPath *sra_path;
-    rc_t rc = SRAPathMake( &sra_path, NULL );
-    if ( rc == 0 )
-    {
-        res = true;
-        SRAPathRelease( sra_path );
-    }
-    return res;
-}
-
-
 static void CoreUsage( const char* prog, const SRADumperFmt* fmt, bool brief, int exit_status )
 {
-    bool can_resolve_acc = CanResolveAccessions();
-    if ( can_resolve_acc )
-    {
-        OUTMSG(( "\n"
-                 "Usage:\n"
-                 "  %s [options] <path [path...]>\n"
-                 "  %s [options] [ -A ] <accession>\n"
-                 "\n", prog, prog));
-    }
-    else
-    {
-        OUTMSG(( "\n"
-                 "Usage:\n"
-                 "  %s [options] <path [path...]>\n"
-                 "\n", prog, prog));
-    }
+    OUTMSG(( "\n"
+             "Usage:\n"
+             "  %s [options] <path> [<path>...]\n"
+             "  %s [options] <accession>\n"
+             "\n", prog, prog));
 
     if ( !brief )
     {
         if ( fmt->usage )
         {
-            rc_t rc = fmt->usage( fmt, KMainArgs, can_resolve_acc ? 0 : 1 );
+            rc_t rc = fmt->usage( fmt, KMainArgs, 1 );
             if ( rc != 0 )
             {
                 LOGERR(klogErr, rc, "Usage print failed");
@@ -690,9 +733,9 @@ static void CoreUsage( const char* prog, const SRADumperFmt* fmt, bool brief, in
             d[ 1 ] = fmt->arg_desc;
             for ( k = 0; k < ( sizeof( d ) / sizeof( d[0] ) ); k++ )
             {
-                for ( i = can_resolve_acc ? 0 : 1;
+                for ( i = 1;
                       d[k] != NULL && ( d[ k ][ i ].abbr != NULL || d[ k ][ i ].full != NULL );
-                      i++ )
+                      ++ i )
                 {
                     if ( ( !fmt->gzip && strcmp( d[ k ][ i ].full, "gzip" ) == 0 ) ||
                          ( !fmt->bzip2 && strcmp (d[ k ][ i ].full, "bzip2" ) == 0 ) )
@@ -825,8 +868,7 @@ bool CC SRADumper_GetArg( const SRADumperFmt* fmt, char const* const abbr, char 
 }
 
 
-static bool reportToUser( rc_t rc, char* argv0 )
-{
+static bool reportToUserSffFromNot454Run(rc_t rc, char* argv0, bool silent) {
     assert( argv0 );
     if ( rc == SILENT_RC( rcSRA, rcFormatter, rcConstructing,
         rcData, rcUnsupported ) )
@@ -852,18 +894,66 @@ static bool reportToUser( rc_t rc, char* argv0 )
         name = last_name ? last_name : argv0;
         if ( strcmp( "sff-dump", name ) == 0 )
         {
-            OUTMSG ((
+            if (!silent) {
+              OUTMSG((
                "This run cannot be transformed into SFF format.\n"
                "Conversion cannot be completed because the source lacks\n"
                "one or more of the data series required by the SFF format.\n"
                "You should be able to dump it as FASTQ by running fastq-dump.\n"
-               "\n" ));
+               "\n"));
+            }
             return true;
         }
     }
     return false;
 }
 
+
+static int str_cmp( const char *a, const char *b )
+{
+    size_t asize = string_size ( a );
+    size_t bsize = string_size ( b );
+    return strcase_cmp ( a, asize, b, bsize, ( asize > bsize ) ? asize : bsize );
+}
+
+static bool database_contains_table_name( const VDBManager * vmgr, const char * acc_or_path, const char * tablename )
+{
+    bool res = false;
+    if ( ( vmgr != NULL ) && ( acc_or_path != NULL ) && ( tablename != NULL ) )
+    {
+        const VDatabase * db;
+        rc_t rc = VDBManagerOpenDBRead( vmgr, &db, NULL, acc_or_path );
+        if ( rc == 0 )
+        {
+            KNamelist * tbl_names;
+            rc = VDatabaseListTbl( db, &tbl_names );
+            if ( rc == 0 )
+            {
+                uint32_t count;
+                rc = KNamelistCount( tbl_names, &count );
+                if ( rc == 0 && count > 0 )
+                {
+                    uint32_t idx;
+                    for ( idx = 0; idx < count && rc == 0 && !res; ++idx )
+                    {
+                        const char *tbl_name;
+                        rc = KNamelistGet( tbl_names, idx, &tbl_name );
+                        if ( rc == 0 )
+                        {
+                            res = ( str_cmp( tbl_name, tablename ) == 0 );
+                        }
+                    }
+                }
+                KNamelistRelease( tbl_names );
+            }
+            VDatabaseRelease( db );
+        }
+    }
+    return res;
+}
+
+
+static const char * consensus_table_name = "CONSENSUS";
 
 /*******************************************************************************
  * KMain - defined for use with kapp library
@@ -873,8 +963,10 @@ rc_t CC KMain ( int argc, char* argv[] )
     rc_t rc = 0;
     int i;
     const char* arg;
-    uint64_t total_spots = 0;
+    uint64_t total_spots_read = 0;
+    uint64_t total_spots_written = 0;
 
+    const VDBManager* vmgr = NULL;
     const SRAMgr* sraMGR = NULL;
     SRADumperFmt fmt;
 
@@ -899,8 +991,6 @@ rc_t CC KMain ( int argc, char* argv[] )
     bool read_filter_on = false;
     SRAReadFilter read_filter = 0xFF;
 
-    bool failed_to_open = false;
-
     /* for the fasta-ouput of fastq-dump: branch out completely of 'common' code */
     if ( fasta_dump_requested( argc, argv ) )
     {
@@ -911,7 +1001,7 @@ rc_t CC KMain ( int argc, char* argv[] )
     ReportBuildDate ( __DATE__ );
 
     memset( &fmt, 0, sizeof( fmt ) );
-    rc = SRADumper_Init( &fmt );
+    rc = SRADumper_Init( &fmt );    /* !!!dirty dirty trick!!! function is defined in abi.c AND fastq.c AND illumina.c AND sff.c !!! */
     if ( rc != 0 )
     {
         LOGERR(klogErr, rc, "formatter initialization");
@@ -925,7 +1015,7 @@ rc_t CC KMain ( int argc, char* argv[] )
     }
     else
     {
-        rc = SRADumper_ArgsValidate( argv[0], &fmt );
+        rc = SRADumper_ArgsValidate( argv[0], &fmt );   /* above in this file */
         if ( rc != 0 )
         {
             LOGERR( klogErr, rc, "formatter args list" );
@@ -935,10 +1025,11 @@ rc_t CC KMain ( int argc, char* argv[] )
 
     if ( argc < 2 )
     {
-        CoreUsage( argv[0], &fmt, true, EXIT_FAILURE );
+        CoreUsage( argv[0], &fmt, true, EXIT_FAILURE ); /* above in this file */
         return 0;
     }
 
+    /* now looping through argv[], ignoring args-parsing via kapp!!! */
     for ( i = 1; i < argc; i++ )
     {
         arg = argv[ i ];
@@ -1057,7 +1148,7 @@ rc_t CC KMain ( int argc, char* argv[] )
                     {
                         if ( t - f > 0 )
                         {
-                            spot_group[ spot_groups++ ] = strndup( &argv[ i ][ f ], t - f );
+                            spot_group[ spot_groups++ ] = string_dup( &argv[ i ][ f ], t - f );
                         }
                         f = t + 1;
                     }
@@ -1065,7 +1156,7 @@ rc_t CC KMain ( int argc, char* argv[] )
                 }
                 if ( t - f > 0 )
                 {
-                    spot_group[ spot_groups++ ] = strndup( &argv[ i ][ f ], t - f );
+                    spot_group[ spot_groups++ ] = string_dup( &argv[ i ][ f ], t - f );
                 }
                 if ( spot_groups < 1 )
                 {
@@ -1123,6 +1214,10 @@ rc_t CC KMain ( int argc, char* argv[] )
         else if ( SRADumper_GetArg( &fmt, NULL, "no-user-settings", &i, argc, argv, NULL ) )
         {
              KConfigDisableUserSettings ();
+        }
+        else if ( SRADumper_GetArg( &fmt, NULL, "legacy-report", &i, argc, argv, NULL ) )
+        {
+             g_legacy_report = true;
         }
         else if ( fmt.add_arg && fmt.add_arg( &fmt, SRADumper_GetArg, &i, argc, argv ) )
         {
@@ -1199,7 +1294,7 @@ rc_t CC KMain ( int argc, char* argv[] )
         }
     }
 
-    rc = SRAMgrMakeRead( &sraMGR );
+    rc = SRAMgrMakeRead( &sraMGR ); /* !!! in libsra !!! */
     if ( rc != 0 )
     {
         LOGERR( klogErr, rc, "failed to open SRA manager" );
@@ -1216,14 +1311,12 @@ rc_t CC KMain ( int argc, char* argv[] )
     }
 
     {
-        const VDBManager* vmgr = NULL;
         rc_t rc2 = SRAMgrGetVDBManagerRead( sraMGR, &vmgr );
         if ( rc2 != 0 )
         {
             LOGERR( klogErr, rc2, "while calling SRAMgrGetVDBManagerRead" );
         }
         rc2 = ReportSetVDBManager( vmgr );
-        VDBManagerRelease( vmgr );
     }
 
 
@@ -1232,21 +1325,54 @@ rc_t CC KMain ( int argc, char* argv[] )
     {
         const SRASplitterFactory* fact_head = NULL;
         spotid_t smax, smin;
+        int path_type;
 
         SRA_DUMP_DBG( 5, ( "table path '%s', name '%s'\n", table_path[ i ], table_name ) );
-        if ( table_name != NULL )
+
+        /* because of PacBio: if no table_name is given ---> open the 'CONSENSUS' table implicitly!
+            we first have to lookup the Object-Type, if it is a Database we have to look if it contains
+            a CONSENSUS-table ( only PacBio-Runs have one ! )...
+        */
+
+        path_type = ( VDBManagerPathType ( vmgr, table_path[ i ] ) & ~ kptAlias );
+        switch ( path_type )
         {
-            rc = SRAMgrOpenAltTableRead( sraMGR, &fmt.table, table_name, table_path[ i ] );
-            if ( rc != 0 )
+            case kptDatabase        :   ;   /* types defined in <kdb/manager.h> */
+            case kptPrereleaseTbl   :   ;
+            case kptTable           :   break;
+
+            default             :   rc = RC( rcVDB, rcNoTarg, rcConstructing, rcItem, rcNotFound );
+                                    PLOGERR( klogErr, ( klogErr, rc,
+                                        "the path '$(p)' cannot be opened as database or table",
+                                        "p=%s", table_path[ i ] ) );
+                                    continue;
+                                    break;
+        }
+
+
+        if ( path_type == kptDatabase )
+        {
+            const char * table_to_open = table_name;
+            if ( table_to_open == NULL && database_contains_table_name( vmgr, table_path[ i ], consensus_table_name ) )
             {
-                PLOGERR( klogErr, ( klogErr, rc, 
-                    "failed to open '$(path):$(table)'", "path=%s,table=%s",
-                    table_path[ i ], table_name ) );
-                continue;
+                table_to_open = consensus_table_name;
             }
+            if ( table_to_open != NULL )
+            {
+                rc = SRAMgrOpenAltTableRead( sraMGR, &fmt.table, table_to_open, table_path[ i ] ); /* from sradb-priv.h */
+                if ( rc != 0 )
+                {
+                    PLOGERR( klogErr, ( klogErr, rc, 
+                        "failed to open '$(path):$(table)'", "path=%s,table=%s",
+                        table_path[ i ], table_to_open ) );
+                    continue;
+                }
+            }
+
         }
 
         ReportResetObject( table_path[ i ] );
+
         if ( fmt.table == NULL )
         {
             rc = SRAMgrOpenTableRead( sraMGR, &fmt.table, table_path[ i ] );
@@ -1259,11 +1385,7 @@ rc_t CC KMain ( int argc, char* argv[] )
                 else
                 {
                     PLOGERR( klogErr, ( klogErr, rc,
-                            "failed to open '$(path)'", "path=%s",
-                            table_path[ i ] ) );
-                    if (GetRCState(rc) == rcNotFound) {
-                        failed_to_open = true;
-                    }
+                            "failed to open '$(path)'", "path=%s", table_path[ i ] ) );
                 }
                 continue;
             }
@@ -1341,11 +1463,12 @@ rc_t CC KMain ( int argc, char* argv[] )
         while ( rc == 0 )
         {
             /* sort out the spot id range */
-            if ( ( rc = SRATableMaxSpotId( fmt.table, &smax ) ) != 0 ||
-                 ( rc = SRATableMinSpotId( fmt.table, &smin ) ) != 0 )
-            {
+            rc = SRATableMaxSpotId( fmt.table, &smax );
+            if ( rc != 0 )
                 break;
-            }
+            rc = SRATableMinSpotId( fmt.table, &smin );
+            if ( rc != 0 )
+                break;
 
             {
                 const struct VTable* tbl = NULL;
@@ -1380,7 +1503,10 @@ rc_t CC KMain ( int argc, char* argv[] )
             if ( true ) /* ??? */
             {
                 const SRAColumn* c = NULL;
-                nreads_max = NREADS_MAX;
+
+                nreads_max = NREADS_MAX;    /* global variables defined in factory.h */
+                quality_N_limit = 0;
+
                 rc = SRATableOpenColumnRead( fmt.table, &c, "PLATFORM", sra_platform_id_t );
                 if ( rc == 0 )
                 {
@@ -1389,9 +1515,14 @@ rc_t CC KMain ( int argc, char* argv[] )
                     rc = SRAColumnRead( c, 1, (const void **)&platform, &o, &z );
                     if ( rc == 0 && platform != NULL )
                     {
-                        if ( *platform != SRA_PLATFORM_PACBIO_SMRT )
+                        /* platform constands in insdc/sra.h */
+                        switch( *platform )
                         {
-                            nreads_max = 32;
+                            case SRA_PLATFORM_454           : quality_N_limit = 30;   break;
+                            case SRA_PLATFORM_ION_TORRENT   : ;
+                            case SRA_PLATFORM_ILLUMINA      : quality_N_limit = 35;   break;
+                            case SRA_PLATFORM_ABSOLID       : quality_N_limit = 25;   break;
+                            case SRA_PLATFORM_PACBIO_SMRT   : nreads_max = 32; break;
                         }
                     }
                     SRAColumnRelease( c );
@@ -1472,20 +1603,29 @@ rc_t CC KMain ( int argc, char* argv[] )
             rc = SRASplitterFactory_Init( fact_head );
             if ( rc == 0 )
             {
+                uint64_t spots_read;
+
                 /* ********************************************************** */
-                rc = SRADumper_DumpRun( fmt.table, smin, smax, fact_head );
+                rc = SRADumper_DumpRun( fmt.table, smin, smax, fact_head, &spots_read );
                 /* ********************************************************** */
                 if ( rc == 0 )
                 { 
-                    uint64_t total = 0, file = 0;
-                    SRASplitterFactory_FilerReport( &total, &file );
-                    OUTMSG(( "Written %lu spots for %s\n", total - total_spots, table_path[ i ] ));
-                    if ( to_stdout && total > 0 )
+                    uint64_t spots_written = 0, file = 0;
+
+                    SRASplitterFactory_FilerReport( &spots_written, &file );
+                    if ( !g_legacy_report )
+                    {
+                        OUTMSG(( "Read %lu spots for %s\n", spots_read, table_path[ i ] ));
+                    }
+                    OUTMSG(( "Written %lu spots for %s\n", spots_written - total_spots_written, table_path[ i ] ));
+
+                    if ( to_stdout && spots_written > 0 )
                     {
                         PLOGMSG( klogInfo, ( klogInfo, "$(t) biggest file has $(n) spots",
                             PLOG_2( PLOG_S( t ), PLOG_U64( n ) ), table_path[ i ], file ));
                     }
-                    total_spots = total;
+                    total_spots_written = spots_written;
+                    total_spots_read += spots_read;
                 }
             }
             break;
@@ -1500,8 +1640,7 @@ rc_t CC KMain ( int argc, char* argv[] )
                     PLOG_4(PLOG_S(path),PLOG_S(dot),PLOG_S(table),PLOG_U32(spots)),
                     table_path[ i ], table_name ? ":" : "", table_name ? table_name : "", smax - smin + 1 ) );
         }
-        else if ( !reportToUser( rc, argv [0 ] ) )
-        {
+        else if (!reportToUserSffFromNot454Run(rc, argv [0], false)) {
             PLOGERR( klogErr, ( klogErr, rc, "failed $(path)$(dot)$(table)",
                     PLOG_3(PLOG_S(path),PLOG_S(dot),PLOG_S(table)),
                     table_path[ i ], table_name ? ":" : "", table_name ? table_name : "" ) );
@@ -1524,14 +1663,23 @@ Catch:
     }
     SRASplitterFiler_Release();
     SRAMgrRelease( sraMGR );
-    OUTMSG(( "Written %lu spots total\n", total_spots ));
+    VDBManagerRelease( vmgr );
 
+    if ( g_legacy_report )
+    {
+        OUTMSG(( "Written %lu spots total\n", total_spots_written ));
+    }
+    else if ( table_path_qty > 1 )
+    {
+        OUTMSG(( "Read %lu spots total\n", total_spots_read ));
+        OUTMSG(( "Written %lu spots total\n", total_spots_written ));
+    }
 
-    if (failed_to_open) {
+    /* Report execution environment if necessary */
+    if (rc != 0 && reportToUserSffFromNot454Run(rc, argv [0], true)) {
         ReportSilence();
     }
     {
-        /* Report execution environment if necessary */
         rc_t rc2 = ReportFinalize( rc );
         if ( rc == 0 )
         {
