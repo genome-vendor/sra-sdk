@@ -1,3 +1,9 @@
+sra-sdk (2.3.3-4-0ubuntu0tgi1) testing; urgency=low
+
+  * New upstream 2.3.3-4
+
+ -- Matthew Callaway <mcallaway@genome.wustl.edu>  Mon, 16 Dec 2013 21:56:03 +0000
+
 sra-sdk (2.3.1-1~beta2) testing; urgency=low
 
   * Beta 1 release of 2.3.1-1.

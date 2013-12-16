@@ -1,5 +1,3 @@
 bin??/*	usr/bin
-mod??/* usr/lib/ncbi/mod
-wmod??/* usr/lib/ncbi/wmod
 schema/*/*.vschema usr/lib/ncbi/schema
 lib??/ncbi/*.kfg /etc/ncbi
