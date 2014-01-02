@@ -26,6 +26,7 @@
 # determine OS
 UNAME = $(shell uname -s)
 
+OS = ''
 ifeq (Darwin, $(UNAME))
 	HOST_OS = mac
 endif
@@ -41,6 +42,10 @@ ifeq (xCYGWIN, $(findstring xCYGWIN,x$(UNAME)))
 endif
 ifeq (xMINGW, $(findstring xMINGW,x$(UNAME)))
 	HOST_OS = win
+endif
+# handle all other OSes (like BSD or Hurd) as if they were linux (see bug #627861)
+ifeq ($(OS), '')
+	OS = linux
 endif
 
 # assume build OS is the same as host OS
@@ -87,6 +92,10 @@ else
 		HOST_ARCH = sparc64
 		ARCHITECTURES = sparc64 sparc32
 	endif
+endif
+# Handle all other architectures equivalent as i386 (see bug #627861)
+ifeq ($(ARCH),'')
+	ARCH = i386
 endif
 
 ARCH = $(HOST_ARCH)

@@ -53,12 +53,6 @@ ifeq (linux,$(OS))
     NO_ARRAY_BOUNDS_WARNING = -Wno-array-bounds
 endif
 
-ifeq (64,$(BITS))
-	CARCH = -m64
-else
-	CARCH = -m32
-endif
-
 ifeq (prof, $(BUILD))
 	PROF = -pg
 endif
