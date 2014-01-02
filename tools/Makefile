@@ -37,6 +37,7 @@ SUBDIRS = \
 	kar \
 	vdb-dump \
 	sra-dump \
+	sra-dbcc \
 	sra-load \
 	sra-pileup \
 	bam-loader \
