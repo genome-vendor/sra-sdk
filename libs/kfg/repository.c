@@ -1084,9 +1084,13 @@ LIB_EXPORT rc_t CC KRepositoryMgrCurrentProtectedRepository ( const KRepositoryM
                                     }
 
                                     /* get its canonical path */
-                                    rc = KSysDirRealPath ( sysDir, resolved, path_size, root );
-                                    if ( rc != 0 )
-                                        break;
+                                    rc2 = KSysDirRealPath ( sysDir,
+                                        resolved, path_size, root );
+                                    if ( rc2 != 0 ) {
+                                        /* VDB-1096:
+                      Invalid cannot get repository root? Ignore and continue */
+                                        continue;
+                                    }
 
                                     /* we know the current directory's canonical path size
                                        and we know the repository's canonical path size.

@@ -41,6 +41,8 @@ typedef struct KHttpFile KHttpFile;
 #include <kns/impl.h>
 #include <kfs/file.h>
 #include <kfs/directory.h>
+
+#include <klib/debug.h> /* DBGMSG */
 #include <klib/text.h>
 #include <klib/container.h>
 #include <klib/out.h>
@@ -49,6 +51,7 @@ typedef struct KHttpFile KHttpFile;
 #include <klib/rc.h>
 #include <klib/printf.h>
 #include <klib/vector.h>
+
 #include <strtol.h>
 #include <va_copy.h>
 
@@ -425,6 +428,9 @@ struct KHttp
     ver_t vers;
 
     KRefcount refcount;
+
+    KEndPoint ep;
+    bool ep_valid;
 };
 
 
@@ -436,6 +442,13 @@ struct KHttp
 
 #define KHttpLineBufferReset( self ) \
     ( ( void ) ( ( self ) -> line_valid = 0 ) )
+    
+static
+void KHttpClose ( KHttp *self )
+{
+    KStreamRelease ( self -> sock );
+    self -> sock = NULL;
+}
 
 
 /* used to be in whack function, but we needed the ability
@@ -443,8 +456,7 @@ struct KHttp
 static
 rc_t KHttpClear ( KHttp *self )
 {
-    KStreamRelease ( self -> sock );
-    self -> sock = NULL;
+    KHttpClose ( self );
 
     KHttpBlockBufferReset ( self );
     KHttpLineBufferReset ( self );
@@ -468,6 +480,31 @@ rc_t KHttpWhack ( KHttp * self )
     return 0;
 }
 
+static
+rc_t KHttpOpen ( KHttp * self, const String * hostname, uint32_t port )
+{
+    rc_t rc;
+
+    if ( ! self -> ep_valid )
+    {
+        rc = KNSManagerInitDNSEndpoint ( self -> mgr, & self -> ep, hostname, port );
+        if ( rc != 0 )
+            return rc;
+
+        self -> ep_valid = true;
+    }
+
+    rc = KNSManagerMakeConnection ( self -> mgr, & self -> sock, NULL, & self -> ep );
+    if ( rc == 0 )
+    {
+        self -> port = port;
+        return 0;
+    }
+
+    self -> sock = NULL;
+    return rc;
+}
+
 /* Initialize KHttp object */
 static
 rc_t KHttpInit ( KHttp * http, const KDataBuffer *hostname_buffer, KStream * conn, ver_t _vers, const String * _host, uint32_t port )
@@ -482,14 +519,7 @@ rc_t KHttpInit ( KHttp * http, const KDataBuffer *hostname_buffer, KStream * con
         rc = KStreamAddRef ( conn );
     else
     {
-        /* KEndPoint holds an address and port number */
-        KEndPoint to;
-        
-        /* make a KEndPoint using a host name */
-        rc = KNSManagerInitDNSEndpoint ( http -> mgr, &to, _host, port );
-        if ( rc == 0 )
-            /* create the connection using the system default for from */
-            rc = KNSMakeConnection ( &conn, NULL, &to );
+        rc = KHttpOpen ( http, _host, port );
     }
 
     if ( rc == 0 )
@@ -791,8 +821,13 @@ rc_t KHttpGetLine ( KHttp *self )
         
         /* get out of loop if end of line */
         if ( ch == 0 )
+        {
+#if _DEBUGGING
+            if ( KNSManagerIsVerbose ( self->mgr ) )
+                KOutMsg( "RX:%s\n", buffer );
+#endif
             break;
-
+        }
         /* not end of line - increase num of valid bytes read */
         ++ self -> line_valid;
     }
@@ -909,7 +944,7 @@ rc_t KHttpVAddHeader ( BSTree *hdrs, const char *_name, const char *_val, va_lis
         size_t blen = string_len ( buf, bsize );
 
         /* init value */
-        StringInit ( & value, buf, bsize, blen );
+        StringInit ( & value, buf, bsize, ( uint32_t ) blen );
 
         rc = KHttpAddHeaderString ( hdrs, & name, & value );
     }
@@ -929,7 +964,7 @@ rc_t KHttpAddHeader ( BSTree *hdrs, const char *name, const char *val, ... )
 }
 
 /* Capture each header line to add to BSTree */
-rc_t KHttpGetHeaderLine ( KHttp *self, BSTree *hdrs, bool *blank )
+rc_t KHttpGetHeaderLine ( KHttp *self, BSTree *hdrs, bool *blank, bool *close_connection )
 {
     /* Starting from the second line of the response */
     rc_t rc = KHttpGetLine ( self );
@@ -975,6 +1010,21 @@ rc_t KHttpGetHeaderLine ( KHttp *self, BSTree *hdrs, bool *blank )
                 /* assign the value data into the value string */
                 StringInit ( & value, buffer, last - buffer, ( uint32_t ) ( last - buffer ) );
                 
+                /* check for Connection: close header */
+                if ( name . size == sizeof "Connection" -1 && value . size == sizeof "close" - 1 )
+                {
+                    if ( tolower ( name . addr [ 0 ] ) == 'c' && tolower ( value . addr [ 0 ] ) == 'c' )
+                    {
+                        if ( strcase_cmp ( name . addr, name . size, "Connection", name . size, ( uint32_t ) name . size ) == 0 &&
+                             strcase_cmp ( value . addr, value . size, "close", value . size, ( uint32_t ) value . size ) == 0 )
+                        {
+                            DBGMSG(DBG_VFS, DBG_FLAG(DBG_VFS),
+                                ("*** seen connection close ***\n"));
+                            * close_connection = true;
+                        }
+                    }
+                }
+                
                 rc = KHttpAddHeaderString ( hdrs, & name, & value );
             }
         }
@@ -996,7 +1046,9 @@ rc_t KHttpFindHeader ( const BSTree *hdrs, const char *_name, char *buffer, size
     /* find the header */
     node = ( KHttpHeader * ) BSTreeFind ( hdrs, &name, KHttpHeaderCmp );
     if ( node == NULL )
+    {
         rc = RC ( rcNS, rcNoTarg, rcSearching, rcName, rcNull );
+    }
     else
     {
         /* make sure buffer is large enough */
@@ -1028,7 +1080,9 @@ rc_t KHttpGetStatusLine ( KHttp *self, String *msg, uint32_t *status, ver_t *ver
            expect HTTP/1.[01]<sp><digit>+<sp><msg>\r\n */
         sep = string_chr ( buffer, end - buffer, '/' );
         if ( sep == NULL )
+        {
             rc = RC ( rcNS, rcNoTarg, rcParsing, rcNoObj, rcNotFound );
+        }
         else
         {
             /* make sure it is http */
@@ -1396,12 +1450,19 @@ struct KHttpResult
     ver_t version;
 
     KRefcount refcount;
+    bool close_connection;
 };
 
 static
 rc_t KHttpResultWhack ( KHttpResult * self )
 {
     BSTreeWhack ( & self -> hdrs, KHttpHeaderWhack, NULL );
+    if ( self -> close_connection )
+    {
+        DBGMSG(DBG_VFS, DBG_FLAG(DBG_VFS),
+            ("*** closing connection ***\n"));
+        KHttpClose ( self -> http );
+    }
     KHttpRelease ( self -> http );
     KRefcountWhack ( & self -> refcount, "KHttpResult" );
     free ( self );
@@ -1414,15 +1475,25 @@ static
 rc_t KHttpSendReceiveMsg ( KHttp *self, KHttpResult **rslt,
     const char *buffer, size_t len, const KDataBuffer *body, const char *url )
 {
-    rc_t rc;
+    rc_t rc = 0;
 
     size_t sent;
 
 
     /* TBD - may want to assert that there is an empty line in "buffer" */
+#if _DEBUGGING
+    if ( KNSManagerIsVerbose ( self->mgr ) )
+        KOutMsg( "TX:%.*s", len, buffer );
+#endif
+
+    /* reopen connection if NULL */
+    if ( self -> sock == NULL )
+        rc = KHttpOpen ( self, & self -> hostname, self -> port );
 
     /* ALWAYS want to use write all when sending */
-    rc = KStreamWriteAll ( self -> sock, buffer, len, & sent ); 
+    if ( rc == 0 )
+        rc = KStreamWriteAll ( self -> sock, buffer, len, & sent ); 
+    
     /* check the data was completely sent */
     if ( rc == 0 && sent != len )
         rc = RC ( rcNS, rcNoTarg, rcWriting, rcTransfer, rcIncomplete );
@@ -1481,7 +1552,7 @@ rc_t KHttpSendReceiveMsg ( KHttp *self, KHttpResult **rslt,
                     /* receive and parse all header lines 
                        blank = end of headers */
                     for ( blank = false; ! blank && rc == 0; )
-                        rc = KHttpGetHeaderLine ( self, & result -> hdrs, & blank );
+                        rc = KHttpGetHeaderLine ( self, & result -> hdrs, & blank, & result -> close_connection );
 
                     if ( rc == 0 )
                     {
@@ -1677,7 +1748,7 @@ rc_t KHttpResultHandleContentRange ( const KHttpResult *self, uint64_t *pos, siz
 
         /* look for separation of 'bytes' and first position */
         sep = string_chr ( buf, end - buf, ' ' );
-        if ( sep != NULL )
+        if ( sep == NULL )
             rc = RC ( rcNS, rcNoTarg, rcParsing, rcNoObj, rcNotFound );
         else
         {
@@ -1746,8 +1817,8 @@ rc_t KHttpResultHandleContentRange ( const KHttpResult *self, uint64_t *pos, siz
                             else 
                             {
                                 /* finally check all the acquired information */
-                                if (  length != end_pos - start_pos ||
-                                      length > total )
+                                if ( ( length != ( ( end_pos - start_pos ) + 1 ) ) ||
+                                     ( length > total ) )
                                     rc = RC ( rcNS, rcNoTarg, rcParsing, rcNoObj, rcNotFound );
                                 else
                                 {
@@ -2455,6 +2526,7 @@ rc_t KHttpRequestFormatMsg ( const KHttpRequest *self,
        sending it in its own header */
 
     /* TBD - should we include the port with the host name? */
+    #if 0
     rc = string_printf ( buffer, bsize, len, 
                          "%s %S://%S%S%s%S HTTP/%.2V\r\n"
                          , method
@@ -2464,6 +2536,16 @@ rc_t KHttpRequestFormatMsg ( const KHttpRequest *self,
                          , has_query
                          , & self -> url_block . query
                          , http -> vers );
+     #else
+    rc = string_printf ( buffer, bsize, len, 
+                         "%s %S%s%S HTTP/%.2V\r\nHost: %S\r\nAccept: */*\r\n"
+                         , method
+                         , & self -> url_block . path
+                         , has_query
+                         , & self -> url_block . query
+                         , http -> vers
+                         , & hostname );
+     #endif
     
 
     /* print all headers remaining into buffer */
@@ -2528,6 +2610,9 @@ rc_t KHttpRequestHandleRedirection ( KHttpRequest *self, KHttpResult *rslt )
 
                 /* close the open http connection and clear out all data except for the manager */
                 KHttpClear ( http );
+
+                /* clear the previous endpoint */
+                http -> ep_valid = false;
 
                 /* reinitialize the http from uri */
                 rc = KHttpInit ( http, &uri, NULL, http -> vers , &b . host, b . port );
@@ -2764,11 +2849,11 @@ struct KHttpFile
 static
 rc_t KHttpFileDestroy ( KHttpFile *self )
 {
-  KHttpWhack ( self -> http );
-  KDataBufferWhack ( & self -> url_buffer );
-  free ( self );
+    KHttpRelease ( self -> http );
+    KDataBufferWhack ( & self -> url_buffer );
+    free ( self );
 
-  return 0;
+    return 0;
 }
 
 static

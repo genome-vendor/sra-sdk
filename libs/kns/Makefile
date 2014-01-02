@@ -78,6 +78,7 @@ $(ILIBDIR)/libkns: $(addprefix $(ILIBDIR)/libkns.,$(ILIBEXT))
 
 KNS_NO_HTTP_SRC = \
 	kns_manager \
+	kns_manager-ext \
 	stream \
 	stream-from-files \
 	stream-from-streams \

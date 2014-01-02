@@ -1117,14 +1117,14 @@ static rc_t perform_disable( visit_ctx * octx )
 /***************************************************************************************************************/
 
 
-static rc_t perform( tool_options * options, void * data )
+static rc_t perform( tool_options * options, Args * args )
 {
     visit_ctx octx;
     rc_t rc = KDirectoryNativeDir( &octx.dir );
     if ( rc == 0 )
     {
         octx.options = options;
-        octx.data = data;
+        octx.data = NULL;
         switch( options->main_function )
         {
             case tf_report  : rc = perform_report( &octx ); break;
@@ -1133,7 +1133,7 @@ static rc_t perform( tool_options * options, void * data )
             case tf_clear   : rc = perform_clear( &octx ); break;
             case tf_enable  : rc = perform_enable( &octx ); break;
             case tf_disable : rc = perform_disable( &octx ); break;
-            case tf_unknown : rc = KOutMsg( "unknown function requested\n" ); break;
+            case tf_unknown : rc = Usage( args ); break;
         }
         KDirectoryRelease( octx.dir );
     }
@@ -1311,7 +1311,7 @@ rc_t CC KMain ( int argc, char *argv [] )
                             rc = explain_no_cache_found ();
                         }
                         else
-                            rc = perform( &options, NULL );
+                            rc = perform( &options, args );
                     }
                 }
                 clear_tool_options( &options );

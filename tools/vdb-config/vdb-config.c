@@ -194,6 +194,26 @@ static rc_t KConfigNodeReadData(const KConfigNode* self,
     return rc;
 }
 
+static rc_t _printNodeData(const char *name, const char *data, uint32_t dlen) {
+    const char ticket[] = "download-ticket";
+    size_t l = sizeof ticket - 1;
+    if (string_cmp(name, string_measure(name, NULL),
+        ticket, l, (uint32_t)l) == 0)
+    {
+        const char *ellipsis = "";
+        const char replace[] =
+"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+        if (dlen > 70) {
+            dlen = 70;
+            ellipsis = "...";
+        }
+        return OUTMSG(("%.*s%s", dlen, replace, ellipsis));
+    }
+    else {
+        return OUTMSG(("%.*s", dlen, data));
+    }
+}
+
 #define VDB_CONGIG_OUTMSG(args) do { if (xml) { OUTMSG(args); } } while (false)
 static rc_t KConfigNodePrintChildNames(bool xml, const KConfigNode* self,
     const char* name, int indent, const char* aFullpath)
@@ -233,10 +253,12 @@ static rc_t KConfigNodePrintChildNames(bool xml, const KConfigNode* self,
     {   VDB_CONGIG_OUTMSG((">")); }
     if (hasData) {
         if (xml) {
-            VDB_CONGIG_OUTMSG(("%.*s", (int)num_read, buffer));
+            _printNodeData(name, buffer, num_read);
         }
         else {
-            OUTMSG(("%s = \"%.*s\"\n", aFullpath, (uint32_t)num_read, buffer));
+            OUTMSG(("%s = \"", aFullpath));
+            _printNodeData(name, buffer, num_read);
+            OUTMSG(("\"\n"));
         }
     }
     if (hasChildren)
@@ -1064,6 +1086,7 @@ rc_t CC KMain(int argc, char* argv[]) {
         if (prm.ngc) {
             const char *newRepoParentPath = NULL;
             rc = KConfigImportNgc(cfg, prm.ngc, NULL, &newRepoParentPath);
+            DISP_RC2(rc, "cannot import ngc file", prm.ngc);
             if (rc == 0) {
                 rc = KConfigCommit(cfg);
             }

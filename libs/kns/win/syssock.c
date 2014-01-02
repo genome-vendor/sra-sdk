@@ -38,9 +38,11 @@ typedef struct KSocket KSocket;
 #include <kns/endpoint.h>
 #include <klib/rc.h>
 #include <klib/log.h>
+#include <klib/printf.h>
+#include <klib/text.h>
 #include <sysalloc.h>
 
-#include "stream-priv.h"
+#include "../stream-priv.h"
 
 #include <stdlib.h>
 #include <assert.h>
@@ -83,7 +85,7 @@ struct KSocket
     KStream dad;
     union {
         SOCKET fd;
-        char pipename[256];
+        wchar_t pipename[256];
         HANDLE pipe;
     } u;
     enum {isSocket, isIpcListener, isIpcPipeServer, isIpcPipeClient} type;
@@ -138,13 +140,13 @@ rc_t CC KSocketWhack ( KSocket *self )
         if (self->listenerPipe != INVALID_HANDLE_VALUE)
         {   /* !!! In case there is an active call to ConnectNamedPipe() on some thread, "wake" the synchronous named pipe,
             otherwise DisconnectNamedPipe/CloseHandle will block forever */
-            HANDLE hPipe = CreateFile(self->u.pipename, 
-                                      GENERIC_READ, 
-                                      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, 
-                                      NULL, 
-                                      OPEN_EXISTING, 
-                                      0, 
-                                      NULL);
+            HANDLE hPipe = CreateFileW(self->u.pipename, 
+                                       GENERIC_READ, 
+                                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, 
+                                       NULL, 
+                                       OPEN_EXISTING, 
+                                       0, 
+                                       NULL);
             if (hPipe != INVALID_HANDLE_VALUE)
                 CloseHandle(hPipe);
 
@@ -310,8 +312,8 @@ rc_t CC KSocketRead ( const KSocket *self,
     {
         ssize_t count;
         if ( self -> type == isSocket)
-            count = recv ( self -> u . fd, buffer, bsize, 0 );
-        else if (!ReadFile( self->u.pipe, buffer, bsize, &count, NULL))
+            count = recv ( self -> u . fd, buffer, (int)bsize, 0 );
+        else if (!ReadFile( self->u.pipe, buffer, (DWORD)bsize, &count, NULL))
             count = -1;
 
         if ( count >= 0 )
@@ -339,8 +341,8 @@ rc_t CC KSocketWrite ( KSocket *self,
     {
         ssize_t count;
         if ( self -> type == isSocket)
-            count = send ( self -> u . fd, buffer, bsize, 0 );
-        else if (!WriteFile( self->u.pipe, buffer, bsize, &count, NULL))
+            count = send ( self -> u . fd, buffer, (int)bsize, 0 );
+        else if (!WriteFile( self->u.pipe, buffer, (DWORD)bsize, &count, NULL))
             count = -1;
         
         if ( count >= 0 )
@@ -371,7 +373,7 @@ rc_t KSocketBind ( KSocket *self, const struct sockaddr *ss, size_t addrlen )
 {
     rc_t rc = 0;
     
-    if ( bind ( self -> u.fd, ss, addrlen ) == SOCKET_ERROR )
+    if ( bind ( self -> u.fd, ss, (int)addrlen ) == SOCKET_ERROR )
         rc = HandleErrno();
 
     return rc;    
@@ -383,17 +385,20 @@ rc_t KSocketConnect ( KSocket *self, struct sockaddr *ss, size_t addrlen )
 {
     rc_t rc = 0;
 
-    if ( connect ( self -> u . fd, ss, addrlen ) == SOCKET_ERROR )
+    if ( connect ( self -> u . fd, ss, (int)addrlen ) == SOCKET_ERROR )
         rc = HandleErrno();
 
     return rc;    
 }
 
 LIB_EXPORT
-rc_t CC KNSMakeConnection ( KStream **out, const KEndPoint *from, const KEndPoint *to )
+rc_t CC KNSManagerMakeConnection ( struct KNSManager const *self, KStream **out, const KEndPoint *from, const KEndPoint *to )
 {
     rc_t rc;
-    int fd;
+    SOCKET fd;
+
+    if ( self == NULL )
+        return RC ( rcNS, rcStream, rcConstructing, rcSelf, rcNull );
 
     if ( out == NULL )
         return RC ( rcNS, rcStream, rcConstructing, rcParam, rcNull );
@@ -448,7 +453,7 @@ rc_t CC KNSMakeConnection ( KStream **out, const KEndPoint *from, const KEndPoin
         }
         else /* bind() failed */
             rc = HandleErrno();
-        close(fd);
+        closesocket(fd);
     }
     else /* socket() failed */
         rc = HandleErrno();
@@ -456,12 +461,16 @@ rc_t CC KNSMakeConnection ( KStream **out, const KEndPoint *from, const KEndPoin
 }
 
 LIB_EXPORT
-rc_t CC KNSMakeIPCConnection ( KStream **out, const KEndPoint *to, uint8_t max_retries )
+rc_t CC KNSManagerMakeIPCConnection ( struct KNSManager const *self, KStream **out, const KEndPoint *to, uint8_t max_retries )
 {
     uint8_t retry_count = 0;
     rc_t rc;
     char pipename[256];
+    wchar_t pipenameW[256];
     size_t num_writ;
+    
+    if ( self == NULL )
+        return RC ( rcNS, rcStream, rcConstructing, rcSelf, rcNull );
 
     if ( out == NULL )
         return RC ( rcNS, rcStream, rcConstructing, rcParam, rcNull );
@@ -476,16 +485,19 @@ rc_t CC KNSMakeIPCConnection ( KStream **out, const KEndPoint *to, uint8_t max_r
 
     /* use named pipes to implement unix domain socket - like behavior */
     rc = string_printf(pipename, sizeof(pipename), &num_writ, "\\\\.\\pipe\\%s", to->u.ipc_name);
+    if (rc == 0)
+        string_cvt_wchar_copy(pipenameW, sizeof(pipenameW), pipename, num_writ);
+        
     while (rc == 0)
     {
-        HANDLE h = CreateFile(pipename,       /* pipe name */
-                              GENERIC_READ |  /* read and write access */
+        HANDLE h = CreateFileW(pipenameW,       /* pipe name */
+                               GENERIC_READ |  /* read and write access */
                                  GENERIC_WRITE, 
-                              0,              /* no sharing */
-                              NULL,           /* default security attributes */
-                              OPEN_EXISTING,  /* opens existing pipe  */
-                              0,              /* default attributes */
-                              NULL);          /* no template file */
+                               0,              /* no sharing */
+                               NULL,           /* default security attributes */
+                               OPEN_EXISTING,  /* opens existing pipe  */
+                               0,              /* default attributes */
+                               NULL);          /* no template file */
         if ( h != INVALID_HANDLE_VALUE )
         {   /* create the KSocket */
             KSocket* ksock;
@@ -519,7 +531,7 @@ rc_t CC KNSMakeIPCConnection ( KStream **out, const KEndPoint *to, uint8_t max_r
         }
         else if (GetLastError() == ERROR_PIPE_BUSY)
         {
-            if (!WaitNamedPipe(pipename, NMPWAIT_USE_DEFAULT_WAIT))
+            if (!WaitNamedPipeW(pipenameW, NMPWAIT_USE_DEFAULT_WAIT))
             {   // timeout, try again
                 if ( retry_count < max_retries )
                 {
@@ -551,11 +563,14 @@ rc_t CC KNSMakeIPCConnection ( KStream **out, const KEndPoint *to, uint8_t max_r
 }
 
 LIB_EXPORT
-rc_t CC KNSMakeListener( struct KSocket** out, struct KEndPoint const * ep )
+rc_t CC KNSManagerMakeListener( struct KNSManager const *self, struct KSocket** out, struct KEndPoint const * ep )
 {   
     rc_t rc = 0;
     KSocket* ksock;
 
+    if ( self == NULL )
+        return RC ( rcNS, rcStream, rcConstructing, rcSelf, rcNull );
+    
     if ( out == NULL )
         return RC ( rcNS, rcStream, rcConstructing, rcParam, rcNull );
 
@@ -578,7 +593,11 @@ rc_t CC KNSMakeListener( struct KSocket** out, struct KEndPoint const * ep )
         if ( rc == 0 )
         {
             size_t num_writ;
-            rc = string_printf(ksock->u.pipename, sizeof(ksock->u.pipename), &num_writ, "\\\\.\\pipe\\%s", ep->u.ipc_name);
+            char pipename[256];
+            rc = string_printf(pipename, sizeof(pipename), &num_writ, "\\\\.\\pipe\\%s", ep->u.ipc_name);
+            if (rc == 0)
+                string_cvt_wchar_copy(ksock->u.pipename, sizeof(ksock->u.pipename), pipename, num_writ);
+                
             if (rc == 0)
             {
                 ksock -> type = isIpcListener;
@@ -596,32 +615,32 @@ rc_t CC KNSMakeListener( struct KSocket** out, struct KEndPoint const * ep )
 }
 
 LIB_EXPORT 
-rc_t CC KNSListen ( struct KSocket *listener, struct KStream **out )
+rc_t CC KSocketListen ( struct KSocket *listener, struct KStream **out )
 {
     rc_t rc = 0;
 
+    if ( listener == NULL )
+        return RC ( rcNS, rcNoTarg, rcValidating, rcSelf, rcNull);
+        
     if ( out == NULL )
         return RC ( rcNS, rcStream, rcConstructing, rcParam, rcNull );
 
     * out = NULL;
 
-    if ( listener == NULL )
-        return RC ( rcNS, rcNoTarg, rcValidating, rcParam, rcNull);
-        
     if (listener->type != isIpcListener)
         return RC ( rcNS, rcNoTarg, rcValidating, rcParam, rcInvalid);
 
     {
-        listener->listenerPipe = CreateNamedPipe(listener->u.pipename,    /* pipe name */
-                                   PIPE_ACCESS_DUPLEX,      /* read/write access  */
-                                   PIPE_TYPE_MESSAGE |      /* message type pipe  */
-                                   PIPE_READMODE_MESSAGE |  /* message-read mode  */
-                                   PIPE_WAIT,               /* blocking mode  */
-                                   PIPE_UNLIMITED_INSTANCES,/* max. instances   */
-                                   1024,                    /* output buffer size  */
-                                   1024,                    /* input buffer size  */
-                                   0,                       /* client time-out  */
-                                   NULL);                   /* default security attribute  */
+        listener->listenerPipe = CreateNamedPipeW(listener->u.pipename,    /* pipe name */
+                                                  PIPE_ACCESS_DUPLEX,      /* read/write access  */
+                                                  PIPE_TYPE_MESSAGE |      /* message type pipe  */
+                                                  PIPE_READMODE_MESSAGE |  /* message-read mode  */
+                                                  PIPE_WAIT,               /* blocking mode  */
+                                                  PIPE_UNLIMITED_INSTANCES,/* max. instances   */
+                                                  1024,                    /* output buffer size  */
+                                                  1024,                    /* input buffer size  */
+                                                  0,                       /* client time-out  */
+                                                  NULL);                   /* default security attribute  */
         if ( listener->listenerPipe != INVALID_HANDLE_VALUE )
         {
             while (1)

@@ -129,6 +129,11 @@ VDB_EXTERN rc_t CC VDatabaseOpenKDatabaseRead ( struct VDatabase const *self, st
 VDB_EXTERN rc_t CC VDatabaseOpenKDatabaseUpdate ( struct VDatabase *self, struct KDatabase **kdb );
 
 
+/* IsCSRA
+ *  ask an open database if it conforms to cSRA schema
+ */
+VDB_EXTERN bool CC VDatabaseIsCSRA ( struct VDatabase const *self );
+
 
 /*--------------------------------------------------------------------------
  * VTable

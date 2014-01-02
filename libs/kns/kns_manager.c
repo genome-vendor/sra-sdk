@@ -97,6 +97,17 @@ static rc_t KNSManager_Make_DlCurl( KDyld ** dl )
 
 static rc_t KNSManagerLoadLib( struct KNSManager *self )
 {
+#ifdef HAVE_LIBCURL /* just link directly */
+    self->curl_easy_init_fkt      = &curl_easy_init;
+    self->curl_easy_cleanup_fkt   = &curl_easy_cleanup;
+    self->curl_easy_setopt_fkt    = &curl_easy_setopt;
+    self->curl_easy_perform_fkt   = &curl_easy_perform;
+    self->curl_easy_getinfo_fkt   = &curl_easy_getinfo;
+    self->curl_slist_append_fkt   = &curl_slist_append;
+    self->curl_slist_free_all_fkt = &curl_slist_free_all;
+
+    return 0;
+#else
     KDyld *dl;
     /* make a dynamic-library loader */
     rc_t rc = KDyldMake ( &dl );
@@ -201,7 +212,7 @@ static rc_t KNSManagerLoadLib( struct KNSManager *self )
     }
 
     return rc;
-
+#endif
 }
 
 
@@ -265,6 +276,22 @@ LIB_EXPORT rc_t CC KNSManagerCurlVersion( const struct KNSManager *self, const c
         return self->create_rc;
     *version_string = self->curl_version_fkt();
     return 0;
+}
+
+
+LIB_EXPORT void KNSManagerSetVerbose ( struct KNSManager *self, bool verbosity )
+{
+    if ( self != NULL )
+        self->verbose = verbosity;
+}
+
+
+LIB_EXPORT bool KNSManagerIsVerbose ( struct KNSManager *self )
+{
+    if ( self != NULL )
+        return self->verbose;
+    else
+        return false;
 }
 
 

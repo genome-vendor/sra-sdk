@@ -34,7 +34,7 @@
 /* =========================================================================================== */
 
 
-static int cmp_pchar( const char * a, const char * b )
+int cmp_pchar( const char * a, const char * b )
 {
     int res = 0;
     if ( ( a != NULL )&&( b != NULL ) )
@@ -796,7 +796,13 @@ static rc_t gather_flag_options( Args * args, samdump_opts * opts )
     rc = get_bool_option( args, OPT_CIGAR_CG_M, &opts->merge_cg_cigar );
     if ( rc != 0 ) return rc;
 
+    /* do we enable rna-splicing */
     rc = get_bool_option( args, OPT_RNA_SPLICE, &opts->rna_splicing );
+    if ( rc != 0 ) return rc;
+    
+    /* do we disable multi-threading */    
+    rc = get_bool_option( args, OPT_NO_MT, &opts->no_mt );
+    
     return rc;
 }
 
@@ -1266,6 +1272,8 @@ void report_options( const samdump_opts * opts )
     KOutMsg( "use min-mapq          : %s\n",  opts->use_min_mapq ? "YES" : "NO" );
     KOutMsg( "min-mapq              : %i\n",  opts->min_mapq );
     KOutMsg( "rna-splicing          : %s\n",  opts->rna_splicing ? "YES" : "NO" );
+
+    KOutMsg( "multithreading        : %s\n",  opts->no_mt ? "NO" : "YES" );    
 }
 
 

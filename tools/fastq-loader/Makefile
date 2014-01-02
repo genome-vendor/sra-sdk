@@ -93,14 +93,6 @@ clean: stdclean
 .PRECIOUS: $(INTERM_SRC)
 
 #-------------------------------------------------------------------------------
-# tag
-#
-tag: \
-	$(addsuffix _tag,$(ALL_LIBS))
-
-.PHONY: tag $(addsuffix _tag,$(ALL_LIBS))
-
-#-------------------------------------------------------------------------------
 # fastq
 #
 $(ILIBDIR)/libfastqloader: $(ILIBDIR)/libfastqloader.$(LIBX)

@@ -25,7 +25,7 @@
 
 default: std
 
-TOP ?= $(shell ../../../build/abspath.sh ../../..)
+TOP ?= $(abspath ../../..)
 MODULE = libs/ext/zlib
 
 include $(TOP)/build/Makefile.env
@@ -112,6 +112,7 @@ ZLIB_TAR_GZ = \
 
 ifeq (win,$(OS))
 ECHO_VERS = echo -ne $(ZLIB_VERS) "\n"
+CFLAGS := $(CFLAGS) -D_CRT_SECURE_NO_WARNINGS -D_CRT_NONSTDC_NO_DEPRECATE
 else
 ECHO_VERS = echo $(ZLIB_VERS)
 endif

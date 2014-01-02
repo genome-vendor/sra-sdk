@@ -1028,7 +1028,7 @@ rc_t VPathParse ( VPath * self, const char * uri, size_t uri_size )
             {
                 state = vppOidRel;
                 oid = ch - '0';
-                oid_anchor = i;
+                oid_anchor = (uint32_t)i;
             }
 
             else if ( ch != '/' )
@@ -1279,7 +1279,7 @@ rc_t VPathParse ( VPath * self, const char * uri, size_t uri_size )
             else if ( isdigit ( ch ) )
             {
                 if ( oid == 0 )
-                    oid_anchor = i;
+                    oid_anchor = (uint32_t)i;
 
                 oid *= 10;
                 oid += ch - '0';
@@ -3256,7 +3256,7 @@ LIB_EXPORT rc_t CC VPathOption ( const VPath * self, VPOption_t option,
 }
 
 
-rc_t LegacyVPathMake ( VPath ** new_path, const char * posix_path )
+LIB_EXPORT rc_t LegacyVPathMake ( VPath ** new_path, const char * posix_path )
 {
     return LegacyVPathMakeFmt ( new_path, posix_path );
 }

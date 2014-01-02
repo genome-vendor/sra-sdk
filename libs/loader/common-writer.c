@@ -258,7 +258,6 @@ static unsigned SeqHashKey(void const *const key, size_t const keylen)
     return (h1 << 8) | h2;
 }
 
-
 #define USE_ILLUMINA_NAMING_POUND_NUMBER_SLASH_HACK 1
 
 static size_t GetFixedNameLength(char const name[], size_t const namelen)
@@ -583,6 +582,7 @@ rc_t WriteSoloFragments(const CommonWriterSettings* settings, SpotAssembler* ctx
             srec.cskey[read] = fip->cskey;
             memcpy(srec.seq + srec.readStart[read], src, srec.readLen[read]);
             src += fip->readlen;
+            
             memcpy(srec.qual + srec.readStart[read], src, srec.readLen[read]);
             src += fip->readlen;
             srec.spotGroup = (char *)src;
@@ -1529,6 +1529,8 @@ rc_t ArchiveFile(const struct ReaderFile *const reader,
                 }
                 else if (squal != NULL)
                     memcpy(qual, squal, csSeqLen);
+                else
+                    memset(qual, 0, csSeqLen);
                 readlen = csSeqLen;
             }
         }
@@ -1570,7 +1572,7 @@ rc_t ArchiveFile(const struct ReaderFile *const reader,
         }
         if (mated) {
             if (isPrimary || !originally_aligned) {
-                if (value->spotId != 0) {
+                if (CTX_VALUE_GET_S_ID(*value) != 0) {
                     (void)PLOGMSG(klogWarn, (klogWarn, "Spot '$(name)' has already been assigned a spot id", "name=%.*s", namelen, name));
                 }
                 else if (!value->has_a_read) {
@@ -1770,7 +1772,7 @@ rc_t ArchiveFile(const struct ReaderFile *const reader,
                 }
             }
         }
-        else if (wasInserted & (isPrimary || !originally_aligned)) {
+        else if (CTX_VALUE_GET_S_ID(*value) == 0 && (isPrimary || !originally_aligned)) {
             /* new unmated fragment - no spot assembly */
             unsigned readLen[1];
 

@@ -2298,8 +2298,8 @@ rc_t print_padding ( KBufferedWrtHandler *out, size_t count, char pad_char )
             num_writ = count - total;
         else
         {
-            uint32_t i = out -> cur;
-            uint32_t lim = out -> cur + count - total;
+            size_t i = out -> cur;
+            size_t lim = out -> cur + count - total;
             if ( lim > out -> bsize )
                 lim = out -> bsize;
             for ( num_writ = lim - i; i < lim; ++ i )
@@ -2538,7 +2538,8 @@ rc_t structured_print_engine ( KBufferedWrtHandler *out,
                 f . type = sptString;
                 if ( f . u . f . precision < S . len )
 #if STDC_COMPATIBILITY  &&  !defined(__GLIBC__)
-                    S . size = S . len = f . u . f . precision;
+                    S . size = f . u . f . precision;
+                    S . len = (uint32_t) f . u . f . precision;
 #else
                     StringInit ( & S, "", 0, 0 );
 #endif                    
@@ -2710,7 +2711,7 @@ rc_t structured_print_engine ( KBufferedWrtHandler *out,
         case sptBytesPrinted:
             n = args [ arg_idx ] . n;
             if ( n != NULL )
-                * n = out -> cur + out -> flushed;
+                * n = (uint32_t) ( out -> cur + out -> flushed );
             ++ arg_idx;
             continue;
 #endif
@@ -2725,7 +2726,7 @@ rc_t structured_print_engine ( KBufferedWrtHandler *out,
         case sptSignedInt16Vect:
         case sptSignedInt32Vect:
         case sptSignedInt64Vect:
-            f64 = i64;
+            f64 = (double) i64;
             break;
 
         case sptUnsignedInt:
@@ -2733,14 +2734,14 @@ rc_t structured_print_engine ( KBufferedWrtHandler *out,
         case sptUnsignedInt16Vect:
         case sptUnsignedInt32Vect:
         case sptUnsignedInt64Vect:
-            f64 = u64;
+            f64 = (double) u64;
             break;
 
         case sptFloat:
         case sptFloat32Vect:
         case sptFloat64Vect:
         case sptFloatLongVect:
-            i64 = f64;
+            i64 = (int64_t) f64;
             break;
 
         case sptChar:
@@ -2755,10 +2756,10 @@ rc_t structured_print_engine ( KBufferedWrtHandler *out,
             return RC ( rcText, rcString, rcConverting, rcType, rcUnsupported );
 
         case sptRowId:
-            f64 = i64;
+            f64 = (double) i64;
             break;
         case sptRowLen:
-            f64 = u64;
+            f64 = (double) u64;
             break;
 
 #if SUPPORT_PERCENT_N
@@ -3111,12 +3112,12 @@ rc_t structured_print_engine ( KBufferedWrtHandler *out,
             break;
 
         case spfRC:
-            dst_len = KWrtFmt_rc_t ( text, sizeof text, f . explain_rc ? "#" : "", ( rc_t ) u64 );
+            dst_len = (uint32_t) KWrtFmt_rc_t ( text, sizeof text, f . explain_rc ? "#" : "", ( rc_t ) u64 );
             StringInit ( & S, text, dst_len, dst_len );
             break;
 
         case spfOSErr:
-            dst_len = KWrtFmt_error_code ( text, sizeof text, ( int ) i64 );
+            dst_len = (uint32_t) KWrtFmt_error_code ( text, sizeof text, ( int ) i64 );
             StringInit ( & S, text, dst_len, dst_len );
             break;
 
@@ -3134,7 +3135,7 @@ rc_t structured_print_engine ( KBufferedWrtHandler *out,
         {
             assert ( S . addr != NULL );
             assert ( S . size != 0 || S . len == 0 );
-            if ( StringSubstr ( & S, & S, text_start, text_lim ) == NULL )
+            if ( StringSubstr ( & S, & S, ( uint32_t ) text_start, ( uint32_t ) text_lim ) == NULL )
                 StringInit ( & S, "", 0, 0 );
         }
 
@@ -3149,7 +3150,7 @@ rc_t structured_print_engine ( KBufferedWrtHandler *out,
         if ( f . left_fill != 0 && f . u . f . min_field_width > dst_len )
         {
             assert ( S . size != 0 || S . len == 0 );
-            left_pad += f . u . f . min_field_width - dst_len;
+            left_pad += ( uint32_t ) ( f . u . f . min_field_width ) - dst_len;
             dst_len = ( uint32_t ) f . u . f . min_field_width;
         }
 

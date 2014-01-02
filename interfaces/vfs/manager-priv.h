@@ -43,11 +43,6 @@
 extern "C" {
 #endif
 
-#define ENV_KRYPTO_PWFILE       "VDB_PWFILE"
-#define KFG_KRYPTO_PWFILE         "krypto/pwfile"
-#define KFG_KRYPTO_PWFD         "krypto/pwfd"
-
-
 struct VFSManager;
 struct KDirectory;
 struct KFile;

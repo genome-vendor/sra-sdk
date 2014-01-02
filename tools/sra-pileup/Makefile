@@ -87,6 +87,8 @@ clean: stdclean
 TOOL_SRC = \
 	cmdline_cmn \
 	reref \
+	ref_regions \
+	ref_walker \
 	sra-pileup
 
 TOOL_OBJ = \

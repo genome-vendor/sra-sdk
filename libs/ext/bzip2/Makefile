@@ -104,6 +104,7 @@ BZIP2_TAR_GZ = \
 
 ifeq (win,$(OS))
 ECHO_VERS = echo -ne $(BZIP2_VERS) "\n"
+CFLAGS := $(CFLAGS) -D_CRT_SECURE_NO_WARNINGS -D_CRT_NONSTDC_NO_DEPRECATE
 else
 ECHO_VERS = echo $(BZIP2_VERS)
 endif

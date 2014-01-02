@@ -261,19 +261,20 @@ static float BGZFileProPos(BGZFile const *const self)
 
 static rc_t BGZFileSetPos(BGZFile *const self, uint64_t const pos)
 {
-    unsigned const bpos = (unsigned)(pos - self->fpos); /* < 64k */
-    
-    if (self->fpos <= pos && pos < self->fpos + self->bcount) {
-        self->bpos = bpos;
+    if (self->fpos > pos || pos >= self->fpos + self->bcount) {
+        /* desired position is outside of current buffer */
+        self->fpos = pos ^ (pos & ((uint64_t)(MEM_ALIGN_SIZE - 1)));
+        self->bpos = (unsigned)(pos - self->fpos);
+        self->bcount = 0; /* force re-read */
+    }
+    else {
+        /* desired position is inside of current buffer */
+        unsigned const bpos = (unsigned)(pos - self->fpos); /* < 64k */
+
+        self->bpos = bpos; /* pos - self->fpos; */
         self->zs.avail_in = (uInt)(self->bcount - bpos);
         self->zs.next_in = (Bytef *)&self->buf[bpos];
     }
-    else {
-        self->fpos = pos & ~((uint64_t)(MEM_ALIGN_SIZE - 1));
-        self->bpos = bpos;
-        self->bcount = 0; /* force re-read */
-    }
-
     return 0;
 }
 

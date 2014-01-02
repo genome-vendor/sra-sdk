@@ -362,8 +362,30 @@ static unsigned HashKey(void const *key, unsigned keylen)
     return h;
 }
 
-static rc_t GetKeyID(context_t *const ctx, uint64_t *const rslt, bool *const wasInserted, char const key[], char const name[], unsigned const namelen)
+#define USE_ILLUMINA_NAMING_POUND_NUMBER_SLASH_HACK 1
+
+static size_t GetFixedNameLength(char const name[], size_t const namelen)
 {
+#if USE_ILLUMINA_NAMING_POUND_NUMBER_SLASH_HACK
+    char const *const pound = string_chr(name, namelen, '#');
+    
+    if (pound && pound + 2u < name + namelen && pound[1] >= '0' && pound[1] <= '9' && pound[2] == '/') {
+        return (size_t)(pound - name) + 2u;
+    }
+#endif
+    return namelen;
+}
+
+static
+rc_t GetKeyID(context_t *const ctx,
+              uint64_t *const rslt,
+              bool *const wasInserted,
+              char const key[],
+              char const name[],
+              size_t const o_namelen)
+{
+    size_t const namelen = GetFixedNameLength(name, o_namelen);
+
     if (ctx->key2id_max == 1)
         return GetKeyIDOld(ctx, rslt, wasInserted, key, name, namelen);
     else {
@@ -462,6 +484,7 @@ static rc_t GetKeyID(context_t *const ctx, uint64_t *const rslt, bool *const was
             tmpKey = ctx->idCount[f];
             rc = KBTreeEntry(ctx->key2id[f], &tmpKey, wasInserted, name, namelen);
             if (rc == 0) {
+              /*              fprintf(stderr, "GetKeyID: { Key: '%s', Name: '%.*s', id: '%u:%x', new: %s }\n", key, (int)namelen, name, (unsigned)f, (unsigned)tmpKey, *wasInserted ? "true" : "false"); */
                 *rslt = (((uint64_t)f) << 32) | tmpKey;
                 if (*wasInserted)
                     ++ctx->idCount[f];
@@ -1587,7 +1610,7 @@ static rc_t ProcessBAM(char const bamFile[], context_t *ctx, VDatabase *db,
                 }
             }
         }
-        else if (wasInserted & (isPrimary || !originally_aligned)) {
+        else if (CTX_VALUE_GET_S_ID(*value) == 0 && (isPrimary || !originally_aligned)) {
             /* new unmated fragment - no spot assembly */
             unsigned readLen[1];
             

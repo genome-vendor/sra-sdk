@@ -26,11 +26,13 @@
 
 #include "ascp-priv.h" /* STS_DBG */
 
-#include <kfs/directory.h> // KDirectory
-#include <kfs/impl.h> // KSysDir
+#include <kfs/directory.h> /* KDirectory */
+#include <kfs/impl.h> /* KSysDir */
+#include <kfs/kfs-priv.h> /* KSysDirOSPath */
 
 #include <klib/log.h> /* LOGERR */
 #include <klib/out.h> /* OUTMSG */
+#include <klib/printf.h> /* string_printf */
 #include <klib/rc.h>
 #include <klib/status.h> /* STSMSG */
 
@@ -48,7 +50,7 @@ static rc_t posixStringToSystemString(char *buffer, size_t len,
     rc_t rc = KDirectoryNativeDir(&wd);
     struct KSysDir *sysDir = KDirectoryGetSysDir(wd);
     wchar_t wd_path[MAX_PATH];
-    int ret = 0;
+    size_t ret = 0;
     va_list args;
     va_start(args, path);
     rc = KSysDirOSPath(sysDir, wd_path, sizeof wd_path, path, args);
@@ -120,7 +122,7 @@ static rc_t mkAscpCommand(char *buffer, size_t len,
     }
 
     rc = string_printf(buffer, len, &num_writ,
-        "%s -i \"%s\" -pQTk1%s%s%s%s%s%s %s %s",
+        "\"%s\" -i \"%s\" -pQTk1%s%s%s%s%s%s %s %s",
         path, key,
         maxRate == NULL ? "" : " -l", maxRate == NULL ? "" : maxRate,
         host == NULL ? "" : " --host ", host == NULL ? "" : host,
@@ -136,8 +138,9 @@ static rc_t mkAscpCommand(char *buffer, size_t len,
     return rc;
 }
 
-static int execute(const char *command, uint64_t heartbeat, bool cacheKey,
-    bool *writeFailed, bool *canceled, const char *name, TQuitting *quitting)
+static int execute(const char *command, uint64_t heartbeat,
+    bool cacheKey, bool *writeFailed, bool *canceled,
+    const char *name, TQuitting *quitting)
 {
     DWORD exitCode = STILL_ACTIVE;
     HANDLE g_hChildStd_IN_Rd = NULL;
@@ -233,7 +236,7 @@ static int execute(const char *command, uint64_t heartbeat, bool cacheKey,
         String line;
         StringInit(&line, NULL, 0, 0);
         if (heartbeat > 0) {
-            dwMillisecondsRemains = heartbeat;
+            dwMillisecondsRemains = (DWORD)heartbeat;
         }
         // Write to the pipe that is the standard input for a child process. 
         // Data is written to the pipe's buffers, so it is not necessary to wait
@@ -315,9 +318,9 @@ static int execute(const char *command, uint64_t heartbeat, bool cacheKey,
                                     l = line.len;
                                     WriteFile(hParentStdOut, "\r", 1,
                                         &dwWritten, NULL);
-                                    bSuccess = WriteFile(hParentStdOut, p, l,
-                                        &dwWritten, NULL);
-                                    dwMillisecondsRemains = heartbeat;
+                                    bSuccess = WriteFile(hParentStdOut, p,
+                                        (DWORD)l, &dwWritten, NULL);
+                                    dwMillisecondsRemains = (DWORD)heartbeat;
                                     progressing = true;
                                 }
                             }

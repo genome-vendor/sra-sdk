@@ -26,8 +26,10 @@
 
 #include "sra-pileup.vers.h"
 
+#include "ref_regions.h"
 #include "cmdline_cmn.h"
 #include "reref.h"
+#include "ref_walker.h"
 
 #include <kapp/main.h>
 
@@ -35,6 +37,7 @@
 #include <klib/printf.h>
 #include <klib/report.h>
 #include <klib/sort.h>
+#include <klib/vector.h>
 
 #include <kfs/file.h>
 #include <kfs/buffile.h>
@@ -43,9 +46,12 @@
 
 #include <insdc/sra.h>
 
+#include <kdb/manager.h>
+
 #include <vdb/manager.h>
 #include <vdb/schema.h>
-#include <vdb/report.h> /* ReportSetVDBManager */
+#include <vdb/report.h> /* ReportSetVDBManager() */
+#include <vdb/vdb-priv.h> /* VDBManagerDisablePagemapThread() */
 
 #include <sra/sraschema.h>
 #include <align/manager.h>
@@ -80,6 +86,8 @@
 #define OPTION_SEQNAME "seqname"
 #define ALIAS_SEQNAME  "e"
 
+#define OPTION_MIN_M   "minmismatch"
+
 #define OPTION_FUNC    "function"
 #define ALIAS_FUNC     NULL
 
@@ -88,6 +96,8 @@
 #define FUNC_RE_REF     "ref"
 #define FUNC_RE_REF_EXT "ref-ex"
 #define FUNC_DEBUG      "debug"
+#define FUNC_MISMATCH   "mismatch"
+#define FUNC_TEST       "test"
 
 enum
 {
@@ -96,7 +106,9 @@ enum
     sra_pileup_stat = 2,
     sra_pileup_report_ref = 3,
     sra_pileup_report_ref_ext = 4,
-    sra_pileup_debug = 5
+    sra_pileup_debug = 5,
+    sra_pileup_mismatch = 6,
+    sra_pileup_test = 7
 };
 
 static const char * minmapq_usage[]         = { "Minimum mapq-value, ", 
@@ -115,10 +127,13 @@ static const char * spotgrp_usage[]         = { "divide by spotgroups", NULL };
 
 static const char * seqname_usage[]         = { "use original seq-name", NULL };
 
+static const char * min_m_usage[]           = { "min percent of mismatches used in function mismatch, def is 5%", NULL };
+
 static const char * func_ref_usage[]        = { "list references", NULL };
 static const char * func_ref_ex_usage[]     = { "list references + coverage", NULL };
 static const char * func_count_usage[]      = { "sort pileup with counters", NULL };
 static const char * func_stat_usage[]       = { "strand/tlen statistic", NULL };
+static const char * func_mismatch_usage[]   = { "only lines with mismatch", NULL };
 static const char * func_usage[]            = { "alternative functionality", NULL };
 
 OptDef MyOptions[] =
@@ -131,6 +146,7 @@ OptDef MyOptions[] =
     { OPTION_SHOWID,  ALIAS_SHOWID,  NULL, showid_usage,  1,        false,       false },
     { OPTION_SPOTGRP, ALIAS_SPOTGRP, NULL, spotgrp_usage, 1,        false,       false },
     { OPTION_SEQNAME, ALIAS_SEQNAME, NULL, seqname_usage, 1,        false,       false },
+    { OPTION_MIN_M,   NULL,          NULL, min_m_usage,   1,        true,        false },    
     { OPTION_FUNC,    ALIAS_FUNC,    NULL, func_usage,    1,        true,        false }
 };
 
@@ -147,6 +163,7 @@ typedef struct pileup_options
     bool div_by_spotgrp;
     bool use_seq_name;
     uint32_t minmapq;
+    uint32_t min_mismatch;
     uint32_t source_table;
     uint32_t function;  /* sra_pileup_samtools, sra_pileup_counters, sra_pileup_stat, 
                            sra_pileup_report_ref, sra_pileup_report_ref_ext, sra_pileup_debug */
@@ -248,6 +265,9 @@ static rc_t get_pileup_options( Args * args, pileup_options *opts )
         rc = get_uint32_option( args, OPTION_MINMAPQ, &opts->minmapq, 0 );
 
     if ( rc == 0 )
+        rc = get_uint32_option( args, OPTION_MIN_M, &opts->min_mismatch, 5 );
+        
+    if ( rc == 0 )
         rc = get_bool_option( args, OPTION_DUPS, &opts->process_dups, false );
 
     if ( rc == 0 )
@@ -281,6 +301,10 @@ static rc_t get_pileup_options( Args * args, pileup_options *opts )
                 opts->function = sra_pileup_report_ref_ext;
             else if ( cmp_pchar( fkt, FUNC_DEBUG ) == 0 )
                 opts->function = sra_pileup_debug;
+            else if ( cmp_pchar( fkt, FUNC_MISMATCH ) == 0 )
+                opts->function = sra_pileup_mismatch;
+            else if ( cmp_pchar( fkt, FUNC_TEST ) == 0 )
+                opts->function = sra_pileup_test;
         }
     }
     return rc;
@@ -326,12 +350,14 @@ rc_t CC Usage ( const Args * args )
     HelpOptionLine ( ALIAS_DUPS, OPTION_DUPS, "dup-mode", dups_usage );
     HelpOptionLine ( ALIAS_SPOTGRP, OPTION_SPOTGRP, "spotgroups-modes", spotgrp_usage );
     HelpOptionLine ( ALIAS_SEQNAME, OPTION_SEQNAME, NULL, seqname_usage );
-
+    HelpOptionLine ( NULL, OPTION_MIN_M, NULL, min_m_usage );
+    
     HelpOptionLine ( NULL, "function ref",      NULL, func_ref_usage );
     HelpOptionLine ( NULL, "function ref-ex",   NULL, func_ref_ex_usage );
     HelpOptionLine ( NULL, "function count",    NULL, func_count_usage );
     HelpOptionLine ( NULL, "function stat",     NULL, func_stat_usage );
-
+    HelpOptionLine ( NULL, "function mismatch", NULL, func_mismatch_usage );
+    
     HelpOptionsStandard ();
     HelpVersion ( fullpath, KAppVersion() );
     return rc;
@@ -369,7 +395,7 @@ ver_t CC KAppVersion ( void )
 ***************************************/
 
 
-char _4na_2_ascii_tab[] =
+static char _4na_2_ascii_tab[] =
 {
 /*  0x0  0x01 0x02 0x03 0x04 0x05 0x06 0x07 0x08 0x09 0x0A 0x0B 0x0C 0x0D 0x0E 0x0F */
     'N', 'A', 'C', 'M', 'G', 'R', 'S', 'V', 'T', 'W', 'Y', 'H', 'K', 'D', 'B', 'N',
@@ -823,7 +849,7 @@ static rc_t walk_ref_position( ReferenceIterator *ref_iter,
         rc = add_char_2_dyn_string( line, '$' );
 
     if ( options->show_id )
-        rc = print_2_dyn_string( line, "(%lu:%u-%u/%u)",
+        rc = print_2_dyn_string( line, "(%,lu:%,d-%,d/%u)",
                                  rec->id, rec->pos + 1, rec->pos + rec->len, seq_pos );
 
     return rc;
@@ -1699,6 +1725,85 @@ static rc_t walk_counters( ReferenceIterator *ref_iter, pileup_options *options 
 /* =========================================================================================== */
 
 
+static rc_t print_mismatches_line( const char * ref_name,
+                                   INSDC_coord_zero ref_pos,
+                                   uint32_t depth,
+                                   uint32_t min_mismatch_percent,
+                                   pileup_counters * counters )
+{
+    rc_t rc = 0;
+    if ( depth > 0 )
+    {
+        uint32_t total_mismatches = counters->mismatches[ 0 ] +
+                                    counters->mismatches[ 1 ] +
+                                    counters->mismatches[ 2 ] +
+                                    counters->mismatches[ 3 ];
+	if ( total_mismatches * 100 >= min_mismatch_percent * depth) 
+        {
+                rc = KOutMsg( "%s\t%u\t%u\t%u\n", ref_name, ref_pos + 1, depth, total_mismatches );
+        }
+    }
+    
+    free_fragments( &(counters->insert_fragments) );
+    free_fragments( &(counters->delete_fragments) );
+
+    return rc;
+}
+
+
+/* ........................................................................................... */
+
+
+static rc_t CC walk_mismatches_enter_ref_pos( walk_data * data )
+{
+    clear_counters( data->data );
+    return 0;
+}
+
+static rc_t CC walk_mismatches_exit_ref_pos( walk_data * data )
+{
+    rc_t rc = print_mismatches_line( data->ref_name, data->ref_pos,
+                                     data->depth, data->options->min_mismatch, data->data );
+    return rc;
+}
+
+static rc_t CC walk_mismatches_placement( walk_data * data )
+{
+    walk_counter_state( data->ref_iter, data->state, data->xrec->reverse, data->data );
+    return 0;
+}
+
+static rc_t walk_mismatches( ReferenceIterator *ref_iter, pileup_options * options )
+{
+    walk_data data;
+    walk_funcs funcs;
+    pileup_counters counters;
+
+    data.ref_iter = ref_iter;
+    data.options = options;
+    data.data = &counters;
+
+    funcs.on_enter_ref = NULL;
+    funcs.on_exit_ref = NULL;
+
+    funcs.on_enter_ref_window = NULL;
+    funcs.on_exit_ref_window = NULL;
+
+    funcs.on_enter_ref_pos = walk_mismatches_enter_ref_pos;
+    funcs.on_exit_ref_pos = walk_mismatches_exit_ref_pos;
+
+    funcs.on_enter_spotgroup = NULL;
+    funcs.on_exit_spotgroup = NULL;
+
+    funcs.on_placement = walk_mismatches_placement;
+
+    return walk( &data, &funcs );
+}
+
+
+/* =========================================================================================== */
+
+
 typedef struct tlen_array
 {
     uint32_t * values;
@@ -2064,6 +2169,7 @@ static rc_t walk_stat( ReferenceIterator *ref_iter, pileup_options *options )
     return rc;
 }
 
+
 /* =========================================================================================== */
 
 static rc_t add_quality_and_orientation( const VTable *tbl, const VCursor ** cursor,
@@ -2211,7 +2317,7 @@ static rc_t CC prepare_section_cb( prepare_ctx * ctx, uint32_t start, uint32_t e
     {
         rc = SILENT_RC ( rcApp, rcNoTarg, rcOpening, rcSelf, rcInvalid );
         /* it is opened in prepare_db_table even if ctx->db == NULL */
-        PLOGERR(klogInt, (klogInt, rc, "failed to process $(path)",
+        PLOGERR( klogErr, ( klogErr, rc, "failed to process $(path)",
             "path=%s", ctx->path == NULL ? "input argument" : ctx->path));
         ReportSilence();
     }
@@ -2367,24 +2473,55 @@ static rc_t CC on_argument( const char * path, const char * spot_group, void * d
 {
     rc_t rc = 0;
     foreach_arg_ctx * ctx = ( foreach_arg_ctx * )data;
-    prepare_ctx prep;   /* from cmdline_cmn.h */
 
-    prep.omit_qualities = ctx->options->omit_qualities;
-    prep.read_tlen = ctx->options->read_tlen;
-    prep.use_primary_alignments = ( ( ctx->options->cmn.tab_select & primary_ats ) == primary_ats );
-    prep.use_secondary_alignments = ( ( ctx->options->cmn.tab_select & secondary_ats ) == secondary_ats );
-    prep.use_evidence_alignments = ( ( ctx->options->cmn.tab_select & evidence_ats ) == evidence_ats );
-    prep.ref_iter = ctx->ref_iter;
-    prep.spot_group = spot_group;
-    prep.on_section = prepare_section_cb;
-    prep.data = ctx->cursor_ids;
-    prep.path = path;
-
-    rc = prepare_ref_iter( &prep, ctx->vdb_mgr, ctx->vdb_schema, path, ctx->ranges ); /* cmdline_cmn.c */
-    if ( rc == 0 && prep.db == NULL )
+    int path_type = ( VDBManagerPathType ( ctx->vdb_mgr, "%s", path ) & ~ kptAlias );
+    if ( path_type != kptDatabase )
     {
-        rc = RC ( rcApp, rcNoTarg, rcOpening, rcSelf, rcInvalid );
-        LOGERR( klogInt, rc, "unsupported source" );
+        rc = RC ( rcApp, rcNoTarg, rcOpening, rcItem, rcUnsupported );
+        PLOGERR( klogErr, ( klogErr, rc, "failed to open '$(path)', it is not a vdb-database", "path=%s", path ) );
+    }
+    else
+    {
+        const VDatabase *db;
+        rc = VDBManagerOpenDBRead ( ctx->vdb_mgr, &db, ctx->vdb_schema, "%s", path );
+        if ( rc != 0 )
+        {
+            rc = RC ( rcApp, rcNoTarg, rcOpening, rcItem, rcUnsupported );
+            PLOGERR( klogErr, ( klogErr, rc, "failed to open '$(path)'", "path=%s", path ) );
+        }
+        else
+        {
+            bool is_csra = VDatabaseIsCSRA ( db );
+            VDatabaseRelease ( db );
+            if ( !is_csra )
+            {
+                rc = RC ( rcApp, rcNoTarg, rcOpening, rcItem, rcUnsupported );
+                PLOGERR( klogErr, ( klogErr, rc, "failed to open '$(path)', it is not a csra-database", "path=%s", path ) );
+            }
+            else
+            {
+                prepare_ctx prep;   /* from cmdline_cmn.h */
+
+                prep.omit_qualities = ctx->options->omit_qualities;
+                prep.read_tlen = ctx->options->read_tlen;
+                prep.use_primary_alignments = ( ( ctx->options->cmn.tab_select & primary_ats ) == primary_ats );
+                prep.use_secondary_alignments = ( ( ctx->options->cmn.tab_select & secondary_ats ) == secondary_ats );
+                prep.use_evidence_alignments = ( ( ctx->options->cmn.tab_select & evidence_ats ) == evidence_ats );
+                prep.ref_iter = ctx->ref_iter;
+                prep.spot_group = spot_group;
+                prep.on_section = prepare_section_cb;
+                prep.data = ctx->cursor_ids;
+                prep.path = path;
+
+                
+                rc = prepare_ref_iter( &prep, ctx->vdb_mgr, ctx->vdb_schema, path, ctx->ranges ); /* cmdline_cmn.c */
+                if ( rc == 0 && prep.db == NULL )
+                {
+                    rc = RC ( rcApp, rcNoTarg, rcOpening, rcSelf, rcInvalid );
+                    LOGERR( klogInt, rc, "unsupported source" );
+                }
+            }
+        }
     }
     return rc;
 }
@@ -2454,12 +2591,22 @@ static rc_t pileup_main( Args * args, pileup_options *options )
         {
             LOGERR( klogInt, rc, "VDBManagerMakeRead() failed" );
         }
-        else {
-            ReportSetVDBManager(arg_ctx.vdb_mgr);
+        else
+        {
+            ReportSetVDBManager( arg_ctx.vdb_mgr );
         }
     }
 
 
+    if ( rc == 0 && options->cmn.no_mt )
+    {
+        rc = VDBManagerDisablePagemapThread ( arg_ctx.vdb_mgr );
+        if ( rc != 0 )
+        {
+            LOGERR( klogInt, rc, "VDBManagerDisablePagemapThread() failed" );
+        }
+    }
+    
     /* (5) make a vdb-schema */
     if ( rc == 0 )
     {
@@ -2496,6 +2643,10 @@ static rc_t pileup_main( Args * args, pileup_options *options )
 
             case sra_pileup_samtools    : options->read_tlen = false;
                                           break;
+                                          
+            case sra_pileup_mismatch    :  options->omit_qualities = true;
+                                          options->read_tlen = false;
+                                          break;
         }
     }
 
@@ -2527,6 +2678,7 @@ static rc_t pileup_main( Args * args, pileup_options *options )
             case sra_pileup_stat        : rc = walk_stat( arg_ctx.ref_iter, options ); break;
             case sra_pileup_counters    : rc = walk_counters( arg_ctx.ref_iter, options ); break;
             case sra_pileup_debug       : rc = walk_debug( arg_ctx.ref_iter, options ); break;
+            case sra_pileup_mismatch    : rc = walk_mismatches( arg_ctx.ref_iter, options ); break;
             default :  rc = walk_ref_iter( arg_ctx.ref_iter, options ); break;
         }
         /* ============================================== */
@@ -2544,6 +2696,115 @@ static rc_t pileup_main( Args * args, pileup_options *options )
 
 
 /* =========================================================================================== */
+
+static rc_t CC pileup_test_enter_ref( ref_walker_data * rwd )
+{
+    return KOutMsg( "\nentering >%s<\n", rwd->ref_name );
+}
+
+static rc_t CC pileup_test_exit_ref( ref_walker_data * rwd )
+{
+    return KOutMsg( "exit >%s<\n", rwd->ref_name );
+}
+
+static rc_t CC pileup_test_enter_ref_window( ref_walker_data * rwd )
+{
+    return KOutMsg( "   enter window >%s< [ %,lu ... %,lu ]\n", rwd->ref_name, rwd->ref_start, rwd->ref_end );
+}
+
+static rc_t CC pileup_test_exit_ref_window( ref_walker_data * rwd )
+{
+    return KOutMsg( "   exit window >%s< [ %,lu ... %,lu ]\n", rwd->ref_name, rwd->ref_start, rwd->ref_end );
+}
+
+static rc_t CC pileup_test_enter_ref_pos( ref_walker_data * rwd )
+{
+    return KOutMsg( "   enter pos [ %,lu ], d=%u\n", rwd->pos, rwd->depth );
+}
+
+static rc_t CC pileup_test_exit_ref_pos( ref_walker_data * rwd )
+{
+    return KOutMsg( "   exit pos [ %,lu ], d=%u\n", rwd->pos, rwd->depth );
+}
+
+static rc_t CC pileup_test_enter_spot_group( ref_walker_data * rwd )
+{
+    return KOutMsg( "       enter spot-group [ %,lu ], %.*s\n", rwd->pos, rwd->spot_group_len, rwd->spot_group );
+}
+
+static rc_t CC pileup_test_exit_spot_group( ref_walker_data * rwd )
+{
+    return KOutMsg( "       exit spot-group [ %,lu ], %.*s\n", rwd->pos, rwd->spot_group_len, rwd->spot_group );
+}
+
+static rc_t CC pileup_test_alignment( ref_walker_data * rwd )
+{
+    return KOutMsg( "          alignment\n" );
+}
+
+
+static rc_t pileup_test( Args * args, pileup_options *options )
+{
+    struct ref_walker * walker;
+
+    /* create walker */
+    rc_t rc = ref_walker_create( &walker );
+    if ( rc == 0 )
+    {
+        uint32_t idx, count;
+
+        /* add sources to walker */
+        rc = ArgsParamCount( args, &count );
+        for ( idx = 0; idx < count && rc == 0; ++idx )
+        {
+            const char * src = NULL;
+            rc = ArgsParamValue( args, idx, &src );
+            if ( rc == 0 && src != NULL )
+                rc = ref_walker_add_source( walker, src );
+        }
+
+        /* add ranges to walker */
+        if ( rc == 0 )
+        {
+            rc = ArgsOptionCount( args, OPTION_REF, &count );
+            for ( idx = 0; idx < count && rc == 0; ++idx )
+            {
+                const char * s = NULL;
+                rc = ArgsOptionValue( args, OPTION_REF, idx, &s );
+                if ( rc == 0 && s != NULL )
+                    rc = ref_walker_parse_and_add_range( walker, s );
+            }
+        }
+
+        /* set callbacks for walker */
+        if ( rc == 0 )
+        {
+            ref_walker_callbacks callbacks = 
+                {   pileup_test_enter_ref,
+                    pileup_test_exit_ref,
+                    pileup_test_enter_ref_window,
+                    pileup_test_exit_ref_window,
+                    pileup_test_enter_ref_pos,
+                    pileup_test_exit_ref_pos,
+                    pileup_test_enter_spot_group,
+                    pileup_test_exit_spot_group,
+                    pileup_test_alignment };
+            rc = ref_walker_set_callbacks( walker, &callbacks );
+        }
+
+        /* let the walker call the callbacks while iterating over the sources/ranges */
+        if ( rc == 0 )
+            rc = ref_walker_walk( walker, NULL );
+
+        /* destroy the walker */
+        ref_walker_destroy( walker );
+    }
+    return rc;
+}
+
+
+/* =========================================================================================== */
+
 
 rc_t CC KMain( int argc, char *argv [] )
 {
@@ -2584,6 +2845,10 @@ rc_t CC KMain( int argc, char *argv [] )
                              options.function == sra_pileup_report_ref_ext )
                         {
                             rc = report_on_reference( args, options.function == sra_pileup_report_ref_ext ); /* reref.c */
+                        }
+                        else if ( options.function == sra_pileup_test )
+                        {
+                            rc = pileup_test( args, &options ); /* see above */
                         }
                         else
                         {

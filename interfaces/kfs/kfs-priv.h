@@ -44,6 +44,7 @@ extern "C" {
  * struct/class forwards
  */
 struct KDirectory;
+struct KSysDir;
 struct KFile;
 struct KPath;
 struct KDlset;
@@ -85,6 +86,13 @@ KFS_EXTERN rc_t KDirectoryPosixStringToSystemString (
     const struct KDirectory *self,
     char *buffer, size_t bsize, const char *path, ... );
 #endif
+
+
+/* OSPath
+ *  returns a real OS path
+ */
+rc_t KSysDirOSPath ( struct KSysDir const *self,
+    wchar_t *real, size_t bsize, const char *path, va_list args );
 
 
 #ifdef __cplusplus

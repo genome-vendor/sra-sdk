@@ -4,8 +4,8 @@
 bool ascp_path(const char **cmd, const char **key) {
     static int idx = 0;
     static const char *c[] = {
-"\"C:\\Program Files (x86)\\Aspera\\Aspera Connect\\bin\\ascp.exe\"",
-"\"C:\\Program Files\\Aspera\\Aspera Connect\\bin\\ascp.exe\""
+        "C:\\Program Files (x86)\\Aspera\\Aspera Connect\\bin\\ascp.exe",
+        "C:\\Program Files\\Aspera\\Aspera Connect\\bin\\ascp.exe"
     };
     static const char *k[] = {
  "C:\\Program Files (x86)\\Aspera\\Aspera Connect\\etc\\asperaweb_id_dsa.putty",

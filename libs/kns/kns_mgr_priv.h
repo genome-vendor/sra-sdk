@@ -45,7 +45,7 @@ struct KNSManager
     KRefcount refcount;
 
     rc_t create_rc;
-
+    
     /* curl-easy-function-pointers... */
     CURL*    ( CC * curl_easy_init_fkt )    ( void );
     void     ( CC * curl_easy_cleanup_fkt ) ( CURL * handle );
@@ -55,10 +55,14 @@ struct KNSManager
     char *   ( CC * curl_version_fkt )      ( void );
     struct curl_slist* ( CC * curl_slist_append_fkt ) ( struct curl_slist * list, const char * string );
     void ( CC * curl_slist_free_all_fkt ) ( struct curl_slist * list );
+    
+    bool verbose;
 };
 
-    rc_t KNSManagerInit ( struct KNSManager *self );
-    void KNSManagerCleanup ( struct KNSManager *self );
+
+rc_t KNSManagerInit ( struct KNSManager *self );    /* in kns/unix/sysmgr.c or kns/win/sysmgr.c */
+void KNSManagerCleanup ( struct KNSManager *self );
+
 
 #ifdef __cplusplus
 }

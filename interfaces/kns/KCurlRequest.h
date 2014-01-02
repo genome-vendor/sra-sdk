@@ -30,6 +30,10 @@
 #include <kns/extern.h>
 #endif
 
+#ifndef _h_klib_defs_
+#include <klib/defs.h>
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif

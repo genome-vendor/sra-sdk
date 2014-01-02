@@ -77,8 +77,11 @@ KFG_EXTERN rc_t CC KartMakeText(const struct KDirectory *dir, const char *path,
 #endif
 
 KFG_EXTERN rc_t CC KartPrint(const Kart *self);
+KFG_EXTERN rc_t CC KartPrintNumbered(const Kart *self);
 
 KFG_EXTERN rc_t CC KartMakeNextItem(Kart *self, const KartItem **item);
+
+KFG_EXTERN rc_t CC KartItemsProcessed(const Kart *self, uint16_t *number);
 
 #ifdef __cplusplus
 }

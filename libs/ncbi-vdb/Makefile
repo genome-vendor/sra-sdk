@@ -77,17 +77,16 @@ LIBVDB_BLAST =
 endif
 
 ifeq (win,$(OS))
-LIBENTREZ =
 LIBKQ =
 LIBKXML =
 else
-LIBENTREZ =
 LIBKQ = kq
 LIBKXML = kxml kxfs
 endif
 
 VDB_LIB_CMN = \
 	align-access \
+	ncbi-bam \
 	bz2 \
 	kfg \
 	kfs \
@@ -137,7 +136,6 @@ VDB_LIB_RDWR = \
 	wsradb \
 	wsraxf \
 	wvdb \
-	$(LIBENTREZ) \
 	wvxf \
 	wwgsxf
 

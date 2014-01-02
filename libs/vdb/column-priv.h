@@ -57,6 +57,7 @@ extern "C" {
 /*--------------------------------------------------------------------------
  * forwards
  */
+struct Vector;
 struct VDBManager;
 struct VSchema;
 struct SColumn;
@@ -205,7 +206,7 @@ struct WColumnRowMap
 
 rc_t WColumnMake ( VColumn **col, struct VSchema const *schema,
     struct SColumn const *scol, struct SExpression const *dflt_limit,
-    struct VDBManager *mgr );
+    struct VDBManager *mgr, struct Vector *cx_bind );
 
 rc_t WColumnSetDefault ( VColumn *self,
     bitsz_t elem_bits, const void *buffer, bitsz_t boff, uint64_t len );

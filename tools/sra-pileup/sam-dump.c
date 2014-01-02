@@ -3882,7 +3882,7 @@ static rc_t ProcessPath( VDBManager const *mgr, char const Path[] )
         size_t i;
 
         /* no scheme found - must be simple fs path */
-    old:
+    /* old: ---unused label */
         readGroup = NULL;
         path = NULL;
     

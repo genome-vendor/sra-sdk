@@ -343,7 +343,7 @@ LIB_EXPORT bool CC KDatabaseVExists ( const KDatabase *self, uint32_t type, cons
     if ( self != NULL && name != NULL && name [ 0 ] != 0 )
     {
         rc_t rc;
-        size_t len;
+        uint32_t len;
         const char *ns;
         char path [ 256 ];
 
@@ -417,7 +417,7 @@ LIB_EXPORT bool CC KDatabaseIsAlias ( const KDatabase *self, uint32_t type,
     if ( self != NULL && name != NULL && name [ 0 ] != 0 )
     {
         rc_t rc;
-        size_t len;
+        uint32_t len;
         const char *ns;
         char path [ 256 ];
 

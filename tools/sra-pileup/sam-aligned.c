@@ -68,6 +68,8 @@ const char * EV_AL_TABLE = "EVIDENCE_ALIGNMENT";
     ALIGNMENT_COUNT             X       X       -           X
     SEQ_NAME                                                X
     MAPQ                                                    X
+    ALIGN_GROUP                 X       -       -           -
+    
    -------------------------------------------------------------------------------------------*/
 
 
@@ -99,6 +101,7 @@ const char * EV_AL_TABLE = "EVIDENCE_ALIGNMENT";
 #define COL_AL_COUNT "(U8)ALIGNMENT_COUNT"
 #define COL_SEQ_NAME "(ascii)SEQ_NAME"
 #define COL_MAPQ "(I32)MAPQ"
+#define COL_ALIGN_GROUP "(ascii)ALIGN_GROUP"
 
 enum align_table_type
 {
@@ -155,6 +158,9 @@ typedef struct align_table_context
     uint32_t mate_ref_pos_idx;
     uint32_t tlen_idx;
 
+    /* this is only in prim */
+    uint32_t al_group_idx;
+    
     /* this is specific to ev-interval/ev-alignmnet */
     uint32_t ploidy_idx;
     uint32_t ev_alignments_idx;
@@ -198,6 +204,7 @@ static void invalidate_all_column_idx( align_table_context * const atx )
     atx->ref_ploidy_idx     = COL_NOT_AVAILABLE;
     atx->seq_name_idx       = COL_NOT_AVAILABLE;
     atx->mapq_idx           = COL_NOT_AVAILABLE;
+    atx->al_group_idx       = COL_NOT_AVAILABLE;
     invalidate_all_cmn_column_idx( &atx->cmn );
     invalidate_all_cmn_column_idx( &atx->eval );
 }
@@ -265,75 +272,66 @@ static rc_t adjust_align_table_context_cig_op_buffer( align_table_context * atx,
 
 /* src: 'P'rimary, 'S'econdary, Evidence_'I'nterval, Evidence_'A'lignment */
 static rc_t prepare_cmn_table_rows( const samdump_opts * const opts, const VTable *tbl,
-                                    align_cmn_context * const cmn, char src )
+                                    align_cmn_context * const cmn, char src,
+                                    struct KNamelist * available_columns )
 {
-    struct KNamelist * available_columns;
-    rc_t rc = VTableListReadableColumns ( tbl, &available_columns );
-    if ( rc != 0 )
+    rc_t rc = 0;
+    const VCursor * cursor = cmn->cursor;
+
+    if ( src == 'P' || src == 'S' )
+        rc = add_column( cursor, COL_SEQ_SPOT_ID, &cmn->seq_spot_id_idx );
+
+    if ( rc == 0 )
     {
-        (void)PLOGERR( klogInt, ( klogInt, rc, 
-            "VTableListReadableColumns( $(src) ) failed", "src=%c", src ) );
+        if ( opts->use_long_cigar )
+        {
+            rc = add_column( cursor, COL_LONG_CIGAR, &cmn->cigar_idx );
+            if ( rc == 0 && ( src == 'I' || src == 'A' ) )
+                rc = add_column( cursor, COL_CIGAR_LONG_LEN, &cmn->cigar_len_idx );
+        }
+        else
+        {
+            rc = add_column( cursor, COL_SHORT_CIGAR, &cmn->cigar_idx );
+            if ( rc == 0 && ( src == 'I' || src == 'A' ) )
+                rc = add_column( cursor, COL_CIGAR_SHORT_LEN, &cmn->cigar_len_idx );
+        }
     }
-    else
+
+    if ( rc == 0 )
     {
-        const VCursor * cursor = cmn->cursor;
-
-        if ( src == 'P' || src == 'S' )
-            rc = add_column( cursor, COL_SEQ_SPOT_ID, &cmn->seq_spot_id_idx );
-
-        if ( rc == 0 )
-        {
-            if ( opts->use_long_cigar )
-            {
-                rc = add_column( cursor, COL_LONG_CIGAR, &cmn->cigar_idx );
-                if ( rc == 0 && ( src == 'I' || src == 'A' ) )
-                    rc = add_column( cursor, COL_CIGAR_LONG_LEN, &cmn->cigar_len_idx );
-            }
-            else
-            {
-                rc = add_column( cursor, COL_SHORT_CIGAR, &cmn->cigar_idx );
-                if ( rc == 0 && ( src == 'I' || src == 'A' ) )
-                    rc = add_column( cursor, COL_CIGAR_SHORT_LEN, &cmn->cigar_len_idx );
-            }
-        }
-
-        if ( rc == 0 )
-        {
-            if ( opts->print_matches_as_equal_sign )
-                rc = add_column( cursor, COL_MISMATCH_READ, &cmn->read_idx );
-            else
-                rc = add_column( cursor, COL_READ, &cmn->read_idx );
-        }
-
-        if ( rc == 0 )
-            rc = add_column( cursor, COL_READ_LEN, &cmn->read_len_idx );
-
-        if ( rc == 0 )
-            rc = add_column( cursor, COL_SAM_QUALITY, &cmn->sam_quality_idx );
-
-        if ( rc == 0 )
-            rc = add_column( cursor, COL_REF_ORIENTATION, &cmn->ref_orientation_idx );
-
-        if ( rc == 0 )
-            rc = add_column( cursor, COL_EDIT_DIST, &cmn->edit_dist_idx );
-
-        if ( rc == 0 && ( src == 'P' || src == 'S' || src == 'A' ) )
-            rc = add_column( cursor, COL_SEQ_SPOT_GROUP, &cmn->seq_spot_group_idx );
-
-        if ( rc == 0 && ( src == 'P' || src == 'S' || src == 'A' ) )
-            rc = add_column( cursor, COL_SEQ_READ_ID, &cmn->seq_read_id_idx );
-
-        if ( rc == 0 )
-            rc = add_column( cursor, COL_RAW_READ, &cmn->raw_read_idx );
-
-        if ( rc == 0 )
-            rc = add_column( cursor, COL_READ_FILTER, &cmn->read_filter_idx );
-
-        if ( rc == 0 && ( src == 'P' || src == 'S' || src == 'A' ) )
-            add_opt_column( cursor, available_columns, COL_AL_COUNT, &cmn->al_count_idx );
-
-        KNamelistRelease( available_columns );
+        if ( opts->print_matches_as_equal_sign )
+            rc = add_column( cursor, COL_MISMATCH_READ, &cmn->read_idx );
+        else
+            rc = add_column( cursor, COL_READ, &cmn->read_idx );
     }
+
+    if ( rc == 0 )
+        rc = add_column( cursor, COL_READ_LEN, &cmn->read_len_idx );
+
+    if ( rc == 0 )
+        rc = add_column( cursor, COL_SAM_QUALITY, &cmn->sam_quality_idx );
+
+    if ( rc == 0 )
+        rc = add_column( cursor, COL_REF_ORIENTATION, &cmn->ref_orientation_idx );
+
+    if ( rc == 0 )
+        rc = add_column( cursor, COL_EDIT_DIST, &cmn->edit_dist_idx );
+
+    if ( rc == 0 && ( src == 'P' || src == 'S' || src == 'A' ) )
+        rc = add_column( cursor, COL_SEQ_SPOT_GROUP, &cmn->seq_spot_group_idx );
+
+    if ( rc == 0 && ( src == 'P' || src == 'S' || src == 'A' ) )
+        rc = add_column( cursor, COL_SEQ_READ_ID, &cmn->seq_read_id_idx );
+
+    if ( rc == 0 )
+        rc = add_column( cursor, COL_RAW_READ, &cmn->raw_read_idx );
+
+    if ( rc == 0 )
+        rc = add_column( cursor, COL_READ_FILTER, &cmn->read_filter_idx );
+
+    if ( rc == 0 && ( src == 'P' || src == 'S' || src == 'A' ) )
+        add_opt_column( cursor, available_columns, COL_AL_COUNT, &cmn->al_count_idx );
+
     return rc;
 }
 
@@ -359,27 +357,45 @@ static rc_t prepare_prim_sec_table_cursor( const samdump_opts * const opts, cons
         }
         else
         {
+            struct KNamelist * available_columns;
+            char table_char = 'P';
             const VCursor * cursor = atx->cmn.cursor;
             
-            rc = prepare_cmn_table_rows( opts, tbl, &atx->cmn, 'P' );
+            if ( cmp_pchar( table_name, "SECONDARY_ALIGNMENT" ) == 0 )
+                table_char = 'S';
+            
+            rc = VTableListReadableColumns ( tbl, &available_columns );
+            if ( rc != 0 )
+            {
+                (void)PLOGERR( klogInt, ( klogInt, rc, 
+                    "VTableListReadableColumns( $(src) ) failed", "src=%c", table_char ) );
+            }
+            else
+            {
+                rc = prepare_cmn_table_rows( opts, tbl, &atx->cmn, table_char, available_columns );
 
-            if ( rc == 0 )
-                rc = add_column( cursor, COL_SAM_FLAGS, &atx->sam_flags_idx );
+                if ( rc == 0 )
+                    rc = add_column( cursor, COL_SAM_FLAGS, &atx->sam_flags_idx );
 
-            /*  i don't have to add REF_NAME or REF_SEQ_ID, because i have it from the ref_obj later
-                i don't have to add REF_POS, because i have it from the iterator later
-                i don't have to add MAPQ, it is in the PlacementRecord later
-                    ... when walking the iterator ...
-            */
-            if ( rc == 0 )
-                rc = add_column( cursor, COL_MATE_ALIGN_ID, &atx->mate_align_id_idx );
-            if ( rc == 0 )
-                rc = add_column( cursor, COL_MATE_REF_NAME, &atx->mate_ref_name_idx );
-            if ( rc == 0 )
-                rc = add_column( cursor, COL_MATE_REF_POS, &atx->mate_ref_pos_idx );
-            if ( rc == 0 )
-                rc = add_column( cursor, COL_TEMPLATE_LEN, &atx->tlen_idx );
+                /*  i don't have to add REF_NAME or REF_SEQ_ID, because i have it from the ref_obj later
+                    i don't have to add REF_POS, because i have it from the iterator later
+                    i don't have to add MAPQ, it is in the PlacementRecord later
+                        ... when walking the iterator ...
+                */
+                if ( rc == 0 )
+                    rc = add_column( cursor, COL_MATE_ALIGN_ID, &atx->mate_align_id_idx );
+                if ( rc == 0 )
+                    rc = add_column( cursor, COL_MATE_REF_NAME, &atx->mate_ref_name_idx );
+                if ( rc == 0 )
+                    rc = add_column( cursor, COL_MATE_REF_POS, &atx->mate_ref_pos_idx );
+                if ( rc == 0 )
+                    rc = add_column( cursor, COL_TEMPLATE_LEN, &atx->tlen_idx );
 
+                if ( rc == 0 && ( table_char == 'P' ) )
+                    add_opt_column( cursor, available_columns, COL_ALIGN_GROUP, &atx->al_group_idx );
+                    
+                KNamelistRelease( available_columns );
+            }
             if ( rc != 0 )
                 VCursorRelease( cursor );
         }
@@ -413,7 +429,21 @@ static rc_t prepare_sub_ev_alignment_table_cursor( const samdump_opts * const op
             }
             else
             {
-                rc = prepare_cmn_table_rows( opts, evidence_alignment_tbl, &atx->eval, 'A' ); /* common to prim/sec/ev-align */
+                struct KNamelist * available_columns;
+
+                rc = VTableListReadableColumns ( evidence_alignment_tbl, &available_columns );
+                if ( rc != 0 )
+                {
+                    (void)PLOGERR( klogInt, ( klogInt, rc, 
+                        "VTableListReadableColumns( $(src) ) failed", "src=%c", 'A' ) );
+                }
+                else
+                {
+                    rc = prepare_cmn_table_rows( opts, evidence_alignment_tbl, &atx->eval,
+                                'A', available_columns ); /* common to prim/sec/ev-align */
+                    KNamelistRelease( available_columns );
+                }
+                
                 if ( rc == 0 )
                 {
                     /* special to ev-align */
@@ -459,7 +489,21 @@ static rc_t prepare_evidence_table_cursor( const samdump_opts * const opts, cons
         }
         else
         {
-            rc = prepare_cmn_table_rows( opts, evidence_interval_tbl, &atx->cmn, 'I' );
+            struct KNamelist * available_columns;
+
+            rc = VTableListReadableColumns ( evidence_interval_tbl, &available_columns );
+            if ( rc != 0 )
+            {
+                (void)PLOGERR( klogInt, ( klogInt, rc, 
+                    "VTableListReadableColumns( $(src) ) failed", "src=%c", 'I' ) );
+            }
+            else
+            {
+                rc = prepare_cmn_table_rows( opts, evidence_interval_tbl, &atx->cmn,
+                            'I', available_columns ); /* common to prim/sec/ev-align */
+                KNamelistRelease( available_columns );
+            }
+        
             if ( rc == 0 )
                 rc = add_column( atx->cmn.cursor, COL_PLOIDY, &atx->ploidy_idx );            
 
@@ -1123,8 +1167,24 @@ static rc_t print_alignment_sam_ev( const samdump_opts * const opts, const char 
         uint32_t quality_offset = 0;
         const uint32_t *cigar_len_vector, *read_len_vector, *edit_dist_vector;
         const char * cigar, *read, *quality;
-
+        char * transformed_cigar = NULL;
+        char * org_transformed_cigar = NULL;
+        
         rc = read_char_ptr( rec->id, cursor, atx->cmn.cigar_idx, &cigar, &cigar_str_len, "CIGAR" );
+        if ( rc == 0 )
+        {
+            org_transformed_cigar = string_dup ( cigar, cigar_str_len );
+            if ( org_transformed_cigar != NULL )
+            {
+                uint32_t i;
+                for ( i = 0; i < cigar_str_len; ++i )
+                {
+                    if ( org_transformed_cigar[ i ] == 'S' ) org_transformed_cigar[ i ] = 'I';
+                }
+                transformed_cigar = org_transformed_cigar;
+            }
+        }
+        
         if ( rc == 0 )
             rc = read_uint32_ptr( rec->id, cursor, atx->cmn.cigar_len_idx, &cigar_len_vector, &cigar_len_vector_len, "CIGAR_LEN" );
         if ( rc == 0 )
@@ -1160,7 +1220,7 @@ static rc_t print_alignment_sam_ev( const samdump_opts * const opts, const char 
 
                 /* SAM-FIELD: CIGAR     SRA-column: CIGAR_SHORT / CIGAR_LONG sliced!!! */
                 if ( rc == 0 )
-                    rc = KOutMsg( "%.*s\t", cigar_slice_len, cigar );
+                    rc = KOutMsg( "%.*s\t", cigar_slice_len, transformed_cigar );
 
                 /* SAM-FIELD: RNEXT     SRA-column: MATE_REF_NAME ( !!! row_len can be zero !!! ) */
                 /* SAM-FIELD: PNEXT     SRA-column: MATE_REF_POS + 1 ( !!! row_len can be zero !!! ) */
@@ -1226,8 +1286,12 @@ static rc_t print_alignment_sam_ev( const samdump_opts * const opts, const char 
 
             /* advance the cigar-slice... */
             cigar += cigar_slice_len;
+            if ( transformed_cigar != NULL )
+                transformed_cigar += cigar_slice_len;
             read += read_slice_len;
         }
+        if ( org_transformed_cigar != NULL )
+            free( org_transformed_cigar );
     }
     return rc;
 }
@@ -1387,9 +1451,11 @@ static rc_t print_alignment_sam_ps( const samdump_opts * const opts, const char 
                         rc = matecache_insert_same_ref( mc, atx->db_idx, id, pos, mate_flags, -tlen );
                     }
 
-                    if ( mate_align_id == 0 && mate_ref_name_len == 0 && opts->print_half_unaligned_reads )
+                    if ( mate_align_id == 0 && mate_ref_name_len == 0 && opts->print_half_unaligned_reads &&
+                         atx->align_table_type == att_primary )
                     {
-                        rc = matecache_insert_unaligned( mc, atx->db_idx, id, pos, atx->ref_idx, *seq_spot_id );
+                        int64_t key = id;
+                        rc = matecache_insert_unaligned( mc, atx->db_idx, key, pos, atx->ref_idx, *seq_spot_id );
                     }
                 }
             }
@@ -1451,8 +1517,10 @@ static rc_t print_alignment_sam_ps( const samdump_opts * const opts, const char 
         static char const *bogus_quality = "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!";
 
         rc = read_char_ptr( id, cursor, atx->cmn.cigar_idx, &cgc_input.p_cigar.ptr, &cgc_input.p_cigar.len, "CIGAR" );
-        if (rc == 0) {
-            if (cgc_output.p_quality.len == 0) {
+        if ( rc == 0 )
+        {
+            if ( cgc_output.p_quality.len == 0 )
+            {
                 cgc_output.p_quality.ptr = bogus_quality;
                 cgc_output.p_quality.len = 35;
             }
@@ -1516,9 +1584,9 @@ static rc_t print_alignment_sam_ps( const samdump_opts * const opts, const char 
     }
 
     /* OPT SAM-FIELD: RG     SRA-column: SPOT_GROUP */
-    if ( rc == 0 && atx->cmn.seq_spot_group_idx != COL_NOT_AVAILABLE )
+    if ( rc == 0 && ( atx->cmn.seq_spot_group_idx != COL_NOT_AVAILABLE ) )
     {
-        const char * spot_grp;
+        const char * spot_grp = NULL;
         uint32_t spot_grp_len;
         rc = read_char_ptr( id, cursor, atx->cmn.seq_spot_group_idx, &spot_grp, &spot_grp_len, "SPOT_GROUP" );
         if ( rc == 0 && spot_grp_len > 0 )
@@ -1532,6 +1600,26 @@ static rc_t print_alignment_sam_ps( const samdump_opts * const opts, const char 
     if ( rc == 0 && opts->print_alignment_id_in_column_xi )
         rc = KOutMsg( "\tXI:i:%u", id );
 
+    /* to match sam-tools output: in case we are dumping this in CG-mode.... */
+    if ( rc == 0 && ( opts->cigar_treatment != ct_unchanged ) && ( atx->al_group_idx != COL_NOT_AVAILABLE ) )
+    {
+        const char * align_grp;
+        uint32_t align_grp_len;
+        rc = read_char_ptr( id, cursor, atx->al_group_idx, &align_grp, &align_grp_len, "ALIGN_GROUP" );
+        if ( rc == 0 && align_grp_len > 0 )
+        {
+            uint32_t i;
+            for ( i = 0; rc == 0 && i < align_grp_len - 1; ++i )
+            {
+                if ( align_grp[ i ] == '_' )
+                {
+                    rc = KOutMsg( "\tZI:i:%.*s\tZA:i:%.1s", i, align_grp, align_grp + i + 1 );
+                    break;
+                }
+            }
+        }
+    }
+    
     /* OPT SAM-FIELD: NH     SRA-column: ALIGNMENT_COUNT */
     if ( rc == 0 && atx->cmn.al_count_idx != COL_NOT_AVAILABLE )
     {

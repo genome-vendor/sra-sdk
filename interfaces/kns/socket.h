@@ -49,46 +49,59 @@ struct KNSManager;
 /*--------------------------------------------------------------------------
  * KSocket
  */
-struct KSocket;
+typedef struct KSocket KSocket;
 
-/* KSocketAddRef
- * 
- */
-KNS_EXTERN rc_t CC KSocketAddRef( struct KSocket *self );
-/* KSocketRelease
- * 
- */
-KNS_EXTERN rc_t CC KSocketRelease( struct KSocket *self );
 
 /* MakeConnection
- *  create a connection-oriented stream connected to an Internet server
- * conn [ OUT ] - a stream for communication with the server
- * from [ IN ] - client endpoint
- * to [ IN ] - server endpoint 
+ *  create a connection-oriented stream
  *
- * both endpoints have to be of type epIP; creates a TCP connection
+ *  "conn" [ OUT ] - a stream for communication with the server
+ *
+ *  "from" [ IN ] - client endpoint
+ *
+ *  "to" [ IN ] - server endpoint 
+ *
+ *  both endpoints have to be of type epIP; creates a TCP connection
  */
-KNS_EXTERN rc_t CC KNSMakeConnection ( struct KStream **conn, struct KEndPoint const *from, struct KEndPoint const *to );
+KNS_EXTERN rc_t CC KNSManagerMakeConnection ( struct KNSManager const * self,
+    struct KStream **conn, struct KEndPoint const *from, struct KEndPoint const *to );
 
 /* MakeIPCConnection
  *  create a connection-oriented stream connected to an IPC server
- * conn [ OUT ] - a stream for communication with the server
- * to [ IN ] - server endpoint (must be of type epIPC)
- * max_retries [ IN ] - number of retries to be made if connection is refused. Will sleep for 1 second between retries
+ *
+ *  "conn" [ OUT ] - a stream for communication with the server
+ *
+ *  "to" [ IN ] - server endpoint (must be of type epIPC)
+ *
+ *  "max_retries" [ IN ] - number of retries to be made if connection is refused.
+ *  Will sleep for 1 second between retries
  */
-KNS_EXTERN rc_t CC KNSMakeIPCConnection ( struct KStream **conn, struct KEndPoint const *to, uint8_t max_retries );
+KNS_EXTERN rc_t CC KNSManagerMakeIPCConnection ( struct KNSManager const *self,
+    struct KStream **conn, struct KEndPoint const *to, uint32_t max_retries );
 
-/* Create a listener socket for accepting incoming IPC connections
- * ep [ IN ] - a endpoint of type epIPC
- * listener [ IN ] - a listener socket, to be called KNSListen() on
+/* MakeListener
+ *  create a listener socket for accepting incoming IPC connections
+ *
+ *  "ep" [ IN ] - a endpoint of type epIPC
+ *
+ *  "listener" [ IN ] - a listener socket, to be called KSocketListen() on
  */
-KNS_EXTERN rc_t CC KNSMakeListener( struct KSocket** listener, struct KEndPoint const * ep );
+KNS_EXTERN rc_t CC KNSManagerMakeListener ( struct KNSManager const *self,
+    KSocket **listener, struct KEndPoint const * ep );
 
-/* Wait for an incoming connection
- * listener [ IN ] - a listener socket
- * conn [ OUT ] - a stream for communication with the client 
+/* AddRef
+ * Release
  */
-KNS_EXTERN rc_t CC KNSListen ( struct KSocket *listener, struct KStream **conn );
+KNS_EXTERN rc_t CC KSocketAddRef ( KSocket *self );
+KNS_EXTERN rc_t CC KSocketRelease ( KSocket *self );
+
+
+/* Listen
+ *  wait for an incoming connection
+ *
+ *  "conn" [ OUT ] - a stream for communication with the client 
+ */
+KNS_EXTERN rc_t CC KSocketListen ( KSocket *self, struct KStream **conn );
 
 
 #ifdef __cplusplus

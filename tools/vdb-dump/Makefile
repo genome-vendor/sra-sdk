@@ -93,6 +93,8 @@ VDB_DUMP_SRC = \
 	vdb-dump-helper \
 	vdb-dump-filter \
 	vdb-dump-formats \
+	vdb-dump-redir \
+	vdb-dump-fastq \
 	vdb-dump
 
 VDB_DUMP_OBJ = \

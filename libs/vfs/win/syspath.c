@@ -32,8 +32,9 @@
 #include <klib/rc.h>
 #include <klib/log.h>
 #include <klib/out.h>
+#include <klib/debug.h>
 
-#include "path-priv.h"
+#include "../path-priv.h"
 
 #include <wchar.h>
 #include <windows.h>
@@ -329,7 +330,7 @@ LIB_EXPORT rc_t CC VFSManagerWMakeSysPath ( const VFSManager * self,
              HACK O' MATIC
  */
 
-rc_t LegacyVPathMakeSysPath ( VPath ** new_path, const char * sys_path )
+LIB_EXPORT rc_t LegacyVPathMakeSysPath ( VPath ** new_path, const char * sys_path )
 {
     VFSManager * vfs;
     rc_t rc = VFSManagerMake ( & vfs );

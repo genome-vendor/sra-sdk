@@ -43,7 +43,11 @@
 // these macros are available outside of test cases' code
 
 #define LOG(log_level, msg) \
-    if (log_level >= ncbi::NK::TestEnv::verbosity) std::cerr << msg
+    (log_level >= ncbi::NK::TestEnv::verbosity ? (std::cerr << msg) : std::cerr)
+
+/*#define TESTMESSAGE(M) \
+{ ncbi::NK::saveLocation(__FILE__,__LINE__); \
+    LOG(ncbi::NK::LogLevel::e_message, M); }*/
 
 #define TEST_MESSAGE(M) \
 { ncbi::NK::saveLocation(__FILE__,__LINE__); \
@@ -239,6 +243,9 @@ protected:
   ( (exp)                      \
       ? report_passed((#exp), __FILE__, __LINE__) \
       : report_error ((#exp), __FILE__, __LINE__) )
+
+#define REPORT_ERROR(exp)       \
+        report_error (exp, __FILE__, __LINE__)
 
 /* TODO #define CHECK_MESSAGE(exp, M)       \
   std::ostringstream s, s << M, \
@@ -448,7 +455,7 @@ ncbi::NK::counter_t Main(int argc, char* argv[],
             "Entering test suite \"" << suite_name << "\"\n");
         ec = t->Run(&globalFixtute);
         LOG(ncbi::NK::LogLevel::e_test_suite,
-            "Leaving test suite \"" << suite_name << "\"\n";)
+            "Leaving test suite \"" << suite_name << "\"\n");
     } 
     catch (std::exception& ex) 
     { 

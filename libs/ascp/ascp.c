@@ -59,7 +59,7 @@ static bool _StringStartsWith(const String *self, const char *buf) {
     if (self->len < len) {
         return false;
     }
-    return string_cmp(self->addr, self->len, buf, len, len) == 0;
+    return string_cmp(self->addr, self->len, buf, len, (uint32_t)len) == 0;
 }
 
 static
@@ -80,10 +80,12 @@ bool _StringHas(const String *self, const char *buf, String *res)
             return false;
         }
         if (_StringStartsWith(res, buf)) {
-            res->len = res->size = len;
+            res->len = (uint32_t)len;
+            res->size = len;
             return true;
         }
-        res->len = res->size = res->len - 1;
+        res->size = res->len - 1;
+        res->len = res->len - 1;
         ++res->addr;
     }
 }
@@ -275,18 +277,20 @@ rc_t ascpParse(const char *buf, size_t len, const char *filename,
             }
         }
         if (n != NULL) {
-            StringInit(line, p, n - p, n - p);
+            StringInit(line, p, n - p, (uint32_t)(n - p));
             l -= n - p + 1;
         }
         else {
-            StringInit(line, p, l, l);
+            StringInit(line, p, l, (uint32_t)l);
         }
         if (line->addr && line->len && line->addr[line->len - 1] == '\r') {
-            line->len = line->size = line->len - 1;
+            line->size = line->len - 1;
+            line->len = line->len - 1;
         }
         if (line->addr && line->len && line->addr[0] == '\r') {
             ++line->addr;
-            line->len = line->size = line->len - 1;
+            line->size = line->len - 1;
+            line->len = line->len - 1;
         }
         if (line->len != 0) {
             SAscpState full;
@@ -495,6 +499,28 @@ static bool _SystemHelp(const char *command, bool status) {
     }
 }
 
+static rc_t _KConfigGetAscpRate(const KConfig *self, const char **max_rate) {
+    String *s = NULL;
+    assert(self && max_rate);
+    *max_rate = NULL;
+    s = _KConfigAscpString(self, "tools/ascp/max_rate", "Aspera max rate");
+    if (s != NULL) {
+        if (s->size == 0) {
+            free(s);
+        }
+        else {
+            *max_rate = string_dup_measure(s->addr, NULL);
+            free(s);
+            if (*max_rate == NULL) {
+                free((void*)*max_rate);
+                return RC(rcNS, rcStorage, rcAllocating, rcMemory, rcExhausted);
+            }
+        }
+        return 0;
+    }
+    return 0;
+}
+
 static rc_t _KConfigGetAscp(const KConfig *self,
     const char **ascp_bin, const char **private_file)
 {
@@ -622,6 +648,17 @@ LIB_EXPORT rc_t CC aspera_get(
         opt = &dummy;
     }
 
+    if (opt->target_rate == NULL) {
+        KConfig *cfg = NULL;
+        rc_t rc = KConfigMake(&cfg, NULL);
+        DISP_RC(rc, "cannot KConfigMake");
+        if (rc == 0) {
+            rc = _KConfigGetAscpRate(cfg, &opt->target_rate);
+            DISP_RC(rc, "cannot get aspera max rate");
+        }
+        RELEASE(KConfig, cfg);
+    }
+
     sStatus = status = opt->status;
     quitting = opt->quitting;
 
@@ -683,10 +720,26 @@ STSMSG(0, ("KDirectoryFileSize after ascp run: "
     return rc;
 }
 
-rc_t mkAscpCmd(const char *ascp_bin, const char *private_file,
+LIB_EXPORT rc_t CC aspera_options(AscpOptions *opt) {
+    KConfig *cfg = NULL;
+    rc_t rc = 0;
+    if (opt == NULL) {
+        return RC(rcNS, rcFile, rcVisiting, rcParam, rcNull);
+    }
+    memset(opt, 0, sizeof *opt);
+    rc = KConfigMake(&cfg, NULL);
+    if (rc == 0) {
+        rc = _KConfigGetAscpRate(cfg, &opt->target_rate);
+        opt->disabled = _KConfigAscpDisabled(cfg, false);
+    }
+    RELEASE(KConfig, cfg);
+    return rc;
+}
+
+/*rc_t mkAscpCmd(const char *ascp_bin, const char *private_file,
     const char *src, const char *dest, const AscpOptions *opt,
     char *const argv[], size_t argvSz)
 {
     rc_t rc = 0;
     return rc;
-}
+}*/

@@ -139,7 +139,7 @@ static rc_t expand_argv( tokenzr *t )
     }
     else
     {
-        if ( ( *(t->argc) ) >= t->nargs )
+        if ( (uint32_t) ( *(t->argc) ) >= t->nargs )
         {
             char ** pargv1 = realloc( pargv, ( ( t->nargs + ARGV_INC ) * ( sizeof pargv[ 0 ] ) ) );
             if ( pargv1 != NULL )
@@ -445,7 +445,7 @@ static int sized_str_cmp( const char *a, const char *b )
 {
     size_t asize = string_size ( a );
     size_t bsize = string_size ( b );
-    return strcase_cmp ( a, asize, b, bsize, ( asize > bsize ) ? asize : bsize );
+    return strcase_cmp ( a, asize, b, bsize, (uint32_t) ( ( asize > bsize ) ? asize : bsize ) );
 }
 
 

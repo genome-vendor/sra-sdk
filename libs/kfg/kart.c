@@ -226,6 +226,8 @@ struct Kart {
 
     const char *text;
     uint64_t len;
+
+    uint16_t itemsProcessed;
 };
 
 static void KartWhack(Kart *self) {
@@ -268,6 +270,22 @@ LIB_EXPORT rc_t CC KartRelease(const Kart *self) {
     return 0;
 }
 
+LIB_EXPORT rc_t CC KartItemsProcessed(const Kart *self, uint16_t *number) {
+    if (number == NULL) {
+        return RC(rcKFG, rcFile, rcLoading, rcParam, rcNull);
+    }
+
+    *number = 0;
+
+    if (self == NULL) {
+        return RC(rcKFG, rcFile, rcLoading, rcSelf, rcNull);
+    }
+
+    *number = self->itemsProcessed;
+
+    return 0;
+}
+
 static rc_t KartItemInitFromKartRow(const Kart *self, const KartItem **item,
     const char *line, size_t len)
 {
@@ -285,7 +303,8 @@ static rc_t KartItemInitFromKartRow(const Kart *self, const KartItem **item,
         const char *p = string_chr(line, len, '|');
         if (p == NULL) {
             if (i != 4) {
-                return RC(rcKFG, rcFile, rcParsing, rcFile, rcInsufficient);
+                rc = RC(rcKFG, rcFile, rcParsing, rcFile, rcInsufficient);
+                break;
             }
             l = len;
         }
@@ -309,13 +328,13 @@ static rc_t KartItemInitFromKartRow(const Kart *self, const KartItem **item,
                 next = &obj->itemDesc;
                 break;
             default:
-                return RC(rcKFG, rcFile, rcParsing, rcFile, rcExcessive);
+                rc = RC(rcKFG, rcFile, rcParsing, rcFile, rcExcessive);
                 break;
         }
         assert(next);
-        StringInit(next, line, l, l);
+        StringInit(next, line, l, (uint32_t)l);
         if (l > len) {
-            return RC(rcKFG, rcFile, rcParsing, rcFile, rcInvalid);
+            rc = RC(rcKFG, rcFile, rcParsing, rcFile, rcInvalid);
         }
         if (len == l) {
             break;
@@ -324,20 +343,110 @@ static rc_t KartItemInitFromKartRow(const Kart *self, const KartItem **item,
         line += l;
         len -= l;
     }
-    rc = KartAddRef(self);
     if (rc == 0) {
+        rc = KartAddRef(self);
+    }
+    if (rc == 0) {
+        ++((Kart*)self)->itemsProcessed;
         obj->dad = self;
         *item = obj;
+    }
+    else {
+        free(obj);
+        obj = NULL;
     }
     return rc;
 }
 
 LIB_EXPORT rc_t CC KartPrint(const Kart *self) {
-    uint32_t len = self->mem.elem_count;
+    uint32_t len = 0;
+
     if (self == NULL) {
         return RC(rcKFG, rcFile, rcLoading, rcSelf, rcNull);
     }
+
+    len = (uint32_t)self->mem.elem_count;;
     return OUTMSG(("%.*s", len, self->mem.base));
+}
+
+LIB_EXPORT rc_t CC KartPrintNumbered(const Kart *self) {
+    rc_t rc = 0;
+    rc_t rc2 = 0;
+    const char *start = NULL;
+    int32_t remaining = 0;
+    int32_t len = 0;
+    uint32_t i = 0;
+    const char *next = NULL;
+    bool done = false;
+
+    if (self == NULL) {
+        return RC(rcKFG, rcFile, rcLoading, rcSelf, rcNull);
+    }
+
+    remaining = (uint32_t)self->mem.elem_count;
+    start = self->mem.base;
+
+    {
+        const char version[] = "version ";
+        size_t l = sizeof version - 1;
+        if (string_cmp(version, l, start, remaining, (uint32_t)l) != 0) {
+            return RC(rcKFG, rcMgr, rcAccessing, rcFormat, rcUnrecognized);
+        }
+    }
+
+    next = string_chr(start, remaining, '\n');
+    if (next == NULL) {
+        len = remaining;
+    }
+    else {
+        ++next;
+        len = next - start;
+    }
+    remaining -= len;
+    rc2 = OUTMSG(("%.*s", len, start));
+    if (rc2 != 0 && rc == 0) {
+        rc = rc2;
+    }
+    start = next;
+
+    rc2 = OUTMSG(("row\tproj-id|item-id|accession|name|item-desc\n"));
+    if (rc2 != 0 && rc == 0) {
+        rc = rc2;
+    }
+
+    for (i = 1; remaining > 0; ++i) {
+        if (*start == '$') {
+            const char end[] = "$end";
+            size_t l = sizeof end - 1;
+            if (string_cmp(end, l, start, remaining, (uint32_t)l) != 0) {
+                return RC(rcKFG, rcMgr, rcAccessing, rcFormat, rcUnrecognized);
+            }
+            else {
+                done = true;
+            }
+        }
+        next = string_chr(start, remaining, '\n');
+        if (next == NULL) {
+            len = remaining;
+        }
+        else {
+            ++next;
+            len = next - start;
+        }
+        remaining -= len;
+        if (done) {
+            rc2 = OUTMSG(("%.*s", len, start));
+        }
+        else {
+            rc2 = OUTMSG(("%d\t%.*s", i, len, start));
+        }
+        if (rc2 != 0 && rc == 0) {
+            rc = rc2;
+        }
+        start = next;
+    }
+
+    return rc;
 }
 
 LIB_EXPORT rc_t CC KartMakeNextItem(Kart *self, const KartItem **item) {
@@ -371,7 +480,7 @@ LIB_EXPORT rc_t CC KartMakeNextItem(Kart *self, const KartItem **item) {
         --len;
     }
 
-    if (self->len >= next - self->text + 1) {
+    if (self->len >= (uint64_t) (next - self->text + 1) ){
         self->len -= next - self->text + 1;
     }
     else {
@@ -383,9 +492,7 @@ LIB_EXPORT rc_t CC KartMakeNextItem(Kart *self, const KartItem **item) {
 
     {
         const char end[] = "$end";
-        if (string_cmp(line, string_size(line), end,
-            sizeof end - 1, sizeof end - 1) == 0)
-        {
+        if (string_cmp(line, len, end, sizeof end - 1, sizeof end - 1) == 0) {
             return 0;
         }
     }
@@ -462,7 +569,7 @@ static rc_t KartProcessHeader(Kart *self) {
     {
         const char version[] = "version ";
         size_t l = sizeof version - 1;
-        if (string_cmp(version, l, self->text, self->len, l) != 0) {
+        if (string_cmp(version, l, self->text, self->len, (uint32_t)l) != 0) {
             return RC(rcKFG, rcMgr, rcUpdating, rcFormat, rcUnrecognized);
         }
 
@@ -473,7 +580,7 @@ static rc_t KartProcessHeader(Kart *self) {
     {
         const char version[] = "1.0";
         size_t l = sizeof version - 1;
-        if (string_cmp(version, l, self->text, l, l) != 0) {
+        if (string_cmp(version, l, self->text, l, (uint32_t)l) != 0) {
             return RC(rcKFG, rcMgr, rcUpdating, rcFormat, rcUnsupported);
         }
 

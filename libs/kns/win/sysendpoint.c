@@ -53,7 +53,7 @@ LIB_EXPORT
 rc_t CC KNSManagerInitDNSEndpoint ( struct KNSManager const *self,
     KEndPoint *ep, struct String const *dns, uint16_t port )
 {
-    rc_t rc;
+    rc_t rc = 0;
 
     if ( ep == NULL )
         rc = RC (rcNS, rcNoTarg, rcInitializing, rcParam, rcNull );
@@ -67,30 +67,39 @@ rc_t CC KNSManagerInitDNSEndpoint ( struct KNSManager const *self,
             rc = RC ( rcNS, rcNoTarg, rcInitializing, rcSelf, rcInsufficient );
         else
         {
-            int lerrno;
-            size_t size;
-            char hostname [ 4096 ];
-            if ( dns -> size >= sizeof hostname )
+            KDataBuffer b;
+            char buffer [ 4096 ], * hostname = buffer;
+            size_t buff_size = sizeof buffer;
+
+            if ( dns -> size >= sizeof buffer )
             {
-                KDataBuffer b;
-                
                 rc = KDataBufferMakeBytes ( & b, dns -> size + 1 );
                 if ( rc == 0 )
                 {
-                    struct hostent *remote;
-                    char *host = b . base;
+                    hostname = b . base;
+                    buff_size = ( size_t ) b . elem_count;
+                }
+            }
 
-                    rc = string_printf ( host, ( size_t ) b . elem_count, & size, "%S", dns );
-                    assert ( size < ( size_t ) b . elem_count );
-                    assert ( host [ size ] == 0 );
-                    remote = gethostbyname ( host );
+            if ( rc == 0 )
+            {
+                size_t size;
+                rc = string_printf ( hostname, buff_size, & size, "%S", dns );
+
+                assert ( rc == 0 );
+                assert ( size < buff_size );
+                assert ( hostname [ size ] == 0 );
+
+                if ( rc ==  0 )
+                {
+                    int lerrno;
+                    struct hostent *remote = gethostbyname ( hostname );
                     if ( remote != NULL )
-                    {
-						ep -> type = epIPV4;
-                        memcpy ( &ep -> u . ipv4 . addr, remote -> h_addr_list [ 0 ], sizeof ep -> u . ipv4 . addr );
+                    { 
+                        ep -> type = epIPV4;
+                        memcpy ( & ep -> u . ipv4 . addr, remote -> h_addr_list [ 0 ], sizeof ep -> u . ipv4 . addr );
+                        ep -> u . ipv4 . addr = htonl ( ep -> u . ipv4 . addr );
                         ep -> u . ipv4 . port = ( uint16_t ) port;
-                        KDataBufferWhack ( & b );
-                        return 0;
                     }
                     else switch ( lerrno = WSAGetLastError () )
                     {
@@ -126,60 +135,14 @@ rc_t CC KNSManagerInitDNSEndpoint ( struct KNSManager const *self,
                     }
                 }
             }
-            else
-            {
-                struct hostent *remote;
-            
-                rc = string_printf ( hostname, sizeof hostname, & size, "%S", dns );
-                assert ( size < sizeof hostname );
-                assert ( hostname [ size ] == 0 );
-                remote = gethostbyname ( hostname );
-                if ( remote != NULL )
-                {
-					ep -> type = epIPV4;
-                    memcpy ( &ep -> u . ipv4 . addr, remote -> h_addr_list [ 0 ], sizeof ep -> u . ipv4 . addr );
-                    ep -> u . ipv4 . port = ( uint16_t ) port;
-                    return 0;
-                }
-                else switch ( lerrno = WSAGetLastError () )
-                {
-                case WSANOTINITIALISED: /* Must have WSAStartup call */
-                    rc = RC ( rcNS, rcNoTarg, rcInitializing, rcEnvironment, rcUndefined );
-                    break;
-                case WSAENETDOWN:/* network subsystem failed */
-                    rc = RC ( rcNS, rcNoTarg, rcInitializing, rcNoObj, rcFailed );
-                    break;
-                case WSAHOST_NOT_FOUND: /* Answer host not found */
-                    rc = RC ( rcNS, rcNoTarg, rcValidating, rcConnection, rcNotFound );
-                    break;
-                case WSATRY_AGAIN: /* host not found or server failure */
-                    rc = RC ( rcNS, rcNoTarg, rcValidating, rcConnection, rcBusy );
-                    break;
-                case WSANO_RECOVERY: /* non-recoverable error */
-                    rc = RC ( rcNS, rcNoTarg, rcValidating, rcConnection, rcError );
-                    break;
-                case WSANO_DATA: /* name is valid but no data */
-                    rc = RC ( rcNS, rcNoTarg, rcValidating, rcConnection, rcEmpty );
-                    break;
-                case WSAEINPROGRESS: /* call is in progress */
-                    rc = RC ( rcNS, rcNoTarg, rcReading, rcId, rcUndefined );
-                    break;
-                case WSAEFAULT: /* name paremeter is not valid part of addr space */
-                    rc = RC ( rcNS, rcNoTarg, rcReading, rcMemory, rcOutofrange );
-                    break;
-                case WSAEINTR: /* socket call was calanceled */
-                    rc = RC ( rcNS, rcNoTarg, rcReading, rcConnection, rcCanceled );
-                    break;
-                default:
-                    rc = RC ( rcNS, rcNoTarg, rcReading, rcNoObj, rcError );
-                }
-            }
+
+            if ( hostname != buffer )
+                KDataBufferWhack ( & b );
         }
 
-        memset ( ep, 0, sizeof * ep );        
+        if ( rc != 0 )
+            memset ( ep, 0, sizeof * ep );        
     }
 
     return rc;
-    
-    
 }

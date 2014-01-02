@@ -797,16 +797,24 @@ rc_t	derive_directory_name (char ** dirname, const char * arcname, const char * 
     }
     if (rc == 0)
     {
-        *dirname = malloc (len + 1);
-        if (*dirname == NULL)
+        if ( len == 0 )
         {
-            rc = RC (rcExe, rcNoTarg, rcAllocating, rcMemory, rcExhausted);
-            LOGERR (klogErr, rc, "Unable to allocate memory for directory name");
+            rc = RC (rcExe, rcNoTarg, rcParsing, rcParam, rcInvalid);
+            * dirname = NULL;
         }
         else
         {
-            memcpy (*dirname, srcname, len);
-            (*dirname)[len] = '\0';
+            *dirname = malloc (len + 1);
+            if (*dirname == NULL)
+            {
+                rc = RC (rcExe, rcNoTarg, rcAllocating, rcMemory, rcExhausted);
+                LOGERR (klogErr, rc, "Unable to allocate memory for directory name");
+            }
+            else
+            {
+                memcpy (*dirname, srcname, len);
+                (*dirname)[len] = '\0';
+            }
         }
     }
     return rc;
@@ -826,18 +834,48 @@ rc_t	run_kar_create(const char * archive, const char * directory)
 
         rc = derive_directory_name (&directorystr, archive, directory);
 
-        assert (directorystr != NULL);
-        assert (directorystr[0] != '\0');
-
         if (rc != 0)
             LOGERR (klogErr, rc,"failed to derive directory name");
         else
         {
+            assert (directorystr != NULL);
+            assert (directorystr[0] != '\0');
+
             STSMSG (4, ("start creation of archive"));
 
-            rc = open_dir_as_archive (directorystr, &fin);
+            /* Jira ticket: SRA-1876
+               Date: September 13, 2013
+               raw usage of "directorystr" causes tests to fail within libs/kfs/arc.c */
+            {
+                char full [ 4096 ];
+                rc = KDirectoryResolvePath ( kdir, true, full, sizeof full, "%s", directorystr );
+                if ( rc == 0 )
+                {
+                    /* string should be non-empty based upon behavior of
+                       "derive_directory_name" ( also fixed today ) */
+                    assert ( full [ 0 ] != 0 );
+
+                    /* eliminate double-slashes */
+                    if ( full [ 1 ] != 0 )
+                    {
+                        uint32_t i, j;
+
+                        /* ALLOW double slashes at the very start
+                           set starting index to 2 for that reason */
+                        for ( i = j = 2; full [ i ] != 0; ++ i )
+                        {
+                            if ( ( full [ j ] = full [ i ] ) != '/' || full [ j - 1 ] != '/' )
+                                ++ j;
+                        }
+
+                        full [ j ] = 0;
+                    }
+
+                    rc = open_dir_as_archive ( full, & fin );
+                }
+            }
             if (rc != 0)
-                PLOGERR (klogErr, (klogErr, rc,"failed to open directory [$(D)] as archive",
+                PLOGERR (klogErr, (klogErr, rc,"failed to open directory '$(D)' as archive",
                                    PLOG_S(D),directorystr));
             else
             {

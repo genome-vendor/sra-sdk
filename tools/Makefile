@@ -63,18 +63,6 @@ $(SUBDIRS):
 .PHONY: default $(SUBDIRS) 
 
 #-------------------------------------------------------------------------------
-# tag
-#
-SUBDIRS_TAG = $(addsuffix _tag,$(SUBDIRS))
-
-tag: $(SUBDIRS_TAG)
-
-$(SUBDIRS_TAG):
-	@ $(MAKE) -C $(subst _tag,,$@) tag
-
-.PHONY: tag $(SUBDIRS_TAG)
-
-#-------------------------------------------------------------------------------
 # pass-through
 #
 out debug profile release GCC ICC VC++:
