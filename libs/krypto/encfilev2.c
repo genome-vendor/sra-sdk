@@ -1801,7 +1801,7 @@ rc_t CC KEncFileWrite (KEncFile *self, uint64_t pos,
             self->dirty = true;
             *pnum_writ = to_copy;
 
-            new_valid = offset + to_copy;
+            new_valid = (uint32_t) ( offset + to_copy );
             if (new_valid > self->block.u.valid)
             {
                 uint64_t new_size;

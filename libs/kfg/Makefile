@@ -33,8 +33,6 @@ INT_LIBS = \
 ALL_LIBS = \
 	$(INT_LIBS)
 
-TEST_TOOLS = \
-
 include $(TOP)/build/Makefile.env
 
 #-------------------------------------------------------------------------------
@@ -46,10 +44,7 @@ all std: makedirs
 $(INT_LIBS): makedirs
 	@ $(MAKE_CMD) $(ILIBDIR)/$@
 
-$(TEST_TOOLS): makedirs
-	@ $(MAKE_CMD) $(TEST_BINDIR)/$@
-
-.PHONY: all std $(ALL_LIBS) $(TEST_TOOLS)
+.PHONY: all std $(ALL_LIBS)
 
 #-------------------------------------------------------------------------------
 # std
@@ -63,7 +58,6 @@ $(TARGDIR)/std: \
 # clean
 #
 clean: stdclean
-	@ rm -f $(addsuffix *,$(addprefix $(TEST_BINDIR)/,$(TEST_TOOLS)))
 
 .PHONY: clean
 
@@ -78,9 +72,11 @@ $(NCBIDIR)/default.kfg: $(SRCDIR)/default.kfg
 	rm -f $(NCBIDIR)/config.kfg
 	cp $^ $@
 
+ifneq ($(NCBIDIR),$(TEST_BINDIR)/ncbi)
 $(TEST_BINDIR)/ncbi/default.kfg: $(SRCDIR)/default.kfg
 	mkdir -p $(TEST_BINDIR)/ncbi
 	cp $^ $@
+endif
 
 KFG_SRC = \
 	config-grammar \

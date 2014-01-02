@@ -76,21 +76,22 @@ clean: stdclean
 # cg-load
 #
 CGLOAD_SRC = \
-	file-version-factory \
-	file \
+	cg-load \
+	factory-evidence-intervals \
+	factory-evidence-dnbs \
+	factory-mappings \
+	factory-reads \
+	factory-tag-lfr \
 	f1_3 \
 	f1_5 \
 	f2_0 \
 	f2_2 \
-	factory-reads \
-	factory-mappings \
-	factory-evidence-intervals \
-	factory-evidence-dnbs \
-	writer-seq \
+	file \
+	file-version-factory \
 	writer-algn \
-	writer-evidence-intervals \
 	writer-evidence-dnbs \
-	cg-load
+	writer-evidence-intervals \
+	writer-seq
 
 CGLOAD_OBJ = \
 	$(addsuffix .$(OBJX),$(CGLOAD_SRC))

@@ -108,13 +108,13 @@ enum VHostVariant
 
 /* legacy support */
 #define VPathMake LegacyVPathMake
-rc_t VPathMake ( VPath ** new_path, const char * posix_path );
+VFS_EXTERN rc_t VPathMake ( VPath ** new_path, const char * posix_path );
 #define VPathMakeFmt LegacyVPathMakeFmt
 rc_t VPathMakeFmt ( VPath ** new_path, const char * fmt, ... );
 #define VPathMakeVFmt LegacyVPathMakeVFmt
 rc_t VPathMakeVFmt ( VPath ** new_path, const char * fmt, va_list args );
 #define VPathMakeSysPath LegacyVPathMakeSysPath
-rc_t VPathMakeSysPath ( VPath ** new_path, const char * sys_path );
+VFS_EXTERN rc_t VPathMakeSysPath ( VPath ** new_path, const char * sys_path );
 
 typedef enum eVPUri_t
 {

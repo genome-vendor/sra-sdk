@@ -119,7 +119,8 @@ KLIB_SRC = \
 	rc-tbl \
 	rc-idx-tbl \
 	judy-vector \
-	report
+	report \
+	sra-release-version
 
 ifeq (win,$(OS))
 	KLIB_SRC += sysalloc

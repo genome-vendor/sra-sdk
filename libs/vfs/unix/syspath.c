@@ -143,7 +143,7 @@ LIB_EXPORT rc_t CC VFSManagerWMakeSysPath ( const VFSManager * self,
              HACK O' MATIC
  */
 
-rc_t LegacyVPathMakeSysPath ( VPath ** new_path, const char * sys_path )
+LIB_EXPORT rc_t LegacyVPathMakeSysPath ( VPath ** new_path, const char * sys_path )
 {
     return LegacyVPathMake ( new_path, sys_path );
 }

@@ -128,8 +128,8 @@ void CC VColumnWhack ( void *item, void *data )
 /* Make - PRIVATE
  *  make a write column
  */
-rc_t WColumnMake ( VColumn **colp, const VSchema *schema,
-    const SColumn *scol, const SExpression *blob_limit, VDBManager *mgr )
+rc_t WColumnMake ( VColumn **colp, const VSchema *schema, const SColumn *scol,
+    const SExpression *blob_limit, VDBManager *mgr, Vector *cx_bind )
 {
     rc_t rc;
     WColumn *col;
@@ -175,7 +175,7 @@ rc_t WColumnMake ( VColumn **colp, const VSchema *schema,
             {
                 /* evaluate column blob limit */
                 uint64_t trigger;
-                rc = eval_uint64_expr ( schema, blob_limit, & trigger );
+                rc = eval_uint64_expr ( schema, blob_limit, & trigger, cx_bind );
                 col -> trigger = ( size_t ) trigger;
             }
 

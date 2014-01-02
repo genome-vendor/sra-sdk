@@ -1699,25 +1699,25 @@ LIB_EXPORT rc_t CC ReferenceMgr_Release(const ReferenceMgr *cself,
 
     if (cself != NULL) {
         ReferenceMgr *const self = (ReferenceMgr *)cself;
-        uint64_t rows;
+        uint64_t rows = 0;
         unsigned i;
-        
+
         rc = TableWriterRef_Whack(self->writer, commit, &rows);
         if (Rows) *Rows = rows;
         KDirectoryRelease(self->dir);
-        
+
         for (i = 0; i != self->refSeqsById.elem_count; ++i)
             free((void *)((key_id_t *)self->refSeqsById.base)[i].key);
-        
+
         for (i = 0; i != self->refSeqs.elem_count; ++i)
             ReferenceSeq_Whack(&self->refSeq[i]);
-        
+
         KDataBufferWhack(&self->compress);
         KDataBufferWhack(&self->seq);
         KDataBufferWhack(&self->refSeqs);
         KDataBufferWhack(&self->refSeqsById);
-        
-        if (rc == 0 && build_coverage && commit)
+
+        if (rc == 0 && build_coverage && commit && rows > 0)
             rc = ReferenceMgr_ReCover(cself, rows, quitting);
 #if 0 
         {

@@ -212,7 +212,6 @@ LIB_SRC = \
 	no-null-ncbi
 
 TEST_LIB_SRC =  \
-	null-ncbi \
 	testcipher
 
 ifeq ($(VEC_SUPPORTED),true)
@@ -221,15 +220,13 @@ ALL_LIB_SRC += \
 	aes-ncbi.vec
 LIB_SRC += \
 	no-null-ncbi.vec
-TEST_LIB_SRC += \
-	null-ncbi.vec
+TEST_LIB_SRC += 
 else
 ALL_LIB_SRC += \
 	cipher-no-vec.vec
 LIB_SRC += \
 	no-null-ncbi.vec
-TEST_LIB_SRC += \
-	no-null-ncbi.vec
+TEST_LIB_SRC += 
 endif
 
 ifeq ($(VECREG_SUPPORTED),true)
@@ -238,15 +235,13 @@ ALL_LIB_SRC += \
 	aes-ncbi.vecreg
 LIB_SRC += \
 	no-null-ncbi.vecreg
-TEST_LIB_SRC += \
-	null-ncbi.vecreg
+TEST_LIB_SRC += 
 else
 ALL_LIB_SRC += \
 	cipher-no-vec.vecreg
 LIB_SRC += \
 	no-null-ncbi.vecreg
-TEST_LIB_SRC += \
-	no-null-ncbi.vecreg
+TEST_LIB_SRC += 
 endif
 
 ifeq ($(AESNI_SUPPORTED),true)
@@ -255,15 +250,13 @@ ALL_LIB_SRC += \
 	aes-ncbi.aes-ni
 LIB_SRC += \
 	no-null-ncbi.aes-ni
-TEST_LIB_SRC += \
-	no-null-ncbi.aes-ni
+TEST_LIB_SRC += 
 else
 ALL_LIB_SRC += \
 	cipher-no-vec.aes-ni
 LIB_SRC += \
 	no-null-ncbi.aes-ni
-TEST_LIB_SRC += \
-	no-null-ncbi.aes-ni
+TEST_LIB_SRC += 
 endif
 
 
@@ -273,10 +266,6 @@ KRYPTO_OBJ = \
 	$(addsuffix .$(LOBX),$(KRYPTO_SRC))
 
 KRYPTO_LIB = \
-	-dkfg \
-	-dkfs \
-	-dkproc \
-	-dklib
 
 $(ILIBDIR)/libkrypto.$(LIBX): $(KRYPTO_OBJ)
 	$(LD) --slib -o $@ $^ $(KRYPTO_LIB)
@@ -288,16 +277,12 @@ $(ILIBDIR)/libkrypto.$(LIBX): $(KRYPTO_OBJ)
 
 $(ILIBDIR)/libkryptotest: $(addprefix $(ILIBDIR)/libkryptotest.,$(ILIBEXT))
 
-KRYPTOTEST_SRC = $(ALL_LIB_SRC)	$(TEST_LIB_SRC)
+KRYPTOTEST_SRC = $(TEST_LIB_SRC)
 
 KRYPTOTEST_OBJ = \
 	$(addsuffix .$(LOBX),$(KRYPTOTEST_SRC))
 
 KRYPTOTEST_LIB = \
-	-dkfg \
-	-dkfs \
-	-dkproc \
-	-dklib
 
 $(ILIBDIR)/libkryptotest.$(LIBX): $(KRYPTOTEST_OBJ)
 	$(LD) --slib -o $@ $^ $(KRYPTOTEST_LIB)

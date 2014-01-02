@@ -42,6 +42,7 @@
 #include <kfg/repository.h>
 #include <kfg/keystore.h>
 #include <kfg/keystore-priv.h>
+#include <kfg/kfg-priv.h>
 
 #include <vfs/resolver.h>
 #include <sra/srapath.h>
@@ -83,8 +84,6 @@
 
 #define DEFAULT_CACHE_BLOCKSIZE ( 32768 * 4 )
 #define DEFAULT_CACHE_CLUSTER 1
-
-#define ENV_KRYPTO_PWFILE "VDB_PWFILE"
 
 #define VFS_KRYPTO_PASSWORD_MAX_SIZE 4096
 
@@ -266,28 +265,50 @@ static rc_t CC VFSManagerGetConfigPWFile (const VFSManager * self, char * b, siz
         return 0;
     }
     
-    rc = KConfigOpenNodeRead (self->cfg, &node, "krypto/pwfile");
-    if (rc)
-    {
-        /* if not found, change object from path to encryption key */
+    { /* If we are in a protected area, there may be an area-specific key file */
+        const KRepositoryMgr *repoMgr;
+        rc = KConfigMakeRepositoryMgrRead ( self->cfg, &repoMgr );
+        if (rc == 0)
+        {
+            const KRepository* prot;
+            rc = KRepositoryMgrCurrentProtectedRepository ( repoMgr, &prot );
+            if (rc == 0)
+            {
+                rc = KRepositoryEncryptionKeyFile ( prot, b, bz, pz);            
+                KRepositoryRelease(prot);
+            }
+            KRepositoryMgrRelease(repoMgr);
+        }
         if (GetRCState(rc) == rcNotFound)
             rc = RC (rcVFS, rcMgr, rcOpening, rcEncryptionKey, rcNotFound);
     }
-    else
-    {
-        rc = KConfigNodeRead (node, 0, b, bz-1, &z, &oopsy);
-        if (rc == 0)
+
+    if (rc != 0)
+    {   /* fall back on an old-style global password file*/
+        rc = KConfigOpenNodeRead (self->cfg, &node, KFG_KRYPTO_PWFILE);
+        if (rc)
         {
-            if (oopsy != 0)
-                rc = RC (rcKrypto, rcMgr, rcReading, rcBuffer, rcInsufficient);
-            else
-            {
-                b[z] = '\0';
-                *pz = z;
-            }
+            /* if not found, change object from path to encryption key */
+            if (GetRCState(rc) == rcNotFound)
+                rc = RC (rcVFS, rcMgr, rcOpening, rcEncryptionKey, rcNotFound);
         }
-        KConfigNodeRelease (node);
+        else
+        {
+            rc = KConfigNodeRead (node, 0, b, bz-1, &z, &oopsy);
+            if (rc == 0)
+            {
+                if (oopsy != 0)
+                    rc = RC (rcKrypto, rcMgr, rcReading, rcBuffer, rcInsufficient);
+                else
+                {
+                    b[z] = '\0';
+                    *pz = z;
+                }
+            }
+            KConfigNodeRelease (node);
+        }
     }
+    
     return rc;
 }
 
@@ -1307,7 +1328,8 @@ rc_t TransformFileToDirectory(const KDirectory * dir,
         else
         {
             /* we only use KAR/SRA or tar files as archives so try to identify
-             * as our KAR/SRA file */
+             * as our KAR/SRA file.
+             IT IS NOT TRUE ANYMORE ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ */
             if ( KFileIsSRA( tbuff, tz ) == 0 )
                 /* if it was open it as a directory */
                 rc = KDirectoryOpenSraArchiveReadUnbounded_silent_preopened( dir, d, false, file, path_str );
@@ -1318,21 +1340,30 @@ rc_t TransformFileToDirectory(const KDirectory * dir,
 
                 /*
                  * if RC here we did not have an SRA and did not have
-                 * a tar file we could use; assume the problem was decryption
-                 * if the file was encrypted
+                 * a tar file we could use; assume the problem was:
+                 * - decryption if the file was encrypted
+                 * - or it is not an archive
                  */
-                if ( was_encrypted )
-                {
-                    rc = RC( rcVFS, rcEncryptionKey, rcOpening, rcEncryption,
-                             rcIncorrect );
-                    PLOGERR (klogErr, (klogErr, rc, "could not use '$(P)' as an "
-                                       "archive it was encrypted so the password"
-                                       " was possibly wrong", "P=%s", path_str));
+                if (rc != 0) {
+                    if ( was_encrypted ) {
+                     /* the following RC update is not correct anymore but:
+                        TODO: check tools/libraries
+                            that expect this returned code and fix them
+                        rc = RC(rcVFS, rcEncryptionKey, rcOpening, rcEncryption,
+                             rcIncorrect ); */
+                        PLOGERR (klogErr, (klogErr, rc,
+                            "could not use '$(P)' as an "
+                            "archive it was encrypted so the password"
+                            " was possibly wrong or it is not SRA or"
+                            " TAR file", "P=%s", path_str));
+                    }
+                    else {
+                        PLOGERR (klogInfo, (klogInfo, rc,
+                            "could not use '$(P)' as an "
+                            "archive not identified as SRA or"
+                            " TAR file", "P=%s", path_str));
+                    }
                 }
-                else
-                    PLOGERR (klogInfo, (klogInfo, rc, "could not use '$(P)' as an "
-                                       "archive not identified as SRA or"
-                                       " TAR file", "P=%s", path_str));
             }
         }
     }

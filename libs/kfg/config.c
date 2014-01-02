@@ -113,6 +113,15 @@ int CC KConfigIncludedSort ( const BSTNode *item, const BSTNode *n )
     return strcmp ( a -> path, b -> path );
 }
 
+enum {
+    eInternalFalse = false, /* internal = false: non internal nodes */
+    eInternalTrue  = true,  /* internal = true ; internal nodes: read-only */
+    eInternalTrueUpdatable
+                       /* internal = true ; internal nodes, but can be updated :
+                                            "kfg/dir", "kfg/name" */
+} EInternal;
+typedef uint32_t TInternal;
+
 /*--------------------------------------------------------------------------
  * KConfigNode
  *  node within configuration tree
@@ -145,7 +154,7 @@ struct KConfigNode
 
     KRefcount refcount;
 
-    bool internal;
+    TInternal internal; /* EInternal */
     bool read_only;
     bool dirty;
 };
@@ -805,7 +814,7 @@ rc_t KConfigNodeVOpenNodeUpdateInt ( KConfigNode *self, KConfig *mgr,
             if ( rc == 0 )
             {
                 /* check to see if internal */
-                if ( self -> internal )
+                if ( self -> internal == eInternalTrue )
                     rc = RC ( rcKFG, rcNode, rcOpening, rcNode, rcReadonly );
                 else
                 {
@@ -969,7 +978,7 @@ LIB_EXPORT rc_t CC KConfigNodeWrite ( KConfigNode *self, const char *buffer, siz
 
     if ( self == NULL )
         rc = RC ( rcKFG, rcNode, rcWriting, rcSelf, rcNull );
-    else if ( self -> read_only || self -> internal )
+    else if ( self -> read_only || self -> internal == eInternalTrue )
         rc = RC ( rcKFG, rcNode, rcWriting, rcSelf, rcReadonly );
     else if ( size == 0 )
     {
@@ -1133,7 +1142,8 @@ LIB_EXPORT rc_t CC KConfigNodeRenameChild ( KConfigNode *self, const char *from,
 
 static
 rc_t
-update_node ( KConfig* self, const char* key, const char* value, bool internal )
+update_node ( KConfig* self, const char* key, const char* value,
+    TInternal internal )
 {
     KConfigNode * node;
     rc_t rc = KConfigVOpenNodeUpdate ( self, &node, key, NULL);
@@ -1144,20 +1154,26 @@ update_node ( KConfig* self, const char* key, const char* value, bool internal )
                           key, value);*/
         rc = KConfigNodeWrite (node, value, string_size(value));
         node -> internal = internal;
+        if (self->current_file != NULL && self->current_file->is_magic_file) {
+            if (node->came_from == NULL || !node->came_from->is_magic_file) {
+                node->came_from = self->current_file;
+            }
+        }
         KConfigNodeRelease ( node );
     }
     return rc;
 }
 
 static
-rc_t write_nvp(void * self, const char* name, size_t nameLen, VNamelist* values)
+rc_t write_nvp(void* pself, const char* name, size_t nameLen, VNamelist* values)
 {   /* concatenate all values from the namelist and put the result into config under the given name */
     uint32_t count;
-    uint32_t size=0;
-    uint32_t concatTo=0;
+    size_t size=0;
+    size_t concatTo=0;
     uint32_t i;
 
     char* buf;
+    KConfig *self = (KConfig *)pself;
     rc_t rc=VNameListCount(values, &count);
     if (rc != 0)
     {
@@ -1201,22 +1217,22 @@ rc_t write_nvp(void * self, const char* name, size_t nameLen, VNamelist* values)
         /* some old config files may have "dbGaP" in their repository keys misspelled as "dbGap" - fix if seen */
         const char* oldGaPprefix = "/repository/user/protected/dbGap-";
         size_t size = sizeof("/repository/user/protected/dbGap-") - 1;
-        bool needsFix = string_cmp(name, string_measure(name, NULL), oldGaPprefix, size, size) == 0;
+        bool needsFix = string_cmp(name, string_measure(name, NULL), oldGaPprefix, size, (uint32_t)size) == 0;
 
         String tmp;
-        StringInit(&tmp, name, nameLen, nameLen);
+        StringInit(&tmp, name, nameLen, (uint32_t)nameLen);
         StringCopy((const String**)&nameStr, &tmp);
         if (needsFix)
             ((char*)(nameStr->addr)) [ size - 2 ] = 'P';
     
-        rc = update_node((KConfig *)self, nameStr->addr, buf, false);
+        rc = update_node(self, nameStr->addr, buf, false);
         if (needsFix)
         {
             KConfigNode * node;
             rc = KConfigVOpenNodeUpdate ( self, &node, nameStr->addr, NULL);
             if (rc == 0)
             {   /* we are likely to be initializing, so have to set the dirty flags directly, not through KConfigNodeSetDirty() */
-                ((KConfig *)self) -> dirty = true;
+                self -> dirty = true;
                 node -> dirty = true;
                 KConfigNodeRelease ( node );
             }
@@ -1256,6 +1272,161 @@ void CC report_error(KFGScanBlock* sb, const char* msg)
                      msg);
 }
 
+#define DISP_RC2(rc, name, msg) (void)((rc == 0) ? 0 : \
+    PLOGERR(klogInt, (klogInt, rc, \
+        "$(name): $(msg)", "name=%s,msg=%s", name, msg)))
+
+static rc_t printIndent(int indent) {
+    rc_t rc = 0;
+
+    int i = 0;
+    for (i = 0; i < indent * 2; ++i) {
+        rc_t rc2 = OUTMSG((" "));
+        if (rc == 0 && rc2 != 0) {
+            rc = rc2;
+        }
+    }
+
+    return rc;
+}
+
+static rc_t KConfigNodeReadData(const KConfigNode* self,
+    char* buf, size_t blen, size_t* num_read)
+{
+    rc_t rc = 0;
+    size_t remaining = 0;
+
+    assert(buf && blen && num_read);
+
+    rc = KConfigNodeRead(self, 0, buf, blen, num_read, &remaining);
+
+    assert(remaining == 0); /* TODO overflow check */
+    assert(*num_read <= blen);
+
+    return rc;
+}
+
+static rc_t _printNodeData(const char *name, const char *data, uint32_t dlen) {
+    const char ticket[] = "download-ticket";
+    size_t l = sizeof ticket - 1;
+    if (string_cmp(name, string_measure(name, NULL),
+        ticket, l, (uint32_t)l) == 0)
+    {
+        const char *ellipsis = "";
+        const char replace[] =
+"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+        if (dlen > 70) {
+            dlen = 70;
+            ellipsis = "...";
+        }
+        return OUTMSG(("%.*s%s", dlen, replace, ellipsis));
+    }
+    else {
+        return OUTMSG(("%.*s", dlen, data));
+    }
+}
+
+static
+rc_t KConfigNodePrint(const KConfigNode* self,
+    int indent, const char* root, bool debug)
+{
+    rc_t rc = 0;
+    KNamelist* names = NULL;
+    uint32_t count = 0;
+    uint32_t i = 0;
+    char data[4097] = "";
+    size_t num_data = 0;
+    assert(self);
+
+    printIndent(indent);
+    OUTMSG(("<%s>", root));
+
+    if (rc == 0) {
+        rc_t rc = KConfigNodeReadData(self, data, sizeof data, &num_data);
+        DISP_RC2(rc, "KConfigNodeReadData()", root);
+        if (rc == 0 && num_data > 0) {
+            _printNodeData(root, data, num_data);
+        }
+        if (debug && self->came_from) {
+            OUTMSG(("<came_from is_magic_file=\"%s\"/>",
+                self->came_from->is_magic_file ? "true" : "false"));
+        }
+    }
+
+    if (rc == 0) {
+        rc = KConfigNodeListChild(self, &names);
+        DISP_RC2(rc, "KConfigNodeListChild()", root);
+    }
+    if (rc == 0) {
+        rc = KNamelistCount(names, &count);
+        DISP_RC2(rc, "KNamelistCount()", root);
+    }
+
+    if (rc == 0) {
+        if (count > 0) {
+            OUTMSG(("\n"));
+        }
+        for (i = 0; i < count; ++i) {
+            const char* name = NULL;
+            const KConfigNode* node = NULL;
+            if (rc == 0) {
+                rc = KNamelistGet(names, i, &name);
+                DISP_RC2(rc, "KNamelistGet()", root);
+            }
+            if (rc == 0) {
+                rc = KConfigNodeOpenNodeRead(self, &node, name);
+                DISP_RC2(rc, "KConfigNodeOpenNodeRead()", name);
+            }
+            if (rc == 0) {
+                KConfigNodePrint(node, indent + 1, name, debug);
+            }
+            KConfigNodeRelease(node);
+        }
+    }
+
+    if (count > 0) {
+        printIndent(indent);
+    }
+    OUTMSG(("</%s>\n", root));
+
+    KNamelistRelease(names);
+
+    return rc;
+}
+
+static rc_t CC KConfigPrintImpl(const KConfig* self, int indent,
+    const char *root, bool debug)
+{
+    rc_t rc = 0;
+
+    if (root == NULL) {
+        root = "Config";
+    }
+
+    if (self == NULL) {
+        OUTMSG(("<%s>", root));
+        OUTMSG(("KConfigPrint(const KConfig* self = NULL)\n"));
+        OUTMSG(("</%s>\n", root));
+    }
+    else {
+        const KConfigNode* node = NULL;
+        if (rc == 0) {
+            rc = KConfigOpenNodeRead(self, &node, "/");
+            DISP_RC2(rc, "KConfigOpenNodeRead()", "/");
+        }
+        if (rc == 0) {
+            KConfigNodePrint(node, indent, root, debug);
+        }
+        KConfigNodeRelease(node);
+    }
+
+    return rc;
+}
+
+LIB_EXPORT rc_t CC KConfigPrintDebug(const KConfig* self, const char *path) {
+    return KConfigPrintImpl(self, 0, path, true);
+}
+
 /*
  * Set up the parameter block and start parsing lines
  */
@@ -1265,6 +1436,8 @@ rc_t parse_file ( KConfig * self, const char* path, const char * src )
     KFGParseBlock pb;
     KFGScanBlock sb;
     rc_t rc;
+
+/*  KConfigPrintDebug(self, NULL); */
 
     pb.tokenLength  = 0;
     pb.line_no      = 0;
@@ -1282,6 +1455,8 @@ rc_t parse_file ( KConfig * self, const char* path, const char * src )
         KFG_parse(&pb, &sb); /* may have reported parse errors into log, but we should have been able to extract enough data to proceed regardless */
         KFGScan_yylex_destroy(&sb);
     }
+
+/*  KConfigPrintDebug(self, path); */
 
     return rc;
 }
@@ -1305,9 +1480,9 @@ LIB_EXPORT rc_t CC KConfigLoadFile ( KConfig * self, const char * path, const KF
 
         /* populate file-specific predefined nodes */
 #define UPDATE_NODES(dir, file)                             \
-        rc = update_node(self, "kfg/dir", dir, false );     \
+        rc = update_node(self, "kfg/dir", dir, eInternalTrueUpdatable );     \
         if (rc == 0)                                        \
-            rc = update_node(self, "kfg/name", file, false )
+            rc = update_node(self, "kfg/name", file, eInternalTrueUpdatable )
 
         if ( path == NULL || path [ 0 ] == 0)
         {
@@ -1340,8 +1515,8 @@ LIB_EXPORT rc_t CC KConfigLoadFile ( KConfig * self, const char * path, const KF
             }
             else
             {
-                update_node(self, "kfg/dir", "", false);
-                update_node(self, "kfg/name", "", false);
+                update_node(self, "kfg/dir", "", eInternalTrueUpdatable);
+                update_node(self, "kfg/name", "", eInternalTrueUpdatable);
             }
         }
 #undef UPDATE_NODES
@@ -1369,8 +1544,8 @@ LIB_EXPORT rc_t CC KConfigLoadFile ( KConfig * self, const char * path, const KF
                     buf[size]=0;
 
                     /* Parse the path to populate: */
-                    /* update_node(self, "kfg/dir", dir, false);*/
-                    /* update_node(self, "kfg/name", name, false);*/
+                 /* update_node(self, "kfg/dir", dir, eInternalTrueUpdatable);*/
+               /* update_node(self, "kfg/name", name, eInternalTrueUpdatable);*/
 
                     /* parse config file */
                     rc = parse_file ( self, path, buf );
@@ -1542,7 +1717,9 @@ bool CC WriteDirtyNode ( BSTNode *n, void *data )
     KConfigNode *self = ( KConfigNode * ) n;
     PrintBuff *pb = data;
 
-    if ( self -> dirty || ( self -> came_from != NULL && self -> came_from -> is_magic_file ) )
+    if ( self -> dirty
+        || ( self -> came_from != NULL && self -> came_from -> is_magic_file 
+             && ! self -> internal ) )
     {
         if ( KConfigNodePrintPath ( self, pb ) )
             return true;
@@ -1911,6 +2088,65 @@ bool load_from_std_location ( KConfig *self, const KDirectory *dir )
 }
 
 static
+rc_t find_home_directory ( KDyld *dyld, const KDirectory **dir )
+{
+    static const KDirectory * cached_dir = NULL;
+    static rc_t cached_rc = 0;
+    rc_t rc;
+
+    if ( cached_dir != NULL )
+    {
+        rc = KDirectoryAddRef ( cached_dir );
+        if ( rc == 0 ) {
+            * dir = cached_dir;
+        }
+        return rc;
+    }
+    else if ( cached_rc != 0 )
+    {
+        return cached_rc;
+    }
+
+    rc = KDyldHomeDirectory ( dyld, dir, ( fptr_t ) KConfigMake );
+
+    if ( rc != 0
+        ||  (KDirectoryPathType ( * dir, "ncbi" ) & ~kptAlias) != kptDir )
+    {
+        KDylib * lib;
+        if ( rc == 0 )
+        {
+            /* Nominally succeeded, but got a useless directory
+             * (for a statically linked executable?); try again. */
+            KDirectoryRelease ( * dir );
+        }
+        rc = KDyldLoadLib ( dyld, & lib, LPFX "kfg-beacon" SHLX );
+        if ( rc == 0 )
+        {
+            KSymAddr * sym;
+            if ( ( rc = KDylibSymbol ( lib, & sym, "KConfigBeacon" ) ) == 0 )
+            {
+                fptr_t fp;
+                KSymAddrAsFunc ( sym, & fp );
+                rc = KDyldHomeDirectory ( dyld, dir, fp );
+                KSymAddrRelease ( sym );
+            }
+            KDylibRelease ( lib );
+        }
+    }
+
+    if ( rc == 0  &&  KDirectoryAddRef ( * dir ) == 0 )
+    {
+        cached_dir = * dir;
+    }
+    else
+    {
+        cached_rc = rc;
+    }
+
+    return rc;
+}
+
+static
 rc_t load_from_fs_location ( KConfig *self )
 {
     KDyld *dyld;
@@ -1918,7 +2154,7 @@ rc_t load_from_fs_location ( KConfig *self )
     if ( rc == 0 )
     {
         const KDirectory *dir;
-        rc = KDyldHomeDirectory ( dyld, & dir, ( fptr_t ) KConfigMake );
+        rc = find_home_directory ( dyld, & dir );
         if ( rc == 0 )
         {
             char resolved[PATH_MAX + 1];
@@ -2081,7 +2317,7 @@ void add_predefined_nodes ( KConfig * self, const char *appname )
     rc_t rc = KDyldMake ( & dyld );
     if ( rc == 0 )
     {
-        rc = KDyldHomeDirectory ( dyld, & dir, ( fptr_t ) KConfigMake );
+        rc = find_home_directory ( dyld, & dir );
         if ( rc == 0 )
         {
             KDirectoryResolvePath ( dir, true, buf, sizeof buf, "." );
@@ -2755,7 +2991,7 @@ LIB_EXPORT rc_t CC KConfigNodeReadString ( const KConfigNode *self, String** res
                     /* TBD - this is broken for non-ascii strings
                        much better to be WITHIN the config.c implementation
                        and reach into the node value directly! */
-                    StringInit ( value, (char*)( value + 1 ), to_read, to_read + 1 );
+                    StringInit ( value, (char*)( value + 1 ), to_read, (uint32_t)to_read + 1 );
                     rc = ReadNodeValueFixed(self, (char*)value->addr, to_read + 1);
                     if ( rc == 0 )
                         *result = value;
@@ -2816,128 +3052,9 @@ LIB_EXPORT rc_t CC KConfigReadString ( const KConfig* self, const char* path, st
 }
 
 #define DISP_RC(rc, msg) (void)((rc == 0) ? 0 : LOGERR(klogInt, rc, msg))
-#define DISP_RC2(rc, name, msg) (void)((rc == 0) ? 0 : \
-    PLOGERR(klogInt, (klogInt, rc, \
-        "$(name): $(msg)", "name=%s,msg=%s", name, msg)))
-
-static rc_t KConfigNodeReadData(const KConfigNode* self,
-    char* buf, size_t blen, size_t* num_read)
-{
-    rc_t rc = 0;
-    size_t remaining = 0;
-
-    assert(buf && blen && num_read);
-
-    rc = KConfigNodeRead(self, 0, buf, blen, num_read, &remaining);
-
-    assert(remaining == 0); /* TODO overflow check */
-    assert(*num_read <= blen);
-
-    return rc;
-}
-
-static rc_t printIndent(int indent) {
-    rc_t rc = 0;
-
-    int i = 0;
-    for (i = 0; i < indent * 2; ++i) {
-        rc_t rc2 = OUTMSG((" "));
-        if (rc == 0 && rc2 != 0) {
-            rc = rc2;
-        }
-    }
-
-    return rc;
-}
-
-static
-rc_t KConfigNodePrint(const KConfigNode* self,
-    int indent, const char* root)
-{
-    rc_t rc = 0;
-    KNamelist* names = NULL;
-    uint32_t count = 0;
-    uint32_t i = 0;
-    char data[512] = "";
-    size_t num_data = 0;
-    assert(self);
-
-    printIndent(indent);
-    OUTMSG(("<%s>", root));
-
-    if (rc == 0) {
-        rc_t rc = KConfigNodeReadData(self, data, sizeof data, &num_data);
-        DISP_RC2(rc, "KConfigNodeReadData()", root);
-        if (rc == 0 && num_data > 0) {
-            OUTMSG(("%.*s", (int)num_data, data));
-        }
-    }
-
-    if (rc == 0) {
-        rc = KConfigNodeListChild(self, &names);
-        DISP_RC2(rc, "KConfigNodeListChild()", root);
-    }
-    if (rc == 0) {
-        rc = KNamelistCount(names, &count);
-        DISP_RC2(rc, "KNamelistCount()", root);
-    }
-
-
-    if (rc == 0) {
-        if (count > 0) {
-            OUTMSG(("\n"));
-        }
-        for (i = 0; i < count; ++i) {
-            const char* name = NULL;
-            const KConfigNode* node = NULL;
-            if (rc == 0) {
-                rc = KNamelistGet(names, i, &name);
-                DISP_RC2(rc, "KNamelistGet()", root);
-            }
-            if (rc == 0) {
-                rc = KConfigNodeOpenNodeRead(self, &node, name);
-                DISP_RC2(rc, "KConfigNodeOpenNodeRead()", name);
-            }
-            if (rc == 0) {
-                KConfigNodePrint(node, indent + 1, name);
-            }
-            KConfigNodeRelease(node);
-        }
-    }
-
-    if (count > 0) {
-        printIndent(indent);
-    }
-    OUTMSG(("</%s>\n", root));
-
-    KNamelistRelease(names);
-
-    return rc;
-}
 
 LIB_EXPORT rc_t CC KConfigPrint(const KConfig* self, int indent) {
-    rc_t rc = 0;
-
-    const char root[] = "Config";
-
-    if (self == NULL) {
-        OUTMSG(("<%s>", root));
-        OUTMSG(("KConfigPrint(const KConfig* self = NULL)\n"));
-        OUTMSG(("</%s>\n", root));
-    }
-    else {
-        const KConfigNode* node = NULL;
-        if (rc == 0) {
-            rc = KConfigOpenNodeRead(self, &node, "/");
-            DISP_RC2(rc, "KConfigOpenNodeRead()", "/");
-        }
-        if (rc == 0) {
-            KConfigNodePrint(node, indent, "Config");
-        }
-        KConfigNodeRelease(node);
-    }
-
-    return rc;
+    return KConfigPrintImpl(self, indent, NULL, false);
 }
 
 LIB_EXPORT void CC KConfigDisableUserSettings ( void )
@@ -2961,15 +3078,17 @@ rc_t open_file ( const KFile **f, const char *path )
 }
 
 static
-rc_t decode_file ( KDataBuffer *mem, const KFile *orig )
+rc_t decode_ncbi_gap ( KDataBuffer *mem, const KFile *orig )
 {
     char hdr [ 8 ];
     size_t num_read;
     rc_t rc = KFileReadAll ( orig, 0, hdr, sizeof hdr, & num_read );
     if ( rc == 0 && num_read == sizeof hdr )
     {
-        if ( memcmp ( hdr, "ncbi_gap", sizeof hdr ) == 0 )
-        {
+        if (memcmp(hdr, "ncbi_gap", sizeof hdr) != 0) {
+            rc = RC(rcKFG, rcFile, rcReading, rcFile, rcWrongType);
+        }
+        else {
             uint64_t eof;
             rc = KFileSize ( orig, & eof );
             if ( rc == 0 )
@@ -3050,7 +3169,7 @@ rc_t _KConfigNncToKGapConfig(const KConfig *self, char *text, KGapConfig *kgc)
     {
         const char version[] = "version ";
         size_t l = sizeof version - 1;
-        if (string_cmp(version, l, text, len, l) != 0) {
+        if (string_cmp(version, l, text, len, (uint32_t)l) != 0) {
             return RC(rcKFG, rcMgr, rcUpdating, rcFormat, rcUnrecognized);
         }
         text += l;
@@ -3060,7 +3179,7 @@ rc_t _KConfigNncToKGapConfig(const KConfig *self, char *text, KGapConfig *kgc)
     {
         const char version[] = "1.0";
         size_t l = sizeof version - 1;
-        if (string_cmp(version, l, text, l, l) != 0) {
+        if (string_cmp(version, l, text, l, (uint32_t)l) != 0) {
             return RC(rcKFG, rcMgr, rcUpdating, rcFormat, rcUnsupported);
         }
         text += l;
@@ -3292,6 +3411,9 @@ static rc_t _KConfigDBGapRepositoryNodes(KConfig *self,
     }
 
     if (rc == 0) {
+        rc = _KConfigNodeUpdateChild(rep, "apps/file/volumes/flat", "files");
+    }
+    if (rc == 0) {
         rc = _KConfigNodeUpdateChild(rep, "apps/sra/volumes/sraFlat", "sra");
     }
 
@@ -3400,7 +3522,7 @@ LIB_EXPORT rc_t CC KConfigImportNgc(KConfig *self,
             KDataBuffer mem;
             memset ( & mem, 0, sizeof mem );
 
-            rc = decode_file ( & mem, orig );
+            rc = decode_ncbi_gap ( & mem, orig );
             KFileRelease ( orig );
             orig = NULL;
 

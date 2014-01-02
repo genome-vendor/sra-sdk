@@ -96,13 +96,7 @@ RCEXPLAIN_OBJ = \
 
 RCEXPLAIN_LIB = \
 	-skapp \
-	-svfs \
-	-skurl \
-	-skrypto \
-	-skfg \
-	-skfs \
-	-sksproc \
-	-sklib
+	-lncbi-vdb \
 
 $(BINDIR)/rcexplain: $(RCEXPLAIN_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(RCEXPLAIN_LIB)
@@ -171,7 +165,8 @@ $(BINDIR)/vdb-unlock: $(VDB_UNLOCK_OBJ)
 #
 
 T_SRC = \
-	test-sra
+	PrintOS \
+	test-sra \
 
 T_OBJ = \
 	$(addsuffix .$(OBJX),$(T_SRC))
@@ -197,13 +192,8 @@ VDB_PASSWD_OBJ = \
 
 VDB_PASSWD_LIB = \
 	-skapp \
-	-lvfs \
-	-lkurl \
-	-lkrypto \
-	-lkfg \
-	-lkfs \
-	-sksproc \
-	-lklib
+	-lncbi-vdb \
+
 
 $(BINDIR)/vdb-passwd: $(VDB_PASSWD_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(VDB_PASSWD_LIB)

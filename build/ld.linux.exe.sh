@@ -291,7 +291,12 @@ fi
 # add in xml
 if [ $HAVE_XML -ne 0 ]
 then
-    CMD="$CMD -lxml2"
+    if [ "$NCBI" != "" ] && [ -f "$NCBI/libxml/lib/libxml2-static.a" ]
+    then
+        CMD="$CMD -L$NCBI/libxml/lib -lxml2-static"
+    else
+        CMD="$CMD -lxml2"
+    fi
 fi
 
 # add in math library

@@ -1383,7 +1383,7 @@ LIB_EXPORT rc_t CC ReferenceObj_MakePlacementIterator ( const ReferenceObj* csel
                 o->last_ref_row_of_window_rel = ref_window_start;
                 o->last_ref_row_of_window_rel += ref_window_len;
                 o->last_ref_row_of_window_rel /= mgr->max_seq_len;
-                o->rowcount_of_ref = ( cself->end_rowid - cself->start_rowid );
+                o->rowcount_of_ref = ( cself->end_rowid - cself->start_rowid ) + 1;
 
                 /* get effective starting offset based on overlap
                    from alignments which started before the requested pos */
@@ -1733,15 +1733,16 @@ static rc_t read_alignments( PlacementIterator *self )
     /*ALIGN_DBG("align rows: %u", cself->ids_col->len);*/
     for ( i = 0; rc == 0 && i < self->ids_col->len; i++ )
     {
-        rc = TableReader_ReadRow( self->align_reader, self->ids_col->base.i64[ i ] );
+        int64_t row_id = self->ids_col->base.i64[ i ];
+        rc = TableReader_ReadRow( self->align_reader, row_id );
         if ( rc == 0 )
         {
             INSDC_coord_zero apos = self->align_cols[ eplacementiter_cn_REF_POS ].base.coord0[ 0 ];
             INSDC_coord_len alen  = self->align_cols[ eplacementiter_cn_REF_LEN ].base.coord_len[ 0 ];
-            /*ALIGN_DBG("align row: {%li, %u, %u}", cself->ids_col->base.i64[i], apos, alen);*/
 
-            if ( self->cur_ref_row_rel < 0 )
-                apos -= self->obj->seq_len;
+#if 0
+            ALIGN_DBG( "alignment read: {row_id:%,li, apos:%,d, alen:%u}", row_id, apos, alen );
+#endif
 
             /* at this point we have the position of the alignment.
                we want it to intersect with the window */
@@ -1781,19 +1782,21 @@ static rc_t read_alignments( PlacementIterator *self )
                     continue;
 
             }
-            else if ( ( self->obj->circular )&&( apos + alen > self->obj->seq_len ) ) 
+            else if ( ( self->obj->circular )&&
+                       ( apos + alen > self->obj->seq_len )&&
+                       ( self->cur_ref_row_rel < 0 ) ) 
             {
                 /* the end of the alignment sticks over the end of the reference! 
                    ---> we have the rare case of an alignment that wraps arround !
                    let as insert the alignment 2 times!
                    ( one with neg. position, one at real position ) */
-                rc =  make_alignment( self, self->ids_col->base.i64[i], apos - self->obj->seq_len, alen );
+                rc =  make_alignment( self, row_id, apos - self->obj->seq_len, alen );
             }
 
             /* having arrived here, we know the alignment intersects our window
                apos MAY be < 0 if the alignment wrapped around */
-            if ( rc == 0 )
-                rc =  make_alignment( self, self->ids_col->base.i64[i], apos, alen );
+            if ( rc == 0 && self->cur_ref_row_rel >= 0 )
+                rc =  make_alignment( self, row_id, apos, alen );
         }
     }
     return rc;
@@ -1819,7 +1822,7 @@ LIB_EXPORT rc_t CC PlacementIteratorNextAvailPos( const PlacementIterator *cself
             self->cur_ref_row_rel++;   /* increment row offset */
 
 #if 0
-            ALIGN_DBG( "ref row: ref-start-row-id:%li - curr-rel-row:%li - of:%li",
+            ALIGN_DBG( "ref row: ref-start-row-id:%,li - curr-rel-row:%,li - of:%,li",
                        self->obj->start_rowid, self->cur_ref_row_rel, self->last_ref_row_of_window_rel );
 #endif
 
@@ -1858,8 +1861,9 @@ LIB_EXPORT rc_t CC PlacementIteratorNextAvailPos( const PlacementIterator *cself
                 if ( len != NULL ) { *len = r->len; }
 
 #if 0
-                ALIGN_DBG( "PlacementIteratorNextAvailPos( id=%,li, pos=%,u, n=%,u )", r->id, r->pos, count );
+                ALIGN_DBG( "PlacementIteratorNextAvailPos( id=%,li, pos=%,d, len=%,u, n=%,u )", r->id, r->pos, r->len, count );
 #endif
+
                 if ( !( cself->obj->circular ) && ( r->pos >= ( cself->ref_window_start + cself->ref_window_len ) ) )
                 {
                     /* the alignment !starts! after the end of the of the requested window! */

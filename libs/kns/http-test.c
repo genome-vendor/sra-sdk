@@ -206,7 +206,7 @@ rc_t HttpTest ( const KFile *input )
             struct KHttp *http;
 
             String host;
-            CONST_STRING ( & host, "http://www.ncbi.nlm.nih.gov/" );
+            CONST_STRING ( & host, "www.ncbi.nlm.nih.gov" );
 
             rc = KNSManagerMakeHttp ( mgr, & http, sock, 0x01010000, & host, 80 );
             if ( rc == 0 )
@@ -220,15 +220,15 @@ rc_t HttpTest ( const KFile *input )
                     OUTMSG (( "%s: KHttpGetStatusLine failed with rc=%R\n", __func__, rc ));
                 else
                 {
-                    bool blank;
+                    bool blank, close_connection;
                     BSTree hdrs;
                     OUTMSG (( "%s: KHttpGetStatusLine returned msg='%S', status=%u, version=%V\n",
                               __func__, & msg, status, version ));
 
                     BSTreeInit ( & hdrs );
 
-                    for ( blank = false; ! blank && rc == 0; )
-                        rc = KHttpGetHeaderLine ( http, & hdrs, & blank );
+                    for ( blank = close_connection = false; ! blank && rc == 0; )
+                        rc = KHttpGetHeaderLine ( http, & hdrs, & blank, & close_connection );
                     
                     if ( rc != 0 )
                         OUTMSG (( "%s: KHttpGetHeaderLine failed with rc=%R\n", __func__, rc ));

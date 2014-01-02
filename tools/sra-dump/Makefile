@@ -76,14 +76,6 @@ clean: stdclean
 .PHONY: clean
 
 #-------------------------------------------------------------------------------
-# tag
-#
-tag: \
-	$(addsuffix _tag,$(ALL_TOOLS))
-
-.PHONY: tag $(addsuffix _tag,$(ALL_TOOLS))
-
-#-------------------------------------------------------------------------------
 # Common dumper definitions
 #
 DUMP_COMMON_SRC = \
@@ -110,9 +102,6 @@ FASTQ_DUMP_OBJ = \
 $(BINDIR)/fastq-dump: $(FASTQ_DUMP_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(DUMP_COMMON_LIB)
 
-fastq-dump_tag:
-	@ $(TOP)/build/tag-module.sh $(MODULE) fastq-dump $(FASTQ_DUMP_OBJ)
-
 #-------------------------------------------------------------------------------
 # sff-dump
 #
@@ -125,9 +114,6 @@ SFF_DUMP_OBJ = \
 
 $(BINDIR)/sff-dump: $(SFF_DUMP_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(DUMP_COMMON_LIB)
-
-sff-dump_tag:
-	@ $(TOP)/build/tag-module.sh $(MODULE) sff-dump $(SFF_DUMP_OBJ)
 
 #-------------------------------------------------------------------------------
 # illumina-dump
@@ -142,9 +128,6 @@ ILLUMINA_DUMP_OBJ = \
 $(BINDIR)/illumina-dump: $(ILLUMINA_DUMP_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(DUMP_COMMON_LIB)
 
-illumina-dump_tag:
-	@ $(TOP)/build/tag-module.sh $(MODULE) illumina-dump $(ILLUMINA_DUMP_OBJ)
-
 #-------------------------------------------------------------------------------
 # abi-dump
 #
@@ -158,5 +141,3 @@ ABI_DUMP_OBJ = \
 $(BINDIR)/abi-dump: $(ABI_DUMP_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(DUMP_COMMON_LIB)
 
-abi-dump_tag:
-	@ $(TOP)/build/tag-module.sh $(MODULE) abi-dump $(ABI_DUMP_OBJ)

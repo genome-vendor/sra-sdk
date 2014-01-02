@@ -163,7 +163,11 @@ do
         DEPENDENCIES=1
         ;;
 
-    -fPIC|-std=c99|-ansi|-pedantic)
+    -fPIC|-std=c99|-ansi)
+        ;;
+        
+    -pedantic)
+        ARGS="$ARGS /W3"
         ;;
 
     -*)
@@ -228,29 +232,12 @@ then
         for inc in $(cat $TARG.inc)
         do
             inc_low=$(echo ${inc} | tr '[A-Z]' '[a-z]' | tr '\\' '/')
-            # vers.h files are now generated in the objdir
-            if [ "$inc" != "${inc%.vers.h}" ]
+            if [ "${inc_low#$rhome_low}" != "$inc_low" ]
             then
-                # convert the "...vers.h" in the object directory into "...vers" in the source directory
-                inc="${inc%.h}"
-                if [ "${inc_low#$rhome_low}" != "$inc_low" ]
-                then
-                    inc="${inc:$rhome_len}"
-                elif [ "${inc_low#$routdir_low}" != "$inc_low" ]
-                then
-                    inc="$SRCDIR/$inc"
-                fi
-                inc="${inc//\\//}"
-                inc="$(basename $inc)"
-                inc="$SRCDIR/$inc"
-            else
-                if [ "${inc_low#$rhome_low}" != "$inc_low" ]
-                then
-                    inc="$LHOME${inc:$rhome_len}"
-                elif [ "${inc_low#$routdir_low}" != "$inc_low" ]
-                then
-                    inc="$OUTDIR${inc:$routdir_len}"
-                fi
+                inc="$LHOME${inc:$rhome_len}"
+            elif [ "${inc_low#$routdir_low}" != "$inc_low" ]
+            then
+                inc="$OUTDIR${inc:$routdir_len}"
             fi
             echo -n " $inc" | tr '\\' '/' >> $TARG.d
         done

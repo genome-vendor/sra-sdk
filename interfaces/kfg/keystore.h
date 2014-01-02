@@ -39,8 +39,6 @@
 extern "C" {
 #endif
 
-#define ENV_KRYPTO_PWFILE       "VDB_PWFILE"
-
 struct KFile;
 struct KConfig;
 struct String;

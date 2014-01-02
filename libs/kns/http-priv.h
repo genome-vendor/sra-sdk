@@ -78,7 +78,7 @@ struct KHttpHeader
 };
     
 extern void KHttpHeaderWhack ( BSTNode *n, void *ignore );
-extern rc_t KHttpGetHeaderLine ( struct KHttp *self, BSTree *hdrs, bool *blank );
+extern rc_t KHttpGetHeaderLine ( struct KHttp *self, BSTree *hdrs, bool *blank, bool *close_connection );
 extern rc_t KHttpGetStatusLine ( struct KHttp *self, String *msg, uint32_t *status, ver_t *version );
 
 /* exported private functions

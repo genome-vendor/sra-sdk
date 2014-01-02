@@ -27,11 +27,19 @@
 #include "reref.h"
 
 #include <klib/text.h>
+#include <klib/log.h>
+
 #include <kfs/file.h>
+
 #include <vfs/manager.h>
 #include <vfs/path.h>
 #include <vfs/resolver.h>
+
 #include <align/reference.h>
+
+#include <vdb/manager.h>
+#include <vdb/vdb-priv.h>
+#include <kdb/manager.h>
 
 #include <sysalloc.h>
 #include <stdlib.h>
@@ -248,17 +256,23 @@ static rc_t resolve_accession( VFSManager * vfs_mgr, const char * accession, con
 {
     VResolver * resolver;
     rc_t rc = VFSManagerGetResolver( vfs_mgr, &resolver );
-    if ( rc == 0 )
+    if ( rc != 0 )
+        KOutMsg( "cannot get VResolver from VFSManger for '%s'\n", accession );
+    else
     {
         VPath * vpath;
-        rc = VFSManagerMakePath( vfs_mgr, &vpath, accession );
-        if ( rc == 0 )
+        rc = VFSManagerMakePath( vfs_mgr, &vpath, "ncbi-acc:%s?vdb-ctx=refseq", accession );
+        if ( rc != 0 )
+            KOutMsg( "cannot make VPath from VFSManger for '%s'\n", accession );
+        else
         {
             const VPath * local;
             const VPath * remote;
 
             rc = VResolverQuery ( resolver, eProtocolHttp, vpath, &local, &remote, NULL );
-            if ( rc == 0 )
+            if ( rc != 0 )
+                KOutMsg( "cannot resolve '%s'\n", accession );
+            else
             {
                 if ( local != NULL )
                     rc = VPathMakeString( local, path );

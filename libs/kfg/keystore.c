@@ -35,6 +35,7 @@
 
 #include <kfg/config.h>
 #include <kfg/repository.h>
+#include <kfg/kfg-priv.h>
 
 #include <kfs/directory.h>
 #include <kfs/file.h>
@@ -48,7 +49,6 @@
 #include <string.h>
 
 #define PASSWORD_MAX_SIZE 4096
-#define KFG_KRYPTO_PWFILE   "krypto/pwfile"
 #define MAX_PATH_SIZE 4096
 
 static char defaultBindingsFile[MAX_PATH_SIZE];
@@ -363,7 +363,7 @@ static rc_t KEncryptionKeyMakeInt(const char* value, KEncryptionKey** self)
         }
 
         string_copy(data, size + 1, value, size);    
-        StringInit( & ret -> value, data, size, size ); /* do not include the 0-terminator */
+        StringInit( & ret -> value, data, size, (uint32_t)size ); /* do not include the 0-terminator */
         
         KRefcountInit ( & ret -> refcount, 1, "KEncryptionKey", "init", "" );
         
@@ -494,7 +494,7 @@ static rc_t LocateObjectId(const KFile* file, const char* key, char* value, size
                         break;
                 }
                 /* check the key */
-                if (string_cmp(key, key_size, buf + start, key_size, num_read - start) == 0)
+                if (string_cmp(key, key_size, buf + start, key_size, (uint32_t) ( num_read - start )) == 0)
                 {
                     if (buf [ start + key_size ] == '=')
                     {
@@ -611,7 +611,7 @@ static rc_t LocateObject(const KFile* file, const char* value, const size_t valu
                 }
 
                 /* compare the value */
-                if (string_cmp(value, value_size, buf + value_start, start - value_start, start - value_start) == 0)
+                if (string_cmp(value, value_size, buf + value_start, start - value_start, (uint32_t) ( start - value_start )) == 0)
                 {
                     *key_read = key_end - key_start;
                     if (string_copy(key, key_size, buf + key_start, *key_read) != *key_read)
@@ -708,7 +708,7 @@ LIB_EXPORT rc_t CC KKeyStoreRegisterObject(struct KKeyStore* self, uint32_t oid,
             if (rc == 0)
             {   /* see if already registered */
                 if (LocateObjectId(file, oidString, oldName, sizeof(oldName), &num_read) == 0 &&
-                    string_cmp(oldName, num_read, newName->addr, newName->size, newName->size) != 0)
+                    string_cmp(oldName, num_read, newName->addr, newName->size, (uint32_t)newName->size) != 0)
                     rc = RC ( rcVFS, rcMgr, rcRegistering, rcId, rcExists );
                 rc2 = KFileRelease(file);
                 if (rc == 0)
@@ -730,7 +730,7 @@ LIB_EXPORT rc_t CC KKeyStoreRegisterObject(struct KKeyStore* self, uint32_t oid,
                     {
                         if (LocateObjectId(lockedFile, oidString, oldName, sizeof(oldName), &num_read) == 0)
                         {   /* somebody inserted the binding before we locked - make sure their binding was the same */
-                            if (string_cmp(oldName, num_read, newName->addr, newName->size, newName->size) != 0)
+                            if (string_cmp(oldName, num_read, newName->addr, newName->size, (uint32_t)newName->size) != 0)
                                 rc = RC ( rcVFS, rcMgr, rcRegistering, rcId, rcExists );
                         }
                         else
@@ -816,7 +816,7 @@ LIB_EXPORT rc_t CC KKeyStoreGetObjectName(const struct KKeyStore* self, uint32_t
                     if (res != NULL)
                     {
                         string_copy((char*)res + sizeof(String), num_read, name, num_read);
-                        StringInit(res, (char*)res + sizeof(String), num_read, num_read);
+                        StringInit(res, (char*)res + sizeof(String), num_read, (uint32_t)num_read);
                         *result = res;
                     }
                     else

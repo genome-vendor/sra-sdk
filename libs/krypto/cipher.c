@@ -169,7 +169,7 @@ KRYPTO_EXTERN rc_t CC KCipherSetEncryptKey (KCipher * self, const void * user_ke
     switch (self->vt.version->maj)
     {
     case 1:
-        return self->vt.v1->set_encrypt_key (self, user_key, user_key_size);
+        return self->vt.v1->set_encrypt_key (self, user_key, (uint32_t) user_key_size);
     }
     return RC (rcKrypto, rcCipher, rcUpdating, rcInterface, rcBadVersion);
 }
@@ -190,7 +190,7 @@ KRYPTO_EXTERN rc_t CC KCipherSetDecryptKey (KCipher * self, const void * user_ke
     switch (self->vt.version->maj)
     {
     case 1:
-        return self->vt.v1->set_decrypt_key (self, user_key, user_key_size);
+        return self->vt.v1->set_decrypt_key (self, user_key, (uint32_t) user_key_size);
     }
     return RC (rcKrypto, rcCipher, rcUpdating, rcInterface, rcBadVersion);
 }

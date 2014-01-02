@@ -710,3 +710,15 @@ LIB_EXPORT rc_t CC VDatabaseTypespec ( const VDatabase *self, char *ts_buff, siz
 
     return rc;
 }
+
+
+/* IsCSRA
+ *  ask an open database if it conforms to cSRA schema
+ */
+LIB_EXPORT bool CC VDatabaseIsCSRA ( const VDatabase *self )
+{
+    if ( self != NULL )
+        return KDatabaseExists ( self -> kdb, kptTable, "PRIMARY_ALIGNMENT" );
+
+    return false;
+}

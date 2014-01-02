@@ -81,13 +81,6 @@ clean: stdclean
 .PHONY: clean
 
 #-------------------------------------------------------------------------------
-# tag
-#
-tag: $(addsuffix _tag,$(ALL_TOOLS))
-
-.PHONY: tag $(addsuffix _tag,$(ALL_TOOLS))
-
-#-------------------------------------------------------------------------------
 # cache-mgr
 #
 TOOL_SRC = \
@@ -98,23 +91,9 @@ TOOL_OBJ = \
 
 TOOL_LIB = \
 	-lkapp \
-	-ssraschema \
-	-dalign-reader \
-	$(READONLY_SCHEMA_LIBS) \
-	-lvdb \
-	-lkdb \
-	-lvfs \
-	-lkurl \
-	-lkrypto \
-	-lkfg \
-	-lkfs \
-	-lksrch \
-	-lkproc \
-	-lklib \
+	-lncbi-vdb \
 	-lm
 
 $(BINDIR)/cache-mgr: $(TOOL_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(TOOL_LIB)
 
-cache-mgr_tag:
-	@ $(TOP)/build/tag-module.sh $(MODULE) cache-mgr $(TOOL_OBJ)

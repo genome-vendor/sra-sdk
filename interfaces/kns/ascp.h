@@ -70,15 +70,22 @@ typedef struct {
     TProgress *callback;
 
     TQuitting *quitting;
+
+    bool disabled; /* output parameter for aspera_options */
 } AscpOptions;
 
-/** ascp_bin and private_file should be freed by the caller */
+/**  status - whether to print STSMSG(1-2) - information messages
+    ascp_bin and private_file should be freed by the caller */
 KNS_EXTERN rc_t CC ascp_locate(const char **ascp_bin, const char **private_file,
     bool use_config, bool status);
 
 /** Get a file by running aspera ascp binary */
 KNS_EXTERN rc_t CC aspera_get(const char *ascp_bin, const char *private_file,
     const char *src, const char *dest, AscpOptions *opt);
+
+/** Fill AscpOptions members initialized by ascp library */
+KNS_EXTERN rc_t CC aspera_options(AscpOptions *opt);
+
 
 #ifdef __cplusplus
 }

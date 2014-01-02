@@ -28,6 +28,7 @@
 #include <kfg/config.h> /* KConfigDisableUserSettings */
 
 #include <vdb/manager.h> /* VDBManagerRelease */
+#include <vdb/vdb-priv.h> /* VDBManagerDisablePagemapThread() */
 #include <kdb/manager.h> /* for different path-types */
 #include <vdb/dependencies.h> /* UIError */
 #include <klib/report.h> /* ReportInit */
@@ -657,41 +658,41 @@ static rc_t SRADumper_DumpRun( const SRATable* table,
 
 static const SRADumperFmt_Arg KMainArgs[] =
 {
-    { NULL, "no-user-settings", NULL, {"Internal Only", NULL}},
-    { "A", "accession", "accession", {"Replaces accession derived from <path> in filename(s) and deflines (only for single table dump)", NULL}},
-    { "O", "outdir", "path", {"Output directory, default is working directory ( '.' )", NULL}},
-    { "Z", "stdout", NULL, {"Output to stdout, all split data become joined into single stream", NULL}},
-    { NULL, "gzip", NULL, {"Compress output using gzip", NULL}},
-    { NULL, "bzip2", NULL, {"Compress output using bzip2", NULL}},
-    { "N", "minSpotId", "rowid", {"Minimum spot id", NULL}},
-    { "X", "maxSpotId", "rowid", {"Maximum spot id", NULL}},
-    { "G", "spot-group", NULL, {"Split into files by SPOT_GROUP (member name)", NULL}},
-    { NULL, "spot-groups", "[list]", {"Filter by SPOT_GROUP (member): name[,...]", NULL}},
-    { "R", "read-filter", "[filter]", {"Split into files by READ_FILTER value",
-                                      "optionally filter by a value: pass|reject|criteria|redacted", NULL}},
-    { "T", "group-in-dirs", NULL, {"Split into subdirectories instead of files", NULL}},
-    { "K", "keep-empty-files", NULL, {"Do not delete empty files", NULL}},
-    { NULL, "table", "table-name", {"Table name within cSRA object, default is \"SEQUENCE\"", NULL}},
+    { NULL, "no-user-settings",  NULL,         { "Internal Only", NULL } },
+    { "A",   "accession",        "accession",   { "Replaces accession derived from <path> in filename(s) and deflines (only for single table dump)", NULL } },
+    { "O",   "outdir",           "path",        { "Output directory, default is working directory ( '.' )", NULL } },
+    { "Z",   "stdout",           NULL,          { "Output to stdout, all split data become joined into single stream", NULL } },
+    { NULL, "gzip",              NULL,         { "Compress output using gzip", NULL } },
+    { NULL, "bzip2",             NULL,         { "Compress output using bzip2", NULL } },
+    { "N",   "minSpotId",        "rowid",       { "Minimum spot id", NULL } },
+    { "X",   "maxSpotId",        "rowid",       { "Maximum spot id", NULL } },
+    { "G",   "spot-group",       NULL,          { "Split into files by SPOT_GROUP (member name)", NULL } },
+    { NULL, "spot-groups",       "[list]",      { "Filter by SPOT_GROUP (member): name[,...]", NULL } },
+    { "R",   "read-filter",      "[filter]",    { "Split into files by READ_FILTER value",
+                                                  "optionally filter by a value: pass|reject|criteria|redacted", NULL } },
+    { "T",   "group-in-dirs",    NULL,          { "Split into subdirectories instead of files", NULL } },
+    { "K",   "keep-empty-files", NULL,          { "Do not delete empty files", NULL } },
+    { NULL, "table",            "table-name",   { "Table name within cSRA object, default is \"SEQUENCE\"", NULL } },
 
-    { "h", "help", NULL, {"Output a brief explanation of program usage", NULL}},
-    { "V", "version", NULL, {"Display the version of the program", NULL}},
+    { NULL, "disable-multithreading", NULL,     { "disable multithreading", NULL } },
 
-    { "L", "log-level", "level", {"Logging level as number or enum string",
-                                 "One of (fatal|sys|int|err|warn|info) or (0-5)",
-                                 "Current/default is warn", NULL}},
-    { "v", "verbose", NULL, {"Increase the verbosity level of the program",
-                            "Use multiple times for more verbosity", NULL}},
-    { NULL, OPTION_REPORT, NULL, {
-"Control program execution environment report generation (if implemented).",
-"One of (never|error|always). Default is error",
-                      NULL}},
+    { "h",   "help",             NULL,          { "Output a brief explanation of program usage", NULL } },
+    { "V",   "version",          NULL,          { "Display the version of the program", NULL } },
+
+    { "L",   "log-level",       "level",        { "Logging level as number or enum string",
+                                                  "One of (fatal|sys|int|err|warn|info) or (0-5)",
+                                                  "Current/default is warn", NULL } },
+    { "v",   "verbose",         NULL,           { "Increase the verbosity level of the program",
+                                                   "Use multiple times for more verbosity", NULL } },
+    { NULL, OPTION_REPORT,     NULL,           { "Control program execution environment report generation (if implemented).",
+                                                   "One of (never|error|always). Default is error", NULL } },
 #if _DEBUGGING
-        {"+", "debug", "Module[-Flag]", {"Turn on debug output for module",
-                                         "All flags if not specified", NULL}},
+    { "+",   "debug",           "Module[-Flag]",{ "Turn on debug output for module",
+                                                   "All flags if not specified", NULL } },
 #endif
 
-    { NULL, "legacy-report", NULL, { "use legacy style 'Written N spots' for tool" } },
-    { NULL, NULL, NULL, {NULL}} /* terminator */
+    { NULL, "legacy-report",    NULL,           { "use legacy style 'Written N spots' for tool" } },
+    { NULL, NULL,              NULL,           { NULL } } /* terminator */
 };
 
 
@@ -986,6 +987,7 @@ rc_t CC KMain ( int argc, char* argv[] )
     const char* table_name = NULL;
     
     bool spot_group_on = false;
+    bool no_mt = false;
     int spot_groups = 0;
     char* spot_group[128] = {NULL};
     bool read_filter_on = false;
@@ -1063,6 +1065,10 @@ rc_t CC KMain ( int argc, char* argv[] )
                 PLOGERR( klogErr, ( klogErr, rc, "log level $(lvl)", PLOG_S( lvl ), arg ) );
                 goto Catch;
             }
+        }
+        else if ( SRADumper_GetArg( &fmt, NULL, "disable-multithreading", &i, argc, argv, NULL ) )
+        {
+            no_mt = true;
         }
         else if ( SRADumper_GetArg( &fmt, NULL, OPTION_REPORT, &i, argc, argv, &arg ) )
         {
@@ -1316,6 +1322,17 @@ rc_t CC KMain ( int argc, char* argv[] )
         {
             LOGERR( klogErr, rc2, "while calling SRAMgrGetVDBManagerRead" );
         }
+        else
+        {
+            if ( no_mt )
+            {
+                rc2 = VDBManagerDisablePagemapThread ( vmgr );
+                if ( rc2 != 0 )
+                {
+                    LOGERR( klogErr, rc2, "disabling multithreading failed" );
+                }
+            }
+        }
         rc2 = ReportSetVDBManager( vmgr );
     }
 
@@ -1440,7 +1457,7 @@ rc_t CC KMain ( int argc, char* argv[] )
             ext = strrchr( fmt.accession, '.' );
             if ( ext != NULL )
             {
-                if ( strcasecmp( ext, ".nenc" ) == 0 || strcasecmp( ext, ",ncbi_enc" ) == 0 )
+                if ( strcasecmp( ext, ".nenc" ) == 0 || strcasecmp( ext, ".ncbi_enc" ) == 0 )
                 {
                     *ext = '\0';
                     ext = strrchr( fmt.accession, '.' );

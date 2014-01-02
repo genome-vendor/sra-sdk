@@ -76,7 +76,6 @@ static
 int utf16_utf32 ( uint32_t *dst, const wchar_t *begin, const wchar_t *end )
 {
     uint32_t ch;
-    const wchar_t *src, *stop;
 
     if ( dst == NULL || begin == NULL || end == NULL )
         return -1;
@@ -332,7 +331,7 @@ int KSysDirListingSort ( const void *a, const void *b )
     /* close enough for max chars? */
     M = (A>B) ? A : B;
 
-    return wstrcase_cmp (a, A, b, B, M);
+    return wstrcase_cmp (a, A, b, B, ( uint32_t ) M);
 }
 
 static
@@ -1726,7 +1725,6 @@ static __inline
 rc_t get_attributes ( const wchar_t * wpath, uint32_t * access, KTime_t * date )
 {
     WIN32_FIND_DATA fd;
-    DWORD error;
     rc_t rc;
 
     if ( FindFirstFile ( wpath, &fd ))
@@ -1997,7 +1995,7 @@ rc_t KSysDirCreateParents ( const KSysDir *self, wchar_t *path, uint32_t access,
 {
 #if ! OLD_CREATE_PARENTS
     rc_t rc;
-    uint32_t len;
+    size_t len;
     wchar_t *p, *par = path;
 
     /* if directory is chroot'd, skip past root and slash */

@@ -651,7 +651,7 @@ static rc_t dump_seq_row_sam_filtered( const samdump_opts * const opts, const se
                             /* OPT SAM-FIIELD:      SRA-column: SPOT_GROUP */
                             if ( rc == 0 && spot_group == NULL )
                                 rc = read_char_ptr( row_id, stx->cursor, stx->spot_group_idx, &spot_group, &spot_group_len, "SPOT_GROUP" );
-                            if ( rc == 0 )
+                            if ( rc == 0 && spot_group_len > 0 )
                                 rc = KOutMsg( "\tRG:Z:%.*s", spot_group_len, spot_group );
 
                             if ( rc == 0 )
@@ -813,7 +813,7 @@ static rc_t dump_seq_prim_row_sam( const samdump_opts * const opts, const seq_ta
             /* OPT SAM-FIIELD:      SRA-column: SPOT_GROUP */
             if ( rc == 0 && spot_group == NULL )
                 rc = read_char_ptr( row_id, stx->cursor, stx->spot_group_idx, &spot_group, &spot_group_len, "SPOT_GROUP" );
-            if ( rc == 0 )
+            if ( rc == 0 && spot_group_len > 0 )
                 rc = KOutMsg( "\tRG:Z:%.*s", spot_group_len, spot_group );
 
             if ( rc == 0 )

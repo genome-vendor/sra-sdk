@@ -78,8 +78,7 @@ VFS_SRC_CMN = \
 	syspath \
 	manager  \
 	resolver \
-    keyring \
-    syskeyring
+    
 
 VFS_SRC = \
 	path \

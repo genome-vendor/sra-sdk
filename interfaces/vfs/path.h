@@ -235,6 +235,17 @@ VFS_EXTERN rc_t CC VPathGetFragment ( const VPath * self, struct String * str );
 /* TEMPORARY */
 VFS_EXTERN uint32_t CC VPathGetOid ( const VPath * self );
 
+/* legacy support */
+#define VPathMake LegacyVPathMake
+VFS_EXTERN rc_t VPathMake ( VPath ** new_path, const char * posix_path );
+#define VPathMakeFmt LegacyVPathMakeFmt
+rc_t VPathMakeFmt ( VPath ** new_path, const char * fmt, ... );
+#define VPathMakeVFmt LegacyVPathMakeVFmt
+rc_t VPathMakeVFmt ( VPath ** new_path, const char * fmt, va_list args );
+#define VPathMakeSysPath LegacyVPathMakeSysPath
+VFS_EXTERN rc_t VPathMakeSysPath ( VPath ** new_path, const char * sys_path );
+
+
 #ifdef __cplusplus
 }
 #endif

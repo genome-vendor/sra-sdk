@@ -27,7 +27,7 @@
 #define USE_EUGENE 1
 
 
-#define TRACK_REFERENCES 1
+#define TRACK_REFERENCES 0
 
 #include <vdb/extern.h>
 
@@ -65,7 +65,7 @@
 #include <stdio.h>
 #include <limits.h>
 
-#if ! WINDOWS
+#if !defined(WINDOWS)  &&  !defined(_WIN32)  &&  !defined(NCBI_WITHOUT_MT)
 #define LAUNCH_PAGEMAP_THREAD 1
 #endif
 
@@ -1824,17 +1824,27 @@ bool CC fetch_param_FixedRowLength ( void *item, void *data )
 }
 
 static
-uint32_t VFunctionProdFixedRowLength ( const VFunctionProd *self, int64_t row_id,bool  ignore_self )
+uint32_t VFunctionProdFixedRowLength ( const VFunctionProd *self, int64_t row_id, bool ignore_self )
 {
-    if(ignore_self == false &&  (self->dad.sub == vftRow || self->dad.sub == vftNonDetRow || self->dad.sub == vftIdDepRow )){
-	return 0;
-    } else {
-	fetch_param_FixedRowLength_data pb;
-        pb.first_time = true;
-        pb.length = 0;
-        VectorDoUntil ( & self -> parms, false, fetch_param_FixedRowLength, & pb );
-        return pb.length;
+    fetch_param_FixedRowLength_data pb;
+
+    if ( ! ignore_self )
+    {
+        switch ( self -> dad . sub )
+        {
+        case vftRow:
+        case vftNonDetRow:
+        case vftIdDepRow:
+            return 0;
+        }
     }
+
+    pb.first_time = true;
+    pb.length = 0;
+
+    VectorDoUntil ( & self -> parms, false, fetch_param_FixedRowLength, & pb );
+
+    return pb.length;
 }
 
 

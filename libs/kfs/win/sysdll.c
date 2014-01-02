@@ -983,7 +983,7 @@ rc_t CC KDlsetTryLib ( const KDirectory *dir,
         if ( sizeof SHLX >= 2 )
         {
             /* SHLX has at least 1 character plus NUL byte */
-            uint32_t len = strlen ( name );
+            size_t len = strlen ( name );
             /* name must be at least 1 character larger */
             if ( len <= ( sizeof SHLX - 1 ) )
                 return 0;

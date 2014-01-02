@@ -92,7 +92,7 @@ extern "C" {
 #define OPT_LEGACY      "legacy"
 #define OPT_NEW         "new"
 #define OPT_RNA_SPLICE  "rna-splicing"
-
+#define OPT_NO_MT       "disable-multithreading"
 
 typedef struct range
 {
@@ -241,6 +241,9 @@ typedef struct samdump_opts
     bool print_cg_names;
     bool rna_splicing;
 
+    /* option to disable multi-threading */
+    bool no_mt;
+    
     uint8_t qual_quant_matrix[ 256 ];
 } samdump_opts;
 
@@ -258,6 +261,7 @@ rc_t foreach_reference( BSTree * regions,
     rc_t ( CC * on_reference ) ( const char * name, Vector *ranges, void *data ), 
     void *data );
 
+int cmp_pchar( const char * a, const char * b );
 
 rc_t gather_options( Args * args, samdump_opts * opts );
 void report_options( const samdump_opts * opts );

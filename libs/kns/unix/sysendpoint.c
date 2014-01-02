@@ -56,7 +56,7 @@ LIB_EXPORT
 rc_t CC KNSManagerInitDNSEndpoint ( struct KNSManager const *self,
     KEndPoint *ep, struct String const *dns, uint16_t port )
 {
-    rc_t rc;
+    rc_t rc = 0;
 
     if ( ep == NULL )
         rc = RC (rcNS, rcNoTarg, rcInitializing, rcParam, rcNull );
@@ -70,28 +70,38 @@ rc_t CC KNSManagerInitDNSEndpoint ( struct KNSManager const *self,
             rc = RC ( rcNS, rcNoTarg, rcInitializing, rcSelf, rcInsufficient );
         else
         {
-            size_t size;
-            char hostname [ 4096 ];
-            if ( dns -> size >= sizeof hostname )
+            KDataBuffer b;
+            char buffer [ 4096 ], * hostname = buffer;
+            size_t buff_size = sizeof buffer;
+
+            if ( dns -> size >= sizeof buffer )
             {
-                KDataBuffer b;
                 rc = KDataBufferMakeBytes ( & b, dns -> size + 1 );
                 if ( rc == 0 )
                 {
-                    struct hostent *remote;
-                    char *host = b . base;
+                    hostname = b . base;
+                    buff_size = ( size_t ) b . elem_count;
+                }
+            }
 
-                    rc = string_printf ( host, ( size_t ) b . elem_count, & size, "%S", dns );
-                    assert ( size < ( size_t ) b . elem_count );
-                    assert ( host [ size ] == 0 );
-                    remote = gethostbyname ( host );
+            if ( rc == 0 )
+            {
+                size_t size;
+                rc = string_printf ( hostname, buff_size, & size, "%S", dns );
+
+                assert ( rc == 0 );
+                assert ( size < buff_size );
+                assert ( hostname [ size ] == 0 );
+
+                if ( rc ==  0 )
+                {
+                    struct hostent *remote = gethostbyname ( hostname );
                     if ( remote != NULL )
                     { 
-						ep -> type = epIPV4;
-                        memcpy ( &ep -> u . ipv4 . addr, remote -> h_addr_list [ 0 ], sizeof ep -> u . ipv4 . addr );
+                        ep -> type = epIPV4;
+                        memcpy ( & ep -> u . ipv4 . addr, remote -> h_addr_list [ 0 ], sizeof ep -> u . ipv4 . addr );
+                        ep -> u . ipv4 . addr = htonl ( ep -> u . ipv4 . addr );
                         ep -> u . ipv4 . port = ( uint16_t ) port;
-                        KDataBufferWhack ( & b );
-                        return 0;
                     }
                     else switch ( h_errno )
                     {
@@ -115,55 +125,16 @@ rc_t CC KNSManagerInitDNSEndpoint ( struct KNSManager const *self,
                     default :
                         rc = RC ( rcNS, rcNoTarg, rcValidating, rcConnection, rcError );
                     }
-                        
                 }
             }
-            else
-            {
-                struct hostent *remote;
 
-                rc = string_printf ( hostname, sizeof hostname, & size, "%S", dns );
-                assert ( size < sizeof hostname );
-                assert ( hostname [ size ] == 0 );
-                remote = gethostbyname ( hostname );
-                if ( remote != NULL )
-                {
-					ep -> type = epIPV4;
-                    memcpy ( &ep -> u . ipv4 . addr, remote -> h_addr_list [ 0 ], sizeof ep -> u . ipv4 . addr );
-                    ep -> u . ipv4 . port = ( uint16_t ) port;
-                    return 0;
-                }
-                else switch ( h_errno )
-                {
-                    case HOST_NOT_FOUND: /* The specified host is unknown */
-                        rc = RC ( rcNS, rcNoTarg, rcValidating, rcConnection, rcNotFound );
-                        break;
-                    case NO_ADDRESS: /* The requested names valid but does not have an IP address */
-                        rc = RC ( rcNS, rcNoTarg, rcValidating, rcConnection, rcInconsistent );
-                        break;
-#if ! defined NO_ADDRESS || ! defined NO_DATA || NO_ADDRESS != NO_DATA
-                    case NO_DATA: /* The requested name s valid but does not have an IP address */
-                        rc = RC ( rcNS, rcNoTarg, rcValidating, rcConnection, rcEmpty );
-                        break;
-#endif
-                        rc = RC ( rcNS, rcNoTarg, rcValidating, rcConnection, rcEmpty );
-                        break;
-                    case NO_RECOVERY: /* A nonrecoverable name server error occured */
-                        rc = RC ( rcNS, rcNoTarg, rcValidating, rcConnection, rcError );
-                        break;
-                    case TRY_AGAIN: /* A temporary error occured on an authoritative name server. Try again later */
-                        rc = RC ( rcNS, rcNoTarg, rcValidating, rcConnection, rcBusy );
-                        break;
-                    default :
-                        rc = RC ( rcNS, rcNoTarg, rcValidating, rcConnection, rcError );
-                }
-            }
+            if ( hostname != buffer )
+                KDataBufferWhack ( & b );
         }
 
-        memset ( ep, 0, sizeof * ep );        
+        if ( rc != 0 )
+            memset ( ep, 0, sizeof * ep );        
     }
 
     return rc;
-    
-    
 }

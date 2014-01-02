@@ -76,11 +76,7 @@ BAM_SRC = \
 BAM_OBJ = \
 	$(addsuffix .$(LOBX),$(BAM_SRC))
 
-BAM_LIB = \
-	-lvfs \
-	-lkfs \
-	-lklib \
-	-lz
+BAM_LIB = 
 
 $(ILIBDIR)/libncbi-bam.$(LIBX): $(BAM_OBJ)
 	$(LD) --slib -o $@ $^ $(BAM_LIB)
@@ -97,13 +93,7 @@ ALIGN_ACCESS_SRC = \
 ALIGN_ACCESS_OBJ = \
 	$(addsuffix .$(LOBX),$(ALIGN_ACCESS_SRC))
 
-ALIGN_ACCESS_LIB = \
-	-sncbi-bam \
-	-lvfs \
-	-lkfs \
-	-dkproc \
-	-lklib \
-	-lz
+ALIGN_ACCESS_LIB = 
 
 $(ILIBDIR)/libalign-access.$(LIBX): $(ALIGN_ACCESS_OBJ)
 	$(LD) --slib -o $@ $^ $(ALIGN_ACCESS_LIB)
@@ -129,13 +119,7 @@ ALIGN_READER_SRC = \
 ALIGN_READER_OBJ = \
 	$(addsuffix .$(LOBX),$(ALIGN_READER_SRC))
 
-ALIGN_READER_LIB = \
-	-lvdb \
-	-lkdb \
-	-lkfg \
-	-lkfs \
-	-lklib \
-	-lz
+ALIGN_READER_LIB = 
 
 $(ILIBDIR)/libalign-reader.$(LIBX): $(ALIGN_READER_OBJ)
 	$(LD) --slib -o $@ $^ $(ALIGN_READER_LIB)
@@ -161,13 +145,7 @@ ALIGN_WRITER_SRC = \
 ALIGN_WRITER_OBJ = \
 	$(addsuffix .$(LOBX),$(ALIGN_WRITER_SRC))
 
-ALIGN_WRITER_LIB = \
-	-lwvdb \
-	-lwkdb \
-	-lkfg \
-	-lkfs \
-	-lklib \
-	-lz
+ALIGN_WRITER_LIB = 
 
 $(ILIBDIR)/libalign-writer.$(LIBX): $(ALIGN_WRITER_OBJ)
 	$(LD) --slib -o $@ $^ $(ALIGN_WRITER_LIB)

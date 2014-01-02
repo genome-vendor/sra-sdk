@@ -102,7 +102,7 @@ bool DoThisFile (const KFile * infile, EncScheme enc, ArcScheme * parc)
          * this will apply to KEncFiles versions 1 and 2, maybe not 3
          * but will hopefully become obsolete eventually.
          */
-        rc = KEncFileMakeRead (&Infile, infile, &Key);
+        rc = KEncFileMakeRead (&Infile, infile, &Key); /* replace with VFSManagerOpenFileReadDirectoryRelativeInt */
         if (rc)
             return false;
         break;
