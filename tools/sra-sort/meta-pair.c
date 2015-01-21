@@ -390,12 +390,12 @@ void copy_meta_node ( const KMDataNode *src, const ctx_t *ctx, KMDataNode *dst,
                                 if ( name == NULL )
                                     continue;
 
-                                rc = KMDataNodeOpenNodeRead ( src, & schild, name );
+                                rc = KMDataNodeOpenNodeRead ( src, & schild, "%s", name );
                                 if ( rc != 0 )
                                     ERROR ( rc, "failed to open source metadata node '%s'", name );
                                 else
                                 {
-                                    rc = KMDataNodeOpenNodeUpdate ( dst, & dchild, name );
+                                    rc = KMDataNodeOpenNodeUpdate ( dst, & dchild, "%s", name );
                                     if ( rc != 0 )
                                         ERROR ( rc, "failed to open destination metadata node '%s'", name );
                                     else

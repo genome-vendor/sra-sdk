@@ -174,7 +174,7 @@ rc_t DirPairCopyFile ( const DirPair *self, const ctx_t *ctx,
 
     /* get source access mode */
     uint32_t access;
-    rc_t rc = KDirectoryAccess ( src, & access, relpath );
+    rc_t rc = KDirectoryAccess ( src, & access, "%s", relpath );
     if ( rc != 0 )
     {
         ERROR ( rc, "failed to determine access mode of file 'dst.%.*s%s'",
@@ -183,7 +183,7 @@ rc_t DirPairCopyFile ( const DirPair *self, const ctx_t *ctx,
     else
     {
         KFile *d;
-        rc = KDirectoryCreateFile ( dst, & d, false, access, kcmInit | kcmParents, relpath );
+        rc = KDirectoryCreateFile ( dst, & d, false, access, kcmInit | kcmParents, "%s", relpath );
         if ( rc != 0 )
         {
             ERROR ( rc, "failed to create file 'dst.%.*s%s'",
@@ -193,7 +193,7 @@ rc_t DirPairCopyFile ( const DirPair *self, const ctx_t *ctx,
         {
             const KFile *s;
             /* open source */
-            rc = KDirectoryOpenFileRead ( src, & s, relpath );
+            rc = KDirectoryOpenFileRead ( src, & s, "%s", relpath );
             if ( rc != 0 )
             {
                 ERROR ( rc, "failed to open file 'src.%.*s%s'",
@@ -304,7 +304,7 @@ rc_t DirPairCopyAlias ( const DirPair *self, const ctx_t *ctx,
     char apath [ 4096 ];
 
     /* resolve the alias */
-    rc = KDirectoryResolveAlias ( src, false, apath, sizeof apath, relpath );    
+    rc = KDirectoryResolveAlias ( src, false, apath, sizeof apath, "%s", relpath );    
     if ( rc != 0 )
     {
         ERROR ( rc, "failed to resolve alias 'src.%.*s%s'",
@@ -373,7 +373,7 @@ rc_t DirPairCopyDir ( const DirPair *self, const ctx_t *ctx,
 
     /* get source access mode */
     uint32_t access;
-    rc_t rc = KDirectoryAccess ( src, & access, relpath );
+    rc_t rc = KDirectoryAccess ( src, & access, "%s", relpath );
     if ( rc != 0 )
     {
         ERROR ( rc, "failed to determine access mode of directory 'src.%.*s%s'",
@@ -382,7 +382,7 @@ rc_t DirPairCopyDir ( const DirPair *self, const ctx_t *ctx,
     else
     {
         /* create the destination directory */
-        rc = KDirectoryCreateDir ( dst, access, kcmOpen | kcmParents, relpath );
+        rc = KDirectoryCreateDir ( dst, access, kcmOpen | kcmParents, "%s", relpath );
         if ( rc != 0 )
             ERROR ( rc, "failed to create directory 'dst.%.*s%s'",
                     self -> owner_spec_size, self -> full_spec, relpath );
@@ -398,7 +398,7 @@ rc_t DirPairCopyDir ( const DirPair *self, const ctx_t *ctx,
             pb . dst = dst;
 
             /* going to perform shallow copy */
-            rc = KDirectoryVisit ( src, false, DirPairCopyEntry, & pb, relpath );
+            rc = KDirectoryVisit ( src, false, DirPairCopyEntry, & pb, "%s", relpath );
         }
     }
 

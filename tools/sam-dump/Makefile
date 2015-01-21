@@ -25,7 +25,7 @@
 
 default: std
 
-TOP ?= $(shell ../../build/abspath.sh ../..)
+TOP ?= $(abspath ../..)
 MODULE = tools/sam-dump
 
 include $(TOP)/build/Makefile.env
@@ -100,3 +100,4 @@ SAMDUMP_LIB = \
 
 $(BINDIR)/sam-dump: $(SAMDUMP_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(SAMDUMP_LIB)
+

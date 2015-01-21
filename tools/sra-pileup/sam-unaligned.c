@@ -45,7 +45,9 @@ typedef struct prim_table_ctx
 } prim_table_ctx;
 
 
-static rc_t prepare_prim_table_ctx( const samdump_opts * const opts, const input_table * const itab, prim_table_ctx * const ptx )
+static rc_t prepare_prim_table_ctx( const samdump_opts * const opts,
+                                    const input_table * const itab,
+                                    prim_table_ctx * const ptx )
 {
     rc_t rc;
 
@@ -106,7 +108,9 @@ typedef struct seq_table_ctx
 } seq_table_ctx;
 
 
-static rc_t prepare_seq_table_ctx( const samdump_opts * const opts, const input_table * const itab, seq_table_ctx * const stx, bool legacy )
+static rc_t prepare_seq_table_ctx( const samdump_opts * const opts,
+                                   const input_table * const itab,
+                                   seq_table_ctx * const stx )
 {
     struct KNamelist * available_columns;
     rc_t rc = VTableListReadableColumns ( itab->tab, &available_columns );
@@ -170,7 +174,10 @@ static rc_t complain_size_diff( int64_t row_id, const char * txt )
 }
 
 
-static rc_t read_seq_row( const samdump_opts * const opts, const seq_table_ctx * const stx, const int64_t row_id, seq_row * const row )
+static rc_t read_seq_row( const samdump_opts * const opts,
+                          const seq_table_ctx * const stx,
+                          const int64_t row_id,
+                          seq_row * const row )
 {
     rc_t rc = 0;
 
@@ -250,8 +257,10 @@ static rc_t read_seq_row( const samdump_opts * const opts, const seq_table_ctx *
             ( column 'READ_FILTER' has bit READ_FILTER_CRITERIA set )
 
 **********************************************************************************/
-static uint32_t calculate_unaligned_sam_flags_db( uint32_t nreads, uint32_t read_idx,
-                                                  uint32_t mate_idx, int64_t mate_id,
+static uint32_t calculate_unaligned_sam_flags_db( uint32_t nreads,
+                                                  uint32_t read_idx,
+                                                  uint32_t mate_idx,
+                                                  int64_t mate_id,
                                                   const INSDC_read_type * read_type,
                                                   bool reverse_flag,
                                                   const INSDC_read_filter * read_filter )
@@ -285,9 +294,15 @@ static uint32_t calculate_unaligned_sam_flags_db( uint32_t nreads, uint32_t read
 
 const char * ref_name_star = "*";
 
-static rc_t get_mate_info( const prim_table_ctx * const ptx, const matecache * const mc,
-                           const input_database * const ids, const int64_t row_id, const int64_t mate_id, const uint32_t nreads,
-                           const char ** mate_ref_name, uint32_t * const mate_ref_name_len, INSDC_coord_zero * const mate_ref_pos )
+static rc_t get_mate_info( const prim_table_ctx * const ptx,
+                           const matecache * const mc,
+                           const input_database * const ids,
+                           const int64_t row_id,
+                           const int64_t mate_id,
+                           const uint32_t nreads,
+                           const char ** mate_ref_name,
+                           uint32_t * const mate_ref_name_len,
+                           INSDC_coord_zero * const mate_ref_pos )
 {
     rc_t rc = 0;
 
@@ -353,8 +368,11 @@ static rc_t get_mate_info( const prim_table_ctx * const ptx, const matecache * c
 }
 
 
-static rc_t print_sliced_read( const INSDC_dna_text * read, uint32_t read_idx,
-                               bool reverse, const INSDC_coord_zero * read_start, const INSDC_coord_len * read_len )
+static rc_t print_sliced_read( const INSDC_dna_text * read,
+                               uint32_t read_idx,
+                               bool reverse,
+                               const INSDC_coord_zero * read_start,
+                               const INSDC_coord_len * read_len )
 {
     rc_t rc = 0;
     const INSDC_dna_text * ptr = read + read_start[ read_idx ];
@@ -392,16 +410,22 @@ static rc_t print_sliced_read( const INSDC_dna_text * read, uint32_t read_idx,
 }
 
 
-static rc_t print_sliced_quality( const samdump_opts * const opts, const char * quality, uint32_t read_idx,
-                                  bool reverse, const INSDC_coord_zero * read_start, const INSDC_coord_len * read_len )
+static rc_t print_sliced_quality( const samdump_opts * const opts,
+                                  const char * quality,
+                                  uint32_t read_idx,
+                                  bool reverse,
+                                  const INSDC_coord_zero * read_start,
+                                  const INSDC_coord_len * read_len )
 {
     const char * ptr = quality + read_start[ read_idx ];
     return dump_quality( opts, ptr, read_len[ read_idx ], reverse ); /* sam-dump-opts.c */
 }
 
 
-static rc_t dump_the_other_read( const seq_table_ctx * const stx, const prim_table_ctx * const ptx,
-                                 const int64_t row_id, const uint32_t mate_idx )
+static rc_t dump_the_other_read( const seq_table_ctx * const stx,
+                                 const prim_table_ctx * const ptx,
+                                 const int64_t row_id,
+                                 const uint32_t mate_idx )
 {
     uint32_t row_len;
     const int64_t *prim_al_id_ptr;
@@ -464,7 +488,9 @@ static uint32_t calc_mate_idx( const uint32_t n_reads, const uint32_t read_idx )
 
 
 static rc_t read_quality( const seq_table_ctx * const stx,
-                          const int64_t row_id, const char **quality, const uint32_t read_len )
+                          const int64_t row_id,
+                          const char **quality,
+                          const uint32_t read_len )
 {
     uint32_t quality_len;
     rc_t rc = read_char_ptr( row_id, stx->cursor, stx->quality_idx, quality, &quality_len, "QUALITY" );
@@ -475,7 +501,9 @@ static rc_t read_quality( const seq_table_ctx * const stx,
 
 
 static rc_t read_read_type( const seq_table_ctx * const stx,
-                            const int64_t row_id, const INSDC_read_type **read_type, const uint32_t read_len )
+                            const int64_t row_id,
+                            const INSDC_read_type **read_type,
+                            const uint32_t read_len )
 {
     uint32_t read_type_len;
     rc_t rc = read_INSDC_read_type_ptr( row_id, stx->cursor, stx->read_type_idx, read_type, &read_type_len, "READ_TYPE" );
@@ -486,7 +514,9 @@ static rc_t read_read_type( const seq_table_ctx * const stx,
 
 
 static rc_t read_read_filter( const seq_table_ctx * const stx,
-                              const int64_t row_id, const INSDC_read_filter **read_filter, const uint32_t read_len )
+                              const int64_t row_id,
+                              const INSDC_read_filter **read_filter,
+                              const uint32_t read_len )
 {
     uint32_t read_filter_len;
     rc_t rc = read_INSDC_read_filter_ptr( row_id, stx->cursor, stx->read_filter_idx, read_filter, &read_filter_len, "READ_FILTER" );
@@ -497,7 +527,9 @@ static rc_t read_read_filter( const seq_table_ctx * const stx,
 
 
 static rc_t read_read_start( const seq_table_ctx * const stx,
-                             const int64_t row_id, const INSDC_coord_zero **read_start, const uint32_t nreads )
+                             const int64_t row_id,
+                             const INSDC_coord_zero **read_start,
+                             const uint32_t nreads )
 {
     uint32_t read_start_len;
     rc_t rc = read_INSDC_coord_zero_ptr( row_id, stx->cursor, stx->read_start_idx, read_start, &read_start_len, "READ_START" );
@@ -508,7 +540,9 @@ static rc_t read_read_start( const seq_table_ctx * const stx,
 
 
 static rc_t read_read_len( const seq_table_ctx * const stx,
-                           const int64_t row_id, const INSDC_coord_len **read_len, const uint32_t nreads )
+                           const int64_t row_id,
+                           const INSDC_coord_len **read_len,
+                           const uint32_t nreads )
 {
     uint32_t read_len_len;
     rc_t rc = read_INSDC_coord_len_ptr( row_id, stx->cursor, stx->read_len_idx, read_len, &read_len_len, "READ_LEN" );
@@ -518,7 +552,9 @@ static rc_t read_read_len( const seq_table_ctx * const stx,
 }
 
 
-static bool calc_reverse_flag( const samdump_opts * const opts, const uint32_t read_idx, const INSDC_read_type * read_type )
+static bool calc_reverse_flag( const samdump_opts * const opts,
+                               const uint32_t read_idx,
+                               const INSDC_read_type * read_type )
 {
     bool res = ( ( read_type[ read_idx ] & READ_TYPE_REVERSE ) == READ_TYPE_REVERSE );
     if ( res )
@@ -527,10 +563,13 @@ static bool calc_reverse_flag( const samdump_opts * const opts, const uint32_t r
 }
 
 
-static rc_t dump_seq_row_sam_filtered( const samdump_opts * const opts, const seq_table_ctx * const stx,
-                                       const prim_table_ctx * const ptx, const matecache * const mc,
-                                       const input_database * const ids, const int64_t row_id, const uint32_t nreads,
-                                       uint64_t * const printed )
+static rc_t dump_seq_row_sam_filtered( const samdump_opts * const opts,
+                                       const seq_table_ctx * const stx,
+                                       const prim_table_ctx * const ptx,
+                                       const matecache * const mc,
+                                       const input_database * const ids,
+                                       const int64_t row_id,
+                                       const uint32_t nreads )
 {
     uint32_t read_idx, rd_len, prim_align_ids_len, spot_group_len;
     const int64_t * prim_align_ids;
@@ -656,9 +695,6 @@ static rc_t dump_seq_row_sam_filtered( const samdump_opts * const opts, const se
 
                             if ( rc == 0 )
                                 rc = KOutMsg( "\n" );
-
-                            if ( rc == 0 )
-                                (*printed)++;
                         }
                     }
                 }
@@ -673,10 +709,13 @@ static rc_t dump_seq_row_sam_filtered( const samdump_opts * const opts, const se
 }
 
 
-static rc_t dump_seq_prim_row_sam( const samdump_opts * const opts, const seq_table_ctx * const stx,
-                                   const prim_table_ctx * const ptx, const matecache * const mc,
-                                   const input_database * const ids, const int64_t row_id, const uint32_t nreads,
-                                   uint64_t * const printed )
+static rc_t dump_seq_prim_row_sam( const samdump_opts * const opts,
+                                   const seq_table_ctx * const stx,
+                                   const prim_table_ctx * const ptx,
+                                   const matecache * const mc,
+                                   const input_database * const ids,
+                                   const int64_t row_id,
+                                   const uint32_t nreads )
 {
     uint32_t read_idx, rd_len, prim_align_ids_len, spot_group_len;
     const int64_t * prim_align_ids;
@@ -818,9 +857,6 @@ static rc_t dump_seq_prim_row_sam( const samdump_opts * const opts, const seq_ta
 
             if ( rc == 0 )
                 rc = KOutMsg( "\n" );
-
-            if ( rc == 0 )
-                (*printed)++;
         }
     }
     return rc;
@@ -828,8 +864,10 @@ static rc_t dump_seq_prim_row_sam( const samdump_opts * const opts, const seq_ta
 
 
 /* called if we are dumping from a legacy table instead from a database */
-static rc_t dump_seq_row_sam( const samdump_opts * const opts, const seq_table_ctx * const stx,
-                              const int64_t row_id, const uint32_t nreads, uint64_t * const printed )
+static rc_t dump_seq_row_sam( const samdump_opts * const opts,
+                              const seq_table_ctx * const stx,
+                              const int64_t row_id,
+                              const uint32_t nreads )
 {
     uint32_t read_idx, rd_len, spot_group_len, name_len;
     const char * spot_group = NULL;
@@ -932,19 +970,19 @@ static rc_t dump_seq_row_sam( const samdump_opts * const opts, const seq_table_c
 
             if ( rc == 0 )
                 rc = KOutMsg( "\n" );
-
-            if ( rc == 0 )
-                (*printed)++;
         }
     }
     return rc;
 }
 
 
-static rc_t dump_seq_row_fastx_filtered( const samdump_opts * const opts, const seq_table_ctx * const stx,
-                                         const prim_table_ctx * const ptx, const matecache * const mc,
+static rc_t dump_seq_row_fastx_filtered( const samdump_opts * const opts,
+                                         const seq_table_ctx * const stx,
+                                         const prim_table_ctx * const ptx,
+                                         const matecache * const mc,
                                          const input_database * const ids,
-                                         const int64_t row_id, const uint32_t nreads, uint64_t * const printed )
+                                         const int64_t row_id,
+                                         const uint32_t nreads )
 {
     uint32_t read_idx, rd_len, prim_align_ids_len, spot_group_len = 0;
     const int64_t * prim_align_ids;
@@ -1020,7 +1058,6 @@ static rc_t dump_seq_row_fastx_filtered( const samdump_opts * const opts, const 
                         if ( rc == 0 )
                             rc = KOutMsg( "\n" );
                     }
-                    (*printed)++;
                 }
                 else
                 {
@@ -1033,8 +1070,10 @@ static rc_t dump_seq_row_fastx_filtered( const samdump_opts * const opts, const 
 }
 
 
-static rc_t dump_seq_row_fastx( const samdump_opts * const opts, const seq_table_ctx * const stx,
-                                const int64_t row_id, const uint32_t nreads, uint64_t * const printed )
+static rc_t dump_seq_row_fastx( const samdump_opts * const opts,
+                                const seq_table_ctx * const stx,
+                                const int64_t row_id,
+                                const uint32_t nreads )
 {
     uint32_t read_idx, rd_len, prim_align_ids_len, spot_group_len = 0;
     const int64_t * prim_align_ids;
@@ -1099,15 +1138,16 @@ static rc_t dump_seq_row_fastx( const samdump_opts * const opts, const seq_table
                 if ( rc == 0 )
                     rc = KOutMsg( "\n" );
             }
-            (*printed)++;
         }
     }
     return rc;
 }
 
 
-static rc_t dump_seq_tab_row_fastx( const samdump_opts * const opts, const seq_table_ctx * const stx,
-                                    const int64_t row_id, const uint32_t nreads, uint64_t * const printed )
+static rc_t dump_seq_tab_row_fastx( const samdump_opts * const opts,
+                                    const seq_table_ctx * const stx,
+                                    const int64_t row_id,
+                                    const uint32_t nreads )
 {
     uint32_t read_idx, rd_len, name_len, spot_group_len = 0;
     const char * quality = NULL;
@@ -1175,7 +1215,6 @@ static rc_t dump_seq_tab_row_fastx( const samdump_opts * const opts, const seq_t
                 if ( rc == 0 )
                     rc = KOutMsg( "\n" );
             }
-            (*printed)++;
         }
     }
     return rc;
@@ -1189,7 +1228,6 @@ typedef struct unaligned_callback_ctx
     const matecache * mc;
     seq_table_ctx * stx;
     prim_table_ctx * ptx;
-    uint64_t * rows_so_far;
 } unaligned_callback_ctx;
 
 
@@ -1205,9 +1243,9 @@ static rc_t CC on_unaligned_seq_id( int64_t seq_id, int64_t al_id, void * user_d
         {
             switch( u_ctx->opts->output_format )
             {
-                case of_sam   : rc = dump_seq_row_sam_filtered( u_ctx->opts, u_ctx->stx, u_ctx->ptx, u_ctx->mc, u_ctx->ids, seq_id, row.nreads, u_ctx->rows_so_far ); break;
+                case of_sam   : rc = dump_seq_row_sam_filtered( u_ctx->opts, u_ctx->stx, u_ctx->ptx, u_ctx->mc, u_ctx->ids, seq_id, row.nreads ); break;
                 case of_fasta : /* fall through intended ! */
-                case of_fastq : rc = dump_seq_row_fastx_filtered( u_ctx->opts, u_ctx->stx, u_ctx->ptx, u_ctx->mc, u_ctx->ids, seq_id, row.nreads, u_ctx->rows_so_far ); break;
+                case of_fastq : rc = dump_seq_row_fastx_filtered( u_ctx->opts, u_ctx->stx, u_ctx->ptx, u_ctx->mc, u_ctx->ids, seq_id, row.nreads ); break;
             }
         }
     }
@@ -1215,12 +1253,14 @@ static rc_t CC on_unaligned_seq_id( int64_t seq_id, int64_t al_id, void * user_d
 }
 
 
-static rc_t print_unaligned_database_filtered_2( const samdump_opts * const opts, const input_table * const seq,
-                                                 const input_table * const prim, const matecache * const mc,
-                                                 const input_database * const ids, uint64_t * const rows_so_far )
+static rc_t print_unaligned_database_filtered_2( const samdump_opts * const opts,
+                                                 const input_table * const seq,
+                                                 const input_table * const prim,
+                                                 const matecache * const mc,
+                                                 const input_database * const ids )
 {
     seq_table_ctx stx;
-    rc_t rc = prepare_seq_table_ctx( opts, seq, &stx, ( prim == NULL ) );
+    rc_t rc = prepare_seq_table_ctx( opts, seq, &stx );
     if ( rc == 0 )
     {
         rc = VCursorOpen( stx.cursor );
@@ -1240,7 +1280,6 @@ static rc_t print_unaligned_database_filtered_2( const samdump_opts * const opts
                 u_ctx.mc = mc;
                 u_ctx.stx = &stx;
                 u_ctx.ptx = &ptx;
-                u_ctx.rows_so_far = rows_so_far;
                 rc = foreach_unaligned_entry( mc, ids->db_idx, on_unaligned_seq_id, &u_ctx );
                 VCursorRelease( ptx.cursor );
             }
@@ -1251,14 +1290,16 @@ static rc_t print_unaligned_database_filtered_2( const samdump_opts * const opts
 
 
 /* we are printing from a sra-database, we print half aligned reads only if we find them in the mate-cache */
-static rc_t print_unaligned_database_filtered( const samdump_opts * const opts, const input_table * const seq,
-                                               const input_table * const prim, const matecache * const mc,
-                                               const input_database * const ids, uint64_t * const rows_so_far )
+static rc_t print_unaligned_database_filtered( const samdump_opts * const opts,
+                                               const input_table * const seq,
+                                               const input_table * const prim,
+                                               const matecache * const mc,
+                                               const input_database * const ids )
 {
-    return print_unaligned_database_filtered_2( opts, seq, prim, mc, ids, rows_so_far );
+    return print_unaligned_database_filtered_2( opts, seq, prim, mc, ids );
 #if 0
     seq_table_ctx stx;
-    rc_t rc = prepare_seq_table_ctx( opts, seq, &stx, ( prim == NULL ) );
+    rc_t rc = prepare_seq_table_ctx( opts, seq, &stx );
     if ( rc == 0 )
     {
         rc = VCursorOpen( stx.cursor );
@@ -1284,7 +1325,7 @@ static rc_t print_unaligned_database_filtered( const samdump_opts * const opts, 
                     int64_t row_id;
                     seq_row row;
 
-                    for ( row_id = first_row; ( ( row_id - first_row ) < row_count ) && rc == 0 && !test_limit_reached( opts, *rows_so_far ); ++row_id )
+                    for ( row_id = first_row; ( ( row_id - first_row ) < row_count ) && rc == 0; ++row_id )
                     {
                         rc = Quitting();
                         if ( rc == 0 )
@@ -1294,9 +1335,9 @@ static rc_t print_unaligned_database_filtered( const samdump_opts * const opts, 
                             {
                                 switch( opts->output_format )
                                 {
-                                    case of_sam   : rc = dump_seq_row_sam_filtered( opts, &stx, &ptx, mc, ids, row_id, row.nreads, rows_so_far ); break;
+                                    case of_sam   : rc = dump_seq_row_sam_filtered( opts, &stx, &ptx, mc, ids, row_id, row.nreads ); break;
                                     case of_fasta : /* fall through intended ! */
-                                    case of_fastq : rc = dump_seq_row_fastx_filtered( opts, &stx, &ptx, mc, ids, row_id, row.nreads, rows_so_far ); break;
+                                    case of_fastq : rc = dump_seq_row_fastx_filtered( opts, &stx, &ptx, mc, ids, row_id, row.nreads ); break;
                                 }
                             }
                         }
@@ -1313,12 +1354,14 @@ static rc_t print_unaligned_database_filtered( const samdump_opts * const opts, 
 
 
 /* we are printing from a sra-database, we print all unaligned read we can find */
-static rc_t print_unaligned_database_full( const samdump_opts * const opts, const input_table * const seq,
-                                           const input_table * const prim, const matecache * const mc,
-                                           const input_database * const ids, uint64_t * const rows_so_far )
+static rc_t print_unaligned_database_full( const samdump_opts * const opts,
+                                           const input_table * const seq,
+                                           const input_table * const prim,
+                                           const matecache * const mc,
+                                           const input_database * const ids )
 {
     seq_table_ctx stx;
-    rc_t rc = prepare_seq_table_ctx( opts, seq, &stx, ( prim == NULL ) );
+    rc_t rc = prepare_seq_table_ctx( opts, seq, &stx );
     if ( rc == 0 )
     {
         rc = VCursorOpen( stx.cursor );
@@ -1343,7 +1386,7 @@ static rc_t print_unaligned_database_full( const samdump_opts * const opts, cons
                 else
                 {
                     seq_row row;
-                    for ( row_id = first_row; ( ( row_id - first_row ) < row_count ) && rc == 0 && !test_limit_reached( opts, *rows_so_far ); ++row_id )
+                    for ( row_id = first_row; ( ( row_id - first_row ) < row_count ) && rc == 0; ++row_id )
                     {
                         rc = Quitting();
                         if ( rc == 0 )
@@ -1353,9 +1396,9 @@ static rc_t print_unaligned_database_full( const samdump_opts * const opts, cons
                             {
                                 switch( opts->output_format )
                                 {
-                                    case of_sam   : rc = dump_seq_prim_row_sam( opts, &stx, &ptx, mc, ids, row_id, row.nreads, rows_so_far ); break;
+                                    case of_sam   : rc = dump_seq_prim_row_sam( opts, &stx, &ptx, mc, ids, row_id, row.nreads ); break;
                                     case of_fasta : /* fall through intended ! */
-                                    case of_fastq : rc = dump_seq_row_fastx( opts, &stx, row_id, row.nreads, rows_so_far ); break;
+                                    case of_fastq : rc = dump_seq_row_fastx( opts, &stx, row_id, row.nreads ); break;
                                 }
                             }
                         }
@@ -1372,10 +1415,11 @@ static rc_t print_unaligned_database_full( const samdump_opts * const opts, cons
 
 
 /* we are printing from a (legacy) table not from a database! */
-static rc_t print_unaligned_table( const samdump_opts * const opts, const input_table * const seq, uint64_t * const rows_so_far )
+static rc_t print_unaligned_table( const samdump_opts * const opts,
+                                   const input_table * const seq )
 {
     seq_table_ctx stx;
-    rc_t rc = prepare_seq_table_ctx( opts, seq, &stx, true ); /* true ... this is a legacy table, not a database */
+    rc_t rc = prepare_seq_table_ctx( opts, seq, &stx );
     if ( rc == 0 )
     {
         rc = VCursorOpen( stx.cursor );
@@ -1395,7 +1439,7 @@ static rc_t print_unaligned_table( const samdump_opts * const opts, const input_
             else
             {
                 seq_row row;
-                for ( row_id = first_row; ( ( row_id - first_row ) < row_count ) && rc == 0 && !test_limit_reached( opts, *rows_so_far ); ++row_id )
+                for ( row_id = first_row; ( ( row_id - first_row ) < row_count ) && rc == 0; ++row_id )
                 {
                     rc = Quitting();
                     if ( rc == 0 )
@@ -1405,9 +1449,9 @@ static rc_t print_unaligned_table( const samdump_opts * const opts, const input_
                         {
                             switch( opts->output_format )
                             {
-                                case of_sam   : rc = dump_seq_row_sam( opts, &stx, row_id, row.nreads, rows_so_far ); break;
+                                case of_sam   : rc = dump_seq_row_sam( opts, &stx, row_id, row.nreads ); break;
                                 case of_fasta : /* fall through intended ! */
-                                case of_fastq : rc = dump_seq_tab_row_fastx( opts, &stx, row_id, row.nreads, rows_so_far ); break;
+                                case of_fastq : rc = dump_seq_tab_row_fastx( opts, &stx, row_id, row.nreads ); break;
                             }
                         }
                     }
@@ -1421,10 +1465,17 @@ static rc_t print_unaligned_table( const samdump_opts * const opts, const input_
 
 
 /* entry point from sam-dump3.c */
-rc_t print_unaligned_spots( const samdump_opts * const opts, const input_files * const ifs,
-                            const matecache * const mc, uint64_t * const rows_so_far )
+rc_t print_unaligned_spots( const samdump_opts * const opts,
+                            const input_files * const ifs,
+                            const matecache * const mc )
 {
     rc_t rc = 0;
+
+#if _DEBUGGING
+    if ( opts->perf_log != NULL )
+        perf_log_start_section( opts->perf_log, "unaligned spots" );
+#endif
+
     if ( ( ifs->database_count > 0 ) && ( opts->dump_unaligned_reads || opts->dump_unaligned_only ) )
     {
         uint32_t db_idx;
@@ -1454,11 +1505,11 @@ rc_t print_unaligned_spots( const samdump_opts * const opts, const input_files *
                     {
                         if ( opts->region_count > 0 )
                         {
-                            rc = print_unaligned_database_filtered( opts, &seq, &prim, mc, ids, rows_so_far );
+                            rc = print_unaligned_database_filtered( opts, &seq, &prim, mc, ids );
                         }
                         else
                         {
-                            rc = print_unaligned_database_full( opts, &seq, &prim, mc, ids, rows_so_far );
+                            rc = print_unaligned_database_full( opts, &seq, &prim, mc, ids );
                         }
                         VTableRelease( prim.tab );
                     }
@@ -1475,8 +1526,14 @@ rc_t print_unaligned_spots( const samdump_opts * const opts, const input_files *
         {
             input_table * itab = VectorGet( &ifs->tabs, tab_idx );
             if ( itab != NULL )
-                rc = print_unaligned_table( opts, itab, rows_so_far );
+                rc = print_unaligned_table( opts, itab );
         }
     }
+
+#if _DEBUGGING
+    if ( opts->perf_log != NULL )
+        perf_log_end_section( opts->perf_log );
+#endif
+
     return rc;
 }

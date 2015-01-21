@@ -25,7 +25,7 @@
 
 default: std
 
-TOP ?= $(shell ../../build/abspath.sh ../..)
+TOP ?= $(abspath ../..)
 MODULE = tools/cache-mgr
 
 include $(TOP)/build/Makefile.env
@@ -91,7 +91,7 @@ TOOL_OBJ = \
 
 TOOL_LIB = \
 	-lkapp \
-	-lncbi-vdb \
+	-sncbi-vdb \
 	-lm
 
 $(BINDIR)/cache-mgr: $(TOOL_OBJ)

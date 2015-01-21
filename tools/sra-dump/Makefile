@@ -25,7 +25,7 @@
 
 default: std
 
-TOP ?= $(shell ../../build/abspath.sh ../..)
+TOP ?= $(abspath ../..)
 MODULE = tools/sra-dump
 
 include $(TOP)/build/Makefile.env
@@ -85,8 +85,7 @@ DUMP_COMMON_SRC = \
 
 DUMP_COMMON_LIB = \
 	-lkapp \
-	-lncbi-vdb \
-	-lxml2 \
+	-sncbi-vdb \
 	-lm
 
 #-------------------------------------------------------------------------------

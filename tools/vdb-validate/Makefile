@@ -25,7 +25,7 @@
 
 default: std
 
-TOP ?= $(shell ../../build/abspath.sh ../..)
+TOP ?= $(abspath ../..)
 MODULE = tools/vdb-validate
 
 include $(TOP)/build/Makefile.env
@@ -92,8 +92,7 @@ VDB_VALIDATE_OBJ = \
 
 VDB_VALIDATE_LIB = \
 	-lkapp \
-	-lncbi-vdb \
-	-lxml2 \
+	-sncbi-vdb \
 	-lm
 
 vdb-validate.vers.h: vdb-validate.vers

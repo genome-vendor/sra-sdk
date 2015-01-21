@@ -330,6 +330,7 @@ bool CC DbPairPreExplodeTablePair ( void *item, void *data )
     return true;
 }
 
+#if 0
 static
 void DbPairDefaultExplodeDB ( DbPair *self, const ctx_t *ctx )
 {
@@ -390,6 +391,7 @@ void DbPairDefaultExplodeDB ( DbPair *self, const ctx_t *ctx )
         KNamelistRelease ( names );
     }
 }
+#endif
 
 static
 void DbPairDefaultExplodeTbl ( DbPair *self, const ctx_t *ctx )
@@ -540,7 +542,7 @@ DbPair *DbPairMakeDbPair ( DbPair *self, const ctx_t *ctx, const char *member, c
     DbPair *db = NULL;
                 
     STATUS ( 4, "creating db pair '%s.%s'", self -> full_spec, name );
-    rc = VDatabaseOpenDBRead ( self -> sdb, & src, name );
+    rc = VDatabaseOpenDBRead ( self -> sdb, & src, "%s", name );
     if ( rc != 0 )
     {
         if ( required )
@@ -559,7 +561,7 @@ DbPair *DbPairMakeDbPair ( DbPair *self, const ctx_t *ctx, const char *member, c
         {
             VDatabase *dst;
             const Tool *tp = ctx -> caps -> tool;
-            rc = VDatabaseCreateDB ( self -> ddb, & dst, member, kcmOpen | ( tp -> db . cmode & kcmMD5 ), name );
+            rc = VDatabaseCreateDB ( self -> ddb, & dst, member, kcmOpen | ( tp -> db . cmode & kcmMD5 ), "%s", name );
             if ( rc != 0 )
                 ERROR ( rc, "VDatabaseCreateDB: failed to create %s db '%s.%s'", member, self -> full_spec, name );
             else
@@ -589,7 +591,7 @@ TablePair *DbPairMakeTablePair ( DbPair *self, const ctx_t *ctx, const char *mem
     TablePair *tbl = NULL;
                 
     STATUS ( 4, "creating table pair '%s.%s'", self -> full_spec, name );
-    rc = VDatabaseOpenTableRead ( self -> sdb, & src, name );
+    rc = VDatabaseOpenTableRead ( self -> sdb, & src, "%s", name );
     if ( rc != 0 )
     {
         if ( required )
@@ -606,7 +608,7 @@ TablePair *DbPairMakeTablePair ( DbPair *self, const ctx_t *ctx, const char *mem
         {
             VTable *dst;
             const Tool *tp = ctx -> caps -> tool;
-            rc = VDatabaseCreateTable ( self -> ddb, & dst, member, kcmOpen | ( tp -> db . cmode & kcmMD5 ), name );
+            rc = VDatabaseCreateTable ( self -> ddb, & dst, member, kcmOpen | ( tp -> db . cmode & kcmMD5 ), "%s", name );
             if ( rc != 0 )
                 ERROR ( rc, "VDatabaseCreateTable: failed to create %s table '%s.%s'", member, self -> full_spec, name );
             else
@@ -695,7 +697,7 @@ DirPair *DbPairMakeDirPair ( DbPair *self, const ctx_t *ctx, const char *name, b
                     INTERNAL_ERROR ( rc, "KDatabaseOpenDirectoryUpdate: failed to access KDirectory 'dst.%s'", self -> full_spec );
                 else
                 {
-                    switch ( KDirectoryPathType ( sdir, name ) )
+                    switch ( KDirectoryPathType ( sdir, "%s", name ) )
                     {
                     case kptNotFound:
                         if ( required )

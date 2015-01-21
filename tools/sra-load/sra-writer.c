@@ -99,9 +99,9 @@ rc_t SRAWriter_CreateTable(SRAWriter* self, const char* schema)
         rc = RC( rcSRA, rcFormatter, rcWriting, rcSelf, rcNull);
     } else {
 retry:
-        rc = SRAMgrCreateTable(self->config->sra_mgr, &self->table, schema, self->config->table_path);
-        if( GetRCObject(rc) == rcTable && GetRCState(rc) == rcExists && self->config->force_table_overwrite ) {
-            if( (rc = SRAMgrDropTable(self->config->sra_mgr, true, self->config->table_path)) == 0 ) {
+        rc = SRAMgrCreateTable(self->config->sra_mgr, &self->table, schema, "%s", self->config->table_path);
+        if( GetRCObject(rc) == (enum RCObject)rcTable && GetRCState(rc) == rcExists && self->config->force_table_overwrite ) {
+            if( (rc = SRAMgrDropTable(self->config->sra_mgr, true, "%s", self->config->table_path)) == 0 ) {
                 goto retry;
             }
         }
@@ -222,7 +222,7 @@ rc_t SRAWriter_WriteDefaults(SRAWriter* self)
                 read_start[i] = read_segs[i].start;
                 read_len[i] = read_segs[i].len;
             }
-        } else if( GetRCObject(rc) == rcData && GetRCState(rc) == rcUnsupported ) {
+        } else if( GetRCObject(rc) == (enum RCObject)rcData && GetRCState(rc) == rcUnsupported ) {
             rc = 0;
         }
     }

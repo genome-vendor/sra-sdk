@@ -27,11 +27,14 @@
 #include <kfs/directory.h>
 #include <klib/log.h>
 #include <klib/rc.h>
+#include <klib/text.h>
+
 #include <vdb/manager.h>
 #include <vdb/database.h>
 #include <vdb/schema.h>
 #include <vdb/table.h>
 #include <vdb/cursor.h>
+
 #include <os-native.h>
 #include <sysalloc.h>
 #include "vdb-dump-helper.h"
@@ -68,7 +71,7 @@ static void CC vdh_parse_1_schema( void *item, void *data )
     VSchema *my_schema = (VSchema*)data;
     if ( ( item != NULL )&&( my_schema != NULL ) )
     {
-        rc_t rc = VSchemaParseFile( my_schema, s );
+        rc_t rc = VSchemaParseFile( my_schema, "%s", s );
         DISP_RC( rc, "VSchemaParseFile() failed" );
     }
 }
@@ -115,7 +118,7 @@ bool vdh_is_path_table( const VDBManager *my_manager, const char *path,
     rc = vdh_parse_schema( my_manager, &my_schema, schema_list );
     DISP_RC( rc, "helper_parse_schema() failed" );
 
-    rc = VDBManagerOpenTableRead( my_manager, &my_table, my_schema, path );
+    rc = VDBManagerOpenTableRead( my_manager, &my_table, my_schema, "%s", path );
     DISP_RC( rc, "VDBManagerOpenTableRead() failed" );
     if ( rc == 0 )
         {
@@ -157,7 +160,7 @@ bool vdh_is_path_column( const VDBManager *my_manager, const char *path,
             {
                 string_copy( pp_path, path_len + 20, path, path_len );
                 string_copy( &pp_path[ path_len ], 20, backback, string_size( backback ) );
-                rc = KDirectoryResolvePath( my_directory, true, resolved, 1023, pp_path );
+                rc = KDirectoryResolvePath( my_directory, true, resolved, 1023, "%s", pp_path );
                 if ( rc == 0 )
                     res = vdh_is_path_table( my_manager, resolved, schema_list );
             }
@@ -182,7 +185,7 @@ bool vdh_is_path_database( const VDBManager *my_manager, const char *path,
     rc = vdh_parse_schema( my_manager, &my_schema, schema_list );
     DISP_RC( rc, "helper_parse_schema() failed" );
 
-    rc = VDBManagerOpenDBRead( my_manager, &my_database, my_schema, path );
+    rc = VDBManagerOpenDBRead( my_manager, &my_database, my_schema, "%s", path );
     if ( rc == 0 )
         {
         res = true; /* yes we are able to open the database ---> path is a database */
@@ -236,6 +239,18 @@ static int vdh_str_cmp( const char *a, const char *b )
     return strcase_cmp ( a, asize, b, bsize, ( asize > bsize ) ? asize : bsize );
 }
 
+static bool vdh_str_starts_with( const char *a, const char *b )
+{
+    bool res = false;
+    size_t asize = string_size ( a );
+    size_t bsize = string_size ( b );
+    if ( asize >= bsize )
+    {
+        int cmp = strcase_cmp ( a, bsize, b, bsize, bsize );
+        res = ( cmp == 0 );
+    }
+    return res;
+}
 
 /*************************************************************************************
 helper-function to check if a given table is in the list of tables
@@ -371,6 +386,65 @@ rc_t vdh_print_col_info( dump_context *ctx,
             rc = vdh_print_full_col_info( ctx, col_def, my_schema );
         else
             rc = vdh_print_short_col_info( col_def, my_schema );
+    }
+    return rc;
+}
+
+
+
+rc_t resolve_accession( const char * accession, char * dst, size_t dst_size, bool remotely )
+{
+    VFSManager * vfs_mgr;
+    rc_t rc = VFSManagerMake( &vfs_mgr );
+    dst[ 0 ] = 0;
+    if ( rc == 0 )
+    {
+        VResolver * resolver;
+        rc = VFSManagerGetResolver( vfs_mgr, &resolver );
+        if ( rc == 0 )
+        {
+            VPath * vpath;
+            rc = VFSManagerMakePath( vfs_mgr, &vpath, "ncbi-acc:%s", accession );
+            if ( rc == 0 )
+            {
+                const VPath * local = NULL;
+                const VPath * remote = NULL;
+                if ( remotely )
+                    rc = VResolverQuery ( resolver, eProtocolHttp, vpath, &local, &remote, NULL );
+                else
+                    rc = VResolverQuery ( resolver, eProtocolHttp, vpath, &local, NULL, NULL );
+                if ( rc == 0 && ( local != NULL || remote != NULL ) )
+                {
+                    const String * path;
+                    if ( local != NULL )
+                        rc = VPathMakeString( local, &path );
+                    else
+                        rc = VPathMakeString( remote, &path );
+
+                    if ( rc == 0 && path != NULL )
+                    {
+                        string_copy ( dst, dst_size, path->addr, path->size );
+                        dst[ path->size ] = 0;
+                        StringWhack ( path );
+                    }
+
+                    if ( local != NULL )
+                        VPathRelease ( local );
+                    if ( remote != NULL )
+                        VPathRelease ( remote );
+                }
+                VPathRelease ( vpath );
+            }
+            VResolverRelease( resolver );
+        }
+        VFSManagerRelease ( vfs_mgr );
+    }
+
+    if ( rc == 0 && vdh_str_starts_with( dst, "ncbi-acc:" ) )
+    {
+        size_t l = string_size ( dst );
+        memmove( dst, &( dst[ 9 ] ), l - 9 );
+        dst[ l - 9 ] = 0;
     }
     return rc;
 }

@@ -24,7 +24,7 @@
 
 default: std
 
-TOP ?= $(shell ../../build/abspath.sh ../..)
+TOP ?= $(abspath ../..)
 MODULE = tools/fastq-loader
 
 INT_LIBS = \
@@ -102,8 +102,13 @@ FASTQ_SRC = \
 	fastq-grammar \
 	fastq-lex
 
-$(SRCDIR)/fastq-grammar.c $(SRCDIR)/fastq-tokens.h: $(SRCDIR)/fastq-grammar.y
-	$(YACC) -o $(SRCDIR)/fastq-grammar.c --defines=$(SRCDIR)/fastq-tokens.h -v $^
+# flex/bison should only be invoked manually in an environment ensures the correct versions:
+# bison 2.5, flex 2.5.35
+bison:
+	bison -o $(SRCDIR)/fastq-grammar.c --defines=$(SRCDIR)/fastq-tokens.h -v --no-lines $(SRCDIR)/fastq-grammar.y
+
+flex:    
+	flex -DYY_BUF_SIZE=16777216 -t $(SRCDIR)/fastq-lex.l | grep -v '^#line' > $(SRCDIR)/fastq-lex.c
 
 FASTQ_OBJ = \
 	$(addsuffix .$(LOBX),$(FASTQ_SRC))
@@ -136,12 +141,11 @@ FASTQ_LOAD_OBJ = \
 	$(addsuffix .$(OBJX),$(FASTQ_LOAD_SRC))
 
 FASTQ_LOADER_LIB = \
-	-lkapp \
-    -lloader \
-    -lload \
-	-lncbi-wvdb \
-	-lxml2 \
-	-lm
+	-skapp \
+    -sloader \
+    -sload \
+	-sncbi-wvdb \
+	-sm
 
 $(BINDIR)/latf-load: $(FASTQ_LOAD_OBJ)
 	$(LD) --exe --vers $(SRCDIR)/latf-load.vers -o $@ $^ $(FASTQ_LOADER_LIB)

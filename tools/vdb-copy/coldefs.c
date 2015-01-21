@@ -161,7 +161,7 @@ rc_t col_defs_extract_from_table( col_defs* defs, const VTable *table )
                     if ( rc == 0 )
                     {
                         uint32_t temp_idx;
-                        rc_t rc1 = VCursorAddColumn( cursor, &temp_idx, name );
+                        rc_t rc1 = VCursorAddColumn( cursor, &temp_idx, "%s", name );
                         DISP_RC( rc1, "col_defs_extract_from_table:VCursorAddColumn() failed" );
                         if ( rc1 == 0 )
                         {
@@ -223,7 +223,7 @@ rc_t col_defs_add_to_rd_cursor( col_defs* defs, const VCursor *cursor, bool show
         {
             if ( col->src_cast != NULL )
             {
-                rc = VCursorAddColumn( cursor, &(col->src_idx), col->src_cast );
+                rc = VCursorAddColumn( cursor, &(col->src_idx), "%s", col->src_cast );
                 DISP_RC( rc, "col_defs_add_to_cursor:VCursorAddColumn() failed" );
                 if ( rc == 0 )
                 {
@@ -319,7 +319,7 @@ rc_t col_defs_add_to_wr_cursor( col_defs* defs, const VCursor* cursor, bool show
         if ( col != NULL )
             if ( col->to_copy && col->dst_cast != NULL )
             {
-                rc_t rc = VCursorAddColumn( cursor, &(col->dst_idx), col->dst_cast );
+                rc_t rc = VCursorAddColumn( cursor, &(col->dst_idx), "%s", col->dst_cast );
                 col->to_copy = ( rc == 0 );
                 if ( show )
                 {
@@ -413,7 +413,7 @@ static rc_t redactable_types_2_type_id_vector( const VSchema * s,
                 if ( rc == 0 )
                 {
                     VTypedecl td;
-                    rc = VSchemaResolveTypedecl ( s, &td, name );
+                    rc = VSchemaResolveTypedecl ( s, &td, "%s", name );
                     if ( rc == 0 )
                     {
                         uint32_t *id = malloc( sizeof *id );

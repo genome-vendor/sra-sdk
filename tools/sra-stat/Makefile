@@ -25,7 +25,7 @@
 
 default: std
 
-TOP ?= $(shell ../../build/abspath.sh ../..)
+TOP ?= $(abspath ../..)
 MODULE = tools/sra-stat
 
 include $(TOP)/build/Makefile.env
@@ -33,7 +33,7 @@ include $(TOP)/build/Makefile.env
 INT_TOOLS =
 
 EXT_TOOLS = \
-	sra-stat
+	sra-stat \
 
 ALL_TOOLS = \
 	$(INT_TOOLS) \
@@ -77,16 +77,18 @@ clean: stdclean
 #  sra statistics
 #
 SRASTAT_SRC = \
-	sra-stat
+	sra \
+	sra-stat \
 
 SRASTAT_OBJ = \
 	$(addsuffix .$(OBJX),$(SRASTAT_SRC))
 
 SRASTAT_LIB = \
 	-lkapp \
-	-lncbi-vdb \
-	-lxml2 \
-	-lm
+	-sncbi-vdb \
+	-sload \
+	-lm \
 
 $(BINDIR)/sra-stat: $(SRASTAT_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(SRASTAT_LIB)
+

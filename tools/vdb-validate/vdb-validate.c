@@ -90,6 +90,7 @@ static bool exhaustive;
 static bool md5_required;
 static bool ref_int_check;
 static bool s_IndexOnly;
+static size_t memory_suggestion = (2ull * 1024ull * 1024ull * 1024ull);
 
 typedef struct node_s {
     int parent;
@@ -273,14 +274,14 @@ static rc_t visiting(CCReportInfoBlock const *what, cc_context_t *ctx)
     unsigned const nn = ctx->nextNode++;
     node_t *const nxt = &ctx->nodes[nn];
     node_t *const cur = nxt - 1;
-    
+
     nxt->parent = nxt->prvSibl = nxt->nxtSibl = nxt->firstChild = -1;
     nxt->depth = what->info.visit.depth;
     nxt->objType = what->objType;
     nxt->name = ctx->nextName;
-    ctx->nextName += strlen(what->objName) + 1;
+    ctx->nextName += (unsigned)strlen(what->objName) + 1;
     strcpy(&ctx->names[nxt->name], what->objName);
-    
+
     if (nn) {
         if (cur->depth == nxt->depth) {
             nxt->parent = cur->parent;
@@ -293,7 +294,7 @@ static rc_t visiting(CCReportInfoBlock const *what, cc_context_t *ctx)
         }
         else {
             unsigned sibling = cur->parent;
-            
+
             while (ctx->nodes[sibling].depth > nxt->depth)
                 sibling = ctx->nodes[sibling].parent;
             nxt->parent = ctx->nodes[sibling].parent;
@@ -308,10 +309,10 @@ static rc_t CC report(CCReportInfoBlock const *what, void *Ctx)
 {
     cc_context_t *ctx = Ctx;
     rc_t rc = Quitting();
-    
+
     if (rc)
         return rc;
-    
+
     if (what->type == ccrpt_Visit)
         return visiting(what, ctx);
 
@@ -347,9 +348,9 @@ rc_t kdbcc ( const KDBManager *mgr, char const name[], uint32_t mode,
     ctx.nodes = &nodes[0];
     ctx.names = &names[0];
 
-    if (KDBManagerExists(mgr, kptDatabase, name))
+    if (KDBManagerExists(mgr, kptDatabase, "%s", name))
         *pathType = kptDatabase;
-    else if (KDBManagerExists(mgr, kptTable, name))
+    else if (KDBManagerExists(mgr, kptTable, "%s", name))
         *pathType = kptTable;
     else if (*pathType == kptDatabase || *pathType == kptTable)
         /* is known already: may be encrypted */ ( void) 0;
@@ -364,9 +365,9 @@ rc_t kdbcc ( const KDBManager *mgr, char const name[], uint32_t mode,
     if (*pathType == kptDatabase)
     {
         const KDatabase *db;
-            
+
         objtype = "database";
-        rc = KDBManagerOpenDBRead ( mgr, & db, name );
+        rc = KDBManagerOpenDBRead ( mgr, & db, "%s", name );
         if ( rc == 0 )
         {
             rc = KDatabaseConsistencyCheck ( db, 0, level, report, & ctx );
@@ -385,7 +386,7 @@ rc_t kdbcc ( const KDBManager *mgr, char const name[], uint32_t mode,
         const KTable *tbl;
 
         objtype = "table";
-        rc = KDBManagerOpenTableRead ( mgr, & tbl, name );
+        rc = KDBManagerOpenTableRead ( mgr, & tbl, "%s", name );
         if ( rc == 0 )
         {
             rc = KTableConsistencyCheck ( tbl, 0, level, report, & ctx, platform );
@@ -426,7 +427,7 @@ rc_t vdbcc ( const VDBManager *mgr, char const name[], uint32_t mode,
     if ( ( mode & 8) != 0 )
     {
         const VTable *tbl;
-        rc_t rc = VDBManagerOpenTableRead(mgr, &tbl, NULL, name);
+        rc_t rc = VDBManagerOpenTableRead(mgr, &tbl, NULL, "%s", name);
         if (rc == 0)
             rc = VTableConsistencyCheck(tbl, 2);
         return rc;
@@ -465,9 +466,9 @@ static rc_t CC get_sizes_cb(const KDirectory *dir,
         size_t size;
     } *pb = data;
 
-    ++pb->count;    
+    ++pb->count;
     pb->size += strlen(name) + 1;
-    
+
     return 0;
 }
 
@@ -478,7 +479,7 @@ static rc_t get_sizes(KDirectory const *dir, unsigned *nobj, size_t *namesz)
         unsigned count;
         size_t size;
     } pb;
-    
+
     memset(&pb, 0, sizeof(pb));
     rc = KDirectoryVVisit(dir, true, get_sizes_cb, &pb, NULL, NULL);
     if (rc)
@@ -503,7 +504,7 @@ static rc_t EncFileReadAll(const char *name,
     }
 
     if (rc == 0) {
-        rc = VFSManagerMakePath (mgr, &path, name);
+        rc = VFSManagerMakePath (mgr, &path, "%s", name);
         if (rc != 0) {
             (void)PLOGERR(klogErr, (klogErr, rc,
                 "Failed to VPathMake($(name))", "name=%s", name));
@@ -548,7 +549,7 @@ static rc_t verify_encryption(const KDirectory *dir, const char *name,
     *enc = false;
     *sra = true;
 
-    rc = KDirectoryOpenFileRead(dir, &f, name);
+    rc = KDirectoryOpenFileRead(dir, &f, "%s", name);
     if (rc == 0) {
         rc = KFileReadAll(f, 0, &buffer, sizeof buffer, &num_read);
     }
@@ -614,9 +615,9 @@ static rc_t init_dbcc(KDirectory const *dir, char const name[], bool is_file,
     assert(pathType);
 
     if (is_file) {
-        rc = KDirectoryOpenSraArchiveRead_silent(dir, &obj, false, name);
+        rc = KDirectoryOpenSraArchiveRead_silent(dir, &obj, false, "%s", name);
         if (rc != 0)
-        {   rc = KDirectoryOpenTarArchiveRead_silent(dir, &obj, false, name); }
+        {   rc = KDirectoryOpenTarArchiveRead_silent(dir, &obj, false, "%s", name); }
         if (rc != 0) {
             const VDBManager *mgr = NULL;
             const VTable *tbl = NULL;
@@ -625,7 +626,7 @@ static rc_t init_dbcc(KDirectory const *dir, char const name[], bool is_file,
             if (rc != 0)
             {   return rc; }
             for ( ; rc == 0; ) {
-                rc = VDBManagerOpenTableRead(mgr, &tbl, sra_schema, name);
+                rc = VDBManagerOpenTableRead(mgr, &tbl, sra_schema, "%s", name);
                 VSchemaRelease(sra_schema);
                 if (rc == 0) {
                     const KTable *ktbl = NULL;
@@ -637,14 +638,14 @@ static rc_t init_dbcc(KDirectory const *dir, char const name[], bool is_file,
                     break;
                 }
                 else if (GetRCState(rc) == rcNotFound
-                    && GetRCObject(rc) == rcSchema && sra_schema == NULL)
+                    && GetRCObject(rc) == (enum RCObject)rcSchema && sra_schema == NULL)
                 {
                      rc = VDBManagerMakeSRASchema(mgr, &sra_schema);
                 }
                 else {
                     const VDatabase *db = NULL;
                     const KDatabase *kdb = NULL;
-                    rc = VDBManagerOpenDBRead(mgr, &db, NULL, name);
+                    rc = VDBManagerOpenDBRead(mgr, &db, NULL, "%s", name);
                     if (rc == 0)
                     {   rc = VDatabaseOpenKDatabaseRead(db, &kdb); }
                     if (rc == 0)
@@ -661,7 +662,7 @@ static rc_t init_dbcc(KDirectory const *dir, char const name[], bool is_file,
         }
     }
     else {
-        rc = KDirectoryOpenDirRead(dir, &obj, false, name);
+        rc = KDirectoryOpenDirRead(dir, &obj, false, "%s", name);
     }
     if (rc)
         return rc;
@@ -686,10 +687,10 @@ static rc_t get_schema_info(KMetadata const *meta, char buffer[], size_t bsz,
 {
     KMDataNode const *node;
     rc_t rc = KMetadataOpenNodeRead(meta, &node, "schema");
-    
+
     if (rc == 0) {
         size_t sz;
-        
+
         rc = KMDataNodeReadAttr(node, "name", buffer, bsz, &sz);
         if (rc == 0) {
             buffer[sz] = '\0';
@@ -712,7 +713,7 @@ static rc_t get_tbl_schema_info(VTable const *tbl, char buffer[], size_t bsz,
 {
     KMetadata const *meta;
     rc_t rc = VTableOpenMetadataRead(tbl, &meta);
-    
+
     *(*vers = &buffer[0]) = '\0';
     if (rc == 0) rc = get_schema_info(meta, buffer, bsz, vers);
     return 0;
@@ -723,7 +724,7 @@ static rc_t get_db_schema_info(VDatabase const *db, char buffer[], size_t bsz,
 {
     KMetadata const *meta;
     rc_t rc = VDatabaseOpenMetadataRead(db, &meta);
-    
+
     *(*vers = &buffer[0]) = '\0';
     if (rc == 0) rc = get_schema_info(meta, buffer, bsz, vers);
     return rc;
@@ -735,15 +736,175 @@ static rc_t sra_dbcc_454(VTable const *tbl, char const name[])
     return 0;
 }
 
-static rc_t sra_dbcc_fastq(VTable const *tbl, char const name[])
+typedef struct vdb_validate_params vdb_validate_params;
+struct vdb_validate_params
+{
+    const KDirectory *wd;
+    const KDBManager *kmgr;
+    const VDBManager *vmgr;
+
+    bool md5_chk;
+    bool md5_chk_explicit;
+    bool blob_crc;
+    bool index_chk;
+    bool consist_check;
+    bool exhaustive;
+};
+
+static rc_t tableConsistCheck(const vdb_validate_params *pb, const VTable *tbl)
+{
+    rc_t rce = 0;
+
+    const VCursor *curs = NULL;
+
+    int64_t firstREAD_LEN = 0;
+    uint64_t countREAD_LEN = 0;
+
+    uint64_t i = 0;
+
+    ColumnInfo readLen;
+    ColumnInfo spotLen;
+
+    memset(&readLen, 0, sizeof readLen);
+    memset(&spotLen, 0, sizeof spotLen);
+
+    assert(pb);
+
+    if (!pb->consist_check) {
+        return 0;
+    }
+
+    rce = VTableCreateCursorRead(tbl, &curs);
+    if (rce != 0) {
+        return rce;
+    }
+    if (rce == 0) {
+        readLen.name = "READ_LEN";
+        rce = VCursorAddColumn(curs, &readLen.idx, "%s", readLen.name);
+    }
+    if (rce == 0) {
+        spotLen.name = "SPOT_LEN";
+        rce = VCursorAddColumn(curs, &spotLen.idx, "%s", spotLen.name);
+    }
+
+    if (rce == 0) {
+        assert(readLen.idx && spotLen.idx);
+        if (readLen.idx == 0) {
+            rce = RC(rcExe, rcTable, rcValidating, rcColumn, rcNotFound);
+            LOGERR(klogErr, rce, "Cannot find 'READ_LEN' column");
+        }
+        else if (spotLen.idx == 0) {
+            rce = RC(rcExe, rcTable, rcValidating, rcColumn, rcNotFound);
+            LOGERR(klogErr, rce, "Cannot find 'SPOT_LEN' column");
+        }
+    }
+
+    if (rce == 0) {
+        rce = VCursorOpen(curs);
+    }
+    if (rce == 0) {
+        rce =
+            VCursorIdRange(curs, readLen.idx, &firstREAD_LEN, &countREAD_LEN);
+    }
+    if (rce == 0) {
+        int64_t firstSPOT_LEN = 0;
+        uint64_t countSPOT_LEN = 0;
+        rce =
+            VCursorIdRange(curs, spotLen.idx, &firstSPOT_LEN, &countSPOT_LEN);
+        if (rce == 0) {
+            if (firstREAD_LEN != firstSPOT_LEN) {
+                rce = RC(rcExe, rcTable, rcValidating, rcColumn, rcInvalid);
+                LOGERR(klogErr, rce, "The first ID-s "
+                    "in READ_LEN and SPOT_LEN columns do not match");
+            }
+            else if (countREAD_LEN != countSPOT_LEN) {
+                rce = RC(rcExe, rcTable, rcValidating, rcColumn, rcInvalid);
+                LOGERR(klogErr, rce, "ID ranges "
+                    "in READ_LEN and SPOT_LEN columns do not match");
+            }
+        }
+    }
+
+    for (i = 0; i < countREAD_LEN; ++i) {
+        uint32_t n = 0;
+        uint32_t j = 0;
+        rc_t rc = VCursorCellDataDirect(curs, firstREAD_LEN + i,
+            readLen.idx, &readLen.elem_bits,
+            &readLen.value.vp, NULL, &readLen.elem_count);
+        if (rc != 0) {
+            PLOGERR(klogErr, (klogErr, rc,
+                "Cannot read 'READ_LEN' column at row $(row)",
+                "row=%ld", firstREAD_LEN + i));
+            if (rce == 0) {
+                rce = rc;
+            }
+            if (!pb->exhaustive) {
+                break;
+            }
+        }
+        rc = VCursorCellDataDirect(curs, firstREAD_LEN + i,
+            spotLen.idx, &spotLen.elem_bits,
+            &spotLen.value.vp, NULL, &spotLen.elem_count);
+        if (rc != 0) {
+            PLOGERR(klogErr, (klogErr, rc,
+                "Cannot read 'SPOT_LEN' column at row $(row)",
+                "row=%ld", firstREAD_LEN + i));
+            if (rce == 0) {
+                rce = rc;
+            }
+            if (!pb->exhaustive) {
+                break;
+            }
+        }
+
+        if (readLen.value.vp == NULL || spotLen.value.vp == NULL) {
+            rc = RC(rcExe, rcTable, rcValidating, rcData, rcNull);
+            PLOGERR(klogErr, (klogErr, rc,
+                "Invalid 'READ_LEN' or 'SPOT_LEN' value at row $(row)",
+                "row=%ld", firstREAD_LEN + i));
+            if (rce == 0) {
+                rce = rc;
+            }
+            if (!pb->exhaustive) {
+                break;
+            }
+        }
+        for (j = 0; j < readLen.elem_count; ++j) {
+            n += readLen.value.u32[j];
+        }
+        if (n != *(spotLen.value.u32)) {
+            rc = RC(rcExe, rcTable, rcValidating, rcData, rcCorrupt);
+            PLOGERR(klogErr, (klogErr, rc,
+                "Sum(READ_LEN) != SPOT_LEN in row $(row)",
+                "row=%ld", firstREAD_LEN + i));
+            if (rce == 0) {
+                rce = rc;
+            }
+            if (!pb->exhaustive) {
+                break;
+            }
+        }
+    }
+
+    if (rce == 0) {
+        LOGMSG(klogInfo, "Columns 'READ_LEN' and 'SPOT_LEN' are consistent");
+    }
+
+    VCursorRelease(curs);
+
+    return rce;
+}
+
+static rc_t sra_dbcc_fastq(const vdb_validate_params *pb,
+    const VTable *tbl, char const name[])
 {
     static char const *const cn_FastQ[] = {
         "READ", "QUALITY", "SPOT_LEN", "READ_START", "READ_LEN", "READ_TYPE"
     };
-    
+
     VCursor const *curs;
     rc_t rc = VTableCreateCursorRead(tbl, &curs);
-    
+
     if (rc == 0) {
         unsigned const n = sizeof(cn_FastQ)/sizeof(cn_FastQ[0]);
         ColumnInfo cols[sizeof(cn_FastQ)/sizeof(cn_FastQ[0])];
@@ -752,7 +913,7 @@ static rc_t sra_dbcc_fastq(VTable const *tbl, char const name[])
         memset(cols, 0, sizeof(cols));
         for (i = 0; i < n; ++i) {
             cols[i].name = cn_FastQ[i];
-            VCursorAddColumn(curs, &cols[i].idx, cols[i].name);
+            VCursorAddColumn(curs, &cols[i].idx, "%s", cols[i].name);
         }
         rc = VCursorOpen(curs);
         if (rc == 0) {
@@ -779,10 +940,16 @@ static rc_t sra_dbcc_fastq(VTable const *tbl, char const name[])
         }
         VCursorRelease(curs);
     }
+
+    if (rc == 0) {
+        rc = tableConsistCheck(pb, tbl);
+    }
+
     if (rc) {
         (void)PLOGERR(klogErr, (klogErr, rc,
             "Table '$(name)' is damaged beyond any use", "name=%s", name));
     }
+
     return rc;
 }
 
@@ -792,11 +959,11 @@ static rc_t VTable_get_platform(VTable const *tbl,
     rc_t rc;
     VCursor const *curs;
     INSDC_SRA_platform_id platform = -1;
-    
+
     rc = VTableCreateCursorRead(tbl, &curs);
     if (rc == 0) {
         uint32_t cid;
-        
+
         rc = VCursorAddColumn(curs, &cid, "("sra_platform_id_t")PLATFORM");
         if (rc == 0) {
             rc = VCursorOpen(curs);
@@ -805,7 +972,7 @@ static rc_t VTable_get_platform(VTable const *tbl,
                 void const *data;
                 uint32_t boff;
                 uint32_t ecnt;
-                
+
                 rc = VCursorCellDataDirect(curs, 1, cid,
                     &ebits, &data, &boff, &ecnt);
                 if (rc == 0) {
@@ -825,18 +992,19 @@ static rc_t VTable_get_platform(VTable const *tbl,
     return rc;
 }
 
-static rc_t verify_table(VTable const *tbl, char const name[])
+static rc_t verify_table(const vdb_validate_params *pb,
+    const VTable *tbl, char const name[])
 {
     char schemaName[1024];
     char *schemaVers = NULL;
     rc_t rc = 0;
-    
+
     get_tbl_schema_info(tbl, schemaName, sizeof(schemaName), &schemaVers);
-    
+
     if (schemaName[0] == '\0' || strncmp(schemaName, "NCBI:SRA:", 9) == 0) {
         /* SRA or legacy SRA */
         INSDC_SRA_platform_id platform;
-        
+
         rc = VTable_get_platform(tbl, &platform);
         if (rc == 0) {
             if (platform == (INSDC_SRA_platform_id)-1) {
@@ -844,7 +1012,7 @@ static rc_t verify_table(VTable const *tbl, char const name[])
                     "SRA Platform; type of table '$(name)' is indeterminate.",
                     "name=%s", name));
             }
-            rc = sra_dbcc_fastq(tbl, name);
+            rc = sra_dbcc_fastq(pb, tbl, name);
             if (rc == 0 && platform == SRA_PLATFORM_454) {
                 rc = sra_dbcc_454(tbl, name);
             }
@@ -857,43 +1025,55 @@ static rc_t verify_table(VTable const *tbl, char const name[])
     return rc;
 }
 
-static rc_t verify_mgr_table(VDBManager const *mgr, char const name[])
+static rc_t verify_mgr_table(const vdb_validate_params *pb, char const name[])
 {
-    VTable const *tbl;
+    rc_t rc = 0;
+
+    const VTable *tbl = NULL;
     VSchema *sra_schema = NULL;
-    
+
+    const VDBManager *mgr = NULL;
+
+    assert(pb);
+
+    mgr = pb->vmgr;
+
     for ( ; ; ) {
-        rc_t rc = VDBManagerOpenTableRead(mgr, &tbl, sra_schema, name);
+        rc = VDBManagerOpenTableRead(mgr, &tbl, sra_schema, "%s", name);
         VSchemaRelease(sra_schema);
         if (rc == 0) {
-            rc = verify_table(tbl, name);
-            VTableRelease(tbl);
-            return rc;
+            rc = verify_table(pb, tbl, name);
+            break;
         }
-        else if (GetRCState(rc) == rcNotFound && GetRCObject(rc) == rcSchema
+        else if (GetRCState(rc) == rcNotFound && GetRCObject(rc) == (enum RCObject)rcSchema
             && sra_schema == NULL)
         {
             rc = VDBManagerMakeSRASchema(mgr, &sra_schema);
             if (rc) {
                 (void)PLOGERR(klogErr, (klogErr, rc,
                     "Failed to open table '$(name)'", "name=%s", name));
-                return rc;
+                break;
             }
         }
         else {
             (void)PLOGERR(klogErr, (klogErr, rc,
                 "Failed to open table '$(name)'", "name=%s", name));
-            return rc;
+            break;
         }
     }
+
+    RELEASE(VSchema, sra_schema);
+    RELEASE(VTable, tbl);
+
+    return rc;
 }
 
 #if 0
 static rc_t verify_db_table(VDatabase const *db, char const name[])
 {
     VTable const *tbl;
-    rc_t rc = VDatabaseOpenTableRead(db, &tbl, name);
-    
+    rc_t rc = VDatabaseOpenTableRead(db, &tbl, "%s", name);
+
     if (rc == 0) {
         rc = verify_table(tbl, name);
         VTableRelease(tbl);
@@ -909,7 +1089,7 @@ static rc_t align_dbcc_primary_alignment(VTable const *tbl, char const name[])
 {
     VCursor const *curs;
     rc_t rc = VTableCreateCursorRead(tbl, &curs);
-    
+
     if (rc == 0) {
         static char const *const cn_SAM[] = {
             "SEQ_NAME",
@@ -929,11 +1109,11 @@ static rc_t align_dbcc_primary_alignment(VTable const *tbl, char const name[])
         unsigned const n = sizeof(cn_SAM)/sizeof(cn_SAM[0]);
         ColumnInfo cols[sizeof(cn_SAM)/sizeof(cn_SAM[0])];
         unsigned i;
-        
+
         memset(cols, 0, sizeof(cols));
         for (i = 0; i < n; ++i) {
             cols[i].name = cn_SAM[i];
-            VCursorAddColumn(curs, &cols[i].idx, cols[i].name);
+            VCursorAddColumn(curs, &cols[i].idx, "%s", cols[i].name);
         }
         rc = VCursorOpen(curs);
         if (rc == 0) {
@@ -964,18 +1144,223 @@ typedef struct id_pair_s {
     int64_t first;
     int64_t second;
 } id_pair_t;
-static int CC id_pair_cmp(void const *A, void const *B, void *ignored)
-{
-    id_pair_t const *a = A;
-    id_pair_t const *b = B;
 
-    return a->first < b->first
-        ? -1
-        : a->first == b->first
-            ? a->second < b->second
-                ? -1
-                : a->second == b->second ? 0 : 1
-            : 1;
+static size_t work_chunk(uint64_t const count)
+{
+    size_t const max = memory_suggestion / (sizeof(id_pair_t));
+    size_t chunk = (size_t)count;
+
+#if 1
+    /* do as many as possible at once */
+    if (chunk > max)
+        chunk = max;
+#else
+    /* break it up into chunks of about equal size */
+    while (chunk > max)
+        chunk /= 2;
+#endif
+    return chunk;
+}
+
+static void sort_key_pairs(size_t const N, id_pair_t array[/* N */])
+{
+    id_pair_t a;
+    id_pair_t b;
+    
+#define GET(P, V) ((void)(V = ((id_pair_t const *)(P))[0]))
+#define SET(P, V) ((void)((((id_pair_t *)(P))[0]) = V))
+#define CMP(A, B) (((GET(A, a)),(GET(B, b))), (a.first  < b.first  ? -1 :      \
+                                               b.first  < a.first  ?  1 :      \
+                                               a.second < b.second ? -1 :      \
+                                               b.second < a.second ?  1 : 0))
+#define SWAP(A, B, C, D) do{GET(A, a); GET(B, b); SET(A, b); SET(B, a);}while(0)
+    KSORT(array, N, sizeof(array[0]), 0, 0);
+#undef SWAP
+#undef CMP
+#undef SET
+#undef GET
+}
+
+static void sort_keys(size_t const N, int64_t array[/* N */])
+{
+#define INDEXOF(A) (((int64_t const *)(A)) - ((int64_t const *)(&array[0])))
+#define CMP(A, B) (array[INDEXOF(A)] - array[INDEXOF(B)])
+#define SWAP(A, B, C, D) do {                                                  \
+    int64_t const a = array[INDEXOF(A)];                                       \
+    int64_t const b = array[INDEXOF(B)];                                       \
+    array[INDEXOF(A)] = b;                                                     \
+    array[INDEXOF(B)] = a; } while(0)
+    KSORT(array, N, sizeof(array[0]), 0, 0);
+#undef SWAP
+#undef CMP
+#undef INDEXOF
+}
+
+#define CHECK_QUITTING do { rc_t const rc = Quitting(); if (rc) return rc; } while(0);
+
+static size_t load_key_pairs(int64_t const startId,
+                             int64_t const endId,
+                             size_t const pairs,
+                             id_pair_t pair[/* pairs */],
+                             VCursor const *const acurs,
+                             ColumnInfo *const aci,
+                             int64_t plast[],
+                             rc_t Rc[])
+{
+    int64_t last_fkey = INT64_MIN;
+    int64_t row = startId;
+    size_t j = 0;
+    bool ordered = true;
+    
+    while (row < endId) {
+        int64_t first;
+        int64_t maybe_last;
+        rc_t const rc1 = VCursorPageIdRange(acurs, aci->idx, row, &first, &maybe_last);
+        int64_t const last = maybe_last < endId ? maybe_last : endId - 1;
+        size_t const count = (last + 1) - first;
+
+        if (rc1) {
+            Rc[0] = rc1;
+            return 0;
+        }
+        CHECK_QUITTING;
+        
+        if (first < row)
+            first = row;
+        if (row != startId && pairs < count + j)
+            break;
+        plast[0] = last;
+        
+        for ( ; j < pairs && row <= last; ++row) {
+            rc_t const rc = VCursorCellDataDirect(acurs, row, aci->idx,
+                                                  &aci->elem_bits, &aci->value.vp,
+                                                  NULL, &aci->elem_count);
+            if (rc == 0) {
+                if (aci->elem_count == 1) {
+                    int64_t const fkey = aci->value.i64[0];
+                    
+                    ordered &= (last_fkey <= fkey);
+                    pair[j].second = row;
+                    pair[j].first = fkey;
+                    last_fkey = fkey;
+                    ++j;
+                }
+                else {
+                    Rc[0] = RC(rcExe, rcDatabase, rcValidating, rcData, rcUnexpected);
+                    return 0;
+                }
+            }
+            else if (!(GetRCObject(rc) == rcRow && GetRCState(rc) == rcNotFound)) {
+                Rc[0] = rc;
+                return 0;
+            }
+            /* row not found might be an error but that won't be decided here */
+        }
+    }
+    if (!ordered)
+        sort_key_pairs(j, pair);
+    
+    Rc[0] = 0;
+    return j;
+}
+
+static bool is_sorted(uint32_t const N, int64_t const key[/* N */])
+{
+    uint32_t i = 0;
+    int64_t last = key[i];
+    
+    for (i = 1; i < N; ++i) {
+        int64_t const cur = key[i];
+        
+        if (cur < last)
+            return false;
+
+        last = cur;
+    }
+    return true;
+}
+
+static rc_t ric_align_generic(int64_t const startId,
+                              uint64_t const count,
+                              size_t const pairs,
+                              id_pair_t pair[/* pairs */],
+                              void *scratch[],
+                              VCursor const *const acurs,
+                              ColumnInfo *const aci,
+                              VCursor const *const bcurs,
+                              ColumnInfo *const bci
+                              )
+{
+    int64_t chunk;
+    int64_t const endId = startId + count;
+    size_t scratch_size = 0;
+
+    for (chunk = startId; chunk < endId; ) {
+        rc_t rc = 0;
+        int64_t last;
+        size_t const n = load_key_pairs(chunk, endId, pairs, pair, acurs, aci, &last, &rc);
+        size_t i;
+        int64_t cur_fkey = 0;
+        uint32_t elem_count = 0;
+        uint32_t current = 0;
+        int64_t const *id = 0;
+
+        if (rc) return rc;
+        if (chunk == last)
+            break;
+        if (chunk != startId) {
+            (void)PLOGMSG(klogInfo, (klogInfo, "Referential Integrity: "
+                                     "$(aname) <-> $(bname)"
+                                     " $(pct)% complete",
+                                     "aname=%s,bname=%s,pct=%5.1f",
+                                     aci->name, bci->name,
+                                     (100.0 * (chunk - startId)) / count));
+        }
+        chunk = last;
+        for (i = 0; i < n; ++i) {
+            int64_t const fkey = pair[i].first;
+            int64_t const row = pair[i].second;
+            
+            if (cur_fkey != fkey) {
+                uint32_t dummy;
+                
+                CHECK_QUITTING;
+                
+                rc = VCursorCellDataDirect(bcurs, fkey, bci->idx,
+                                           &dummy, (void const **)&id,
+                                           NULL, &elem_count);
+
+                if (GetRCObject(rc) == rcRow && GetRCState(rc) == rcNotFound)
+                    return RC(rcExe, rcDatabase, rcValidating, rcData, rcInconsistent);
+                else if (rc)
+                    return rc;
+                
+                if (!is_sorted(elem_count, id)) {
+                    if (scratch_size < elem_count) {
+                        void *const temp = realloc(scratch[0], elem_count * sizeof(id[0]));
+                        
+                        if (temp == NULL)
+                            return RC(rcExe, rcDatabase, rcValidating, rcMemory, rcExhausted);
+                        
+                        scratch[0] = temp;
+                        scratch_size = elem_count;
+                    }
+                    memcpy(scratch[0], id, elem_count * sizeof(id[0]));
+                    sort_keys(elem_count, scratch[0]);
+                    id = scratch[0];
+                }
+                current = 0;
+                cur_fkey = fkey;
+                while (current < elem_count && id[current] < row) {
+                    ++current;
+                }
+            }
+            if (current >= elem_count || id[current] != row)
+                return RC(rcExe, rcDatabase, rcValidating, rcData, rcInconsistent);
+            ++current;
+        }
+    }
+    return 0;
 }
 
 static rc_t ric_align_ref_and_align(char const dbname[],
@@ -988,136 +1373,81 @@ static rc_t ric_align_ref_and_align(char const dbname[],
                                   : which == 2 ? "EVIDENCE_ALIGNMENT_IDS"
                                   : NULL;
     rc_t rc;
-    VCursor const *curs = NULL;
-    ColumnInfo ci;
+    VCursor const *acurs = NULL;
+    VCursor const *bcurs = NULL;
+    ColumnInfo aci;
+    ColumnInfo bci;
     int64_t startId;
     uint64_t count;
+
+    aci.name = "REF_ID";
+    bci.name = id_col_name;
     
-    rc = VTableCreateCursorRead(align, &curs);
+    rc = VTableCreateCursorRead(align, &acurs);
     if (rc == 0) {
-        rc = VCursorAddColumn(curs, &ci.idx, "REF_ID");
+        rc = VCursorAddColumn(acurs, &aci.idx, "%s", aci.name);
         if (rc == 0)
-            rc = VCursorOpen(curs);
+            rc = VCursorOpen(acurs);
         if (rc == 0)
-            rc = VCursorIdRange(curs, ci.idx, &startId, &count);
+            rc = VCursorIdRange(acurs, aci.idx, &startId, &count);
     }
-    if (rc) {
+    if (rc)
         (void)PLOGERR(klogErr, (klogErr, rc, "Database '$(name)': "
             "alignment table can not be read", "name=%s", dbname));
-    }
     else {
-        id_pair_t *const id_pair = malloc(sizeof(id_pair_t) * count);
-        
-        if (id_pair) {
-            uint64_t i;
-            uint64_t j;
+        rc = VTableCreateCursorRead(ref, &bcurs);
+        if (rc == 0)
+            rc = VCursorAddColumn(bcurs, &bci.idx, "%s", bci.name);
+        if (rc == 0)
+            rc = VCursorOpen(bcurs);
+        if (rc)
+            (void)PLOGERR(klogErr, (klogErr, rc, "Database '$(name)': "
+                "reference table can not be read", "name=%s", dbname));
+    }
+    if (rc == 0) {
+        size_t const chunk = work_chunk(count);
+        id_pair_t *const pair = malloc(sizeof(id_pair_t) * chunk);
+
+        if (pair) {
+            void *scratch = NULL;
             
-            for (j = i = 0; i < count && rc == 0; ++i) {
-                int64_t const row = startId + i;
-                
-                rc = VCursorCellDataDirect(curs, row, ci.idx, &ci.elem_bits, &ci.value.vp, NULL, &ci.elem_count);
-                if (rc == 0) {
-                    if (ci.elem_count != 1) {
-                        rc = RC(rcExe, rcDatabase, rcValidating, rcData, rcUnexpected);
-                        (void)PLOGERR(klogErr, (klogErr, rc,
-                            "Database '$(name)': failed referential integrity "
-                            "check", "name=%s", dbname));
-                        break;
-                    }
-                    else {
-                        id_pair[j].second = row;
-                        id_pair[j].first = ci.value.i64[0];
-                        ++j;
-                    }
-                }
-                else if (GetRCObject(rc) == rcRow
-                    && GetRCState(rc) == rcNotFound)
-                {   rc = 0; }
-            }
-            VCursorRelease(curs); curs = NULL;
-            if (rc == 0) {
-                bool ooo_warned = false;
-                bool failed = false;
-                
-                ksort(id_pair, count, sizeof(id_pair_t), id_pair_cmp, NULL);
-                
-                rc = VTableCreateCursorRead(ref, &curs);
-                if (rc == 0)
-                    rc = VCursorAddColumn(curs, &ci.idx, id_col_name);
-                if (rc == 0)
-                    rc = VCursorOpen(curs);
-                if (rc == 0)
-                    rc = VCursorIdRange(curs, ci.idx, &startId, &count);
-                if (rc == 0) {
-                    for (i = j = 0; rc == 0 && i < count; ++i) {
-                        int64_t const row = startId + i;
-                        
-                        rc = VCursorCellDataDirect(curs, row, ci.idx,
-                            &ci.elem_bits, &ci.value.vp, NULL, &ci.elem_count);
-                        if (rc == 0) {
-                            unsigned k;
-                            int64_t prvId = ci.value.i64[0];
-                            
-                            for (k = 0; rc == 0 && k < ci.elem_count;
-                                ++k, ++j)
-                            {
-                                int64_t const alignId = ci.value.i64[k];
-                                
-                                if (!ooo_warned && prvId > alignId) {
-                                    (void)PLOGMSG(klogWarn, (klogWarn,
-                                        "Database '$(name)': "
-                                        "column '$(idcol)' is not ordered",
-                                        "name=%s,idcol=%s",
-                                        dbname, id_col_name));
-                                    ooo_warned = true;
-                                }
-                                if (id_pair[j].first != row) {
-                                    if (!failed) {
-                                        rc = RC(rcExe, rcDatabase, rcValidating,
-                                            rcData, rcInconsistent);
-                                        (void)PLOGERR(klogErr, (klogErr, rc,
+            rc = ric_align_generic(startId, count, chunk, pair, &scratch,
+                                   acurs, &aci, bcurs, &bci);
+            if (scratch)
+                free(scratch);
+
+            if (GetRCObject(rc) == (enum RCObject)rcData && GetRCState(rc) == rcUnexpected)
+                (void)PLOGERR(klogErr, (klogErr, rc,
+                    "Database '$(name)': failed referential "
+                    "integrity check", "name=%s", dbname));
+            else if (GetRCObject(rc) == (enum RCObject)rcData &&
+                     GetRCState(rc) == rcInconsistent)
+                (void)PLOGERR(klogErr, (klogErr, rc,
  "Database '$(name)': column '$(idcol)' failed referential integrity check",
  "name=%s,idcol=%s", dbname, id_col_name));
-                                    }
-                                    failed = true;
-                                }
-                                else if (id_pair[j].second != alignId) {
-                                    if (!ooo_warned) {
-                                        (void)PLOGMSG(klogWarn, (klogWarn,
- "Database '$(name)': column '$(idcol)' might fail referential integrity check",
- "name=%s,idcol=%s", dbname, id_col_name));
-                                    }
-                                }
-                                prvId = alignId;
-                            }
-                        }
-                        else if (GetRCObject(rc) == rcRow
-                            && GetRCState(rc) == rcNotFound)
-                        {   rc = 0; }
-                    }
-                    if (!failed && i < count) {
-                        rc = RC(rcExe, rcDatabase, rcValidating,
-                            rcData, rcInconsistent);
-                        (void)PLOGERR(klogErr, (klogErr, rc,
-                            "Database '$(name)': column '$(idcol)' failed "
-                            "referential integrity check",
-                            "name=%s,idcol=%s", dbname, id_col_name));
-                    }
-                }
-                else
-                    (void)PLOGERR(klogErr, (klogErr, rc, "Database '$(name)': "
-                        "reference table can not be read", "name=%s", dbname));
-            }
-            free(id_pair);
-            VCursorRelease(curs);
+            else if (GetRCObject(rc) == (enum RCObject)rcData &&
+                     GetRCState(rc) == rcTooBig)
+                (void)PLOGERR(klogWarn, (klogWarn, rc = 0, "Database '$(name)':"
+                         " referential integrity could not be checked, skipped",
+                         "name=%s", dbname));
+            else if (rc)
+                (void)PLOGERR(klogErr, (klogErr, rc,
+"Database '$(name)': reference table can not be read", "name=%s", dbname));
+
+            free(pair);
         }
-        else {
+        else
             rc = RC(rcExe, rcDatabase, rcValidating, rcMemory, rcExhausted);
-            (void)PLOGERR(klogErr, (klogErr, rc, "Database '$(name)': "
-                "referential integrity could not be checked",
+        
+        if (GetRCObject(rc) == rcMemory && GetRCState(rc) == rcExhausted) {
+            rc = 0;
+            (void)PLOGERR(klogWarn, (klogWarn, rc, "Database '$(name)':"
+                " referential integrity could not be checked, skipped",
                 "name=%s", dbname));
         }
     }
+    VCursorRelease(acurs);
+    VCursorRelease(bcurs);
     return rc;
 }
 
@@ -1126,114 +1456,75 @@ static rc_t ric_align_seq_and_pri(char const dbname[],
                                   VTable const *pri)
 {
     rc_t rc;
-    VCursor const *curs = NULL;
-    ColumnInfo ci;
+    VCursor const *acurs = NULL;
+    VCursor const *bcurs = NULL;
+    ColumnInfo aci;
+    ColumnInfo bci;
     int64_t startId;
     uint64_t count;
+
+    aci.name = "SEQ_SPOT_ID";
+    bci.name = "PRIMARY_ALIGNMENT_ID";
     
-    rc = VTableCreateCursorRead(pri, &curs);
-    if (rc == 0) {
-        rc = VCursorAddColumn(curs, &ci.idx, "SEQ_SPOT_ID");
-        if (rc == 0)
-            rc = VCursorOpen(curs);
-        if (rc == 0)
-            rc = VCursorIdRange(curs, ci.idx, &startId, &count);
-    }
-    if (rc) {
+    rc = VTableCreateCursorRead(pri, &acurs);
+    if (rc == 0)
+        rc = VCursorAddColumn(acurs, &aci.idx, "%s", aci.name);
+    if (rc == 0)
+        rc = VCursorOpen(acurs);
+    if (rc == 0)
+        rc = VCursorIdRange(acurs, aci.idx, &startId, &count);
+    if (rc)
         (void)PLOGERR(klogErr, (klogErr, rc, "Database '$(name)': "
             "alignment table can not be read", "name=%s", dbname));
-    }
     else {
-        id_pair_t *const id_pair = malloc(sizeof(id_pair_t) * count);
-
-        if (id_pair) {
-            uint64_t i;
-            uint64_t j;
-            
-            for (j = i = 0; i < count && rc == 0; ++i) {
-                int64_t const row = startId + i;
-                
-                rc = VCursorCellDataDirect(curs, row, ci.idx,
-                    &ci.elem_bits, &ci.value.vp, NULL, &ci.elem_count);
-                if (rc == 0) {
-                    if (ci.elem_count != 1) {
-                        rc = RC(rcExe, rcDatabase, rcValidating,
-                            rcData, rcUnexpected);
-                        (void)PLOGERR(klogErr, (klogErr, rc,
-                            "Database '$(name)': failed "
-                            "referential integrity check", "name=%s", dbname));
-                        break;
-                    }
-                    else {
-                        id_pair[j].second = row;
-                        id_pair[j].first = ci.value.i64[0];
-                        ++j;
-                    }
-                }
-                else if (GetRCObject(rc) == rcRow
-                    && GetRCState(rc) == rcNotFound)
-                {   rc = 0; }
-            }
-            VCursorRelease(curs); curs = NULL;
-            if (rc == 0) {
-                ksort(id_pair, count, sizeof(id_pair_t), id_pair_cmp, NULL);
-                
-                rc = VTableCreateCursorRead(seq, &curs);
-                if (rc == 0)
-                    rc = VCursorAddColumn(curs, &ci.idx,
-                        "PRIMARY_ALIGNMENT_ID");
-                if (rc == 0)
-                    rc = VCursorOpen(curs);
-                if (rc == 0) {
-                    for (i = 0; rc == 0 && i < count; ++i) {
-                        int64_t const row = id_pair[i].first;
-                        int64_t const alignId = id_pair[i].second;
-                        
-                        rc = VCursorCellDataDirect(curs, row, ci.idx,
-                            &ci.elem_bits, &ci.value.vp, NULL, &ci.elem_count);
-                        if (rc == 0) {
-                            bool found = false;
-                            
-                            for (j = 0; j < ci.elem_count; ++j)
-                                found |= (alignId == ci.value.i64[j]);
-                            
-                            if (!found) {
-                                rc = RC(rcExe, rcDatabase, rcValidating,
-                                    rcData, rcInconsistent);
-                                (void)PLOGERR(klogErr, (klogErr, rc,
-  "Database '$(name)': column 'SEQ_SPOT_ID' failed referential integrity check",
-  "name=%s", dbname));
-                            }
-                        }
-                        else if (GetRCObject(rc) == rcRow
-                            && GetRCState(rc) == rcNotFound)
-                        {
-                            rc = RC(rcExe, rcDatabase, rcValidating,
-                                rcData, rcInconsistent);
-                            (void)PLOGERR(klogErr, (klogErr, rc,
-  "Database '$(name)': column 'SEQ_SPOT_ID' failed referential integrity check",
-  "name=%s", dbname));
-                        }
-                        else {
-                            (void)PLOGERR(klogErr, (klogErr, rc,
-  "Database '$(name)': sequence table can not be read", "name=%s", dbname));
-                        }
-                    }
-                }
-                else
-                    (void)PLOGERR(klogErr, (klogErr, rc, "Database '$(name)': "
-                        "sequence table can not be read", "name=%s", dbname));
-            }
-            free(id_pair);
-        }
-        else {
-            rc = RC(rcExe, rcDatabase, rcValidating, rcMemory, rcExhausted);
+        rc = VTableCreateCursorRead(seq, &bcurs);
+        if (rc == 0)
+            rc = VCursorAddColumn(bcurs, &bci.idx, "%s", bci.name);
+        if (rc == 0)
+            rc = VCursorOpen(bcurs);
+        if (rc)
             (void)PLOGERR(klogErr, (klogErr, rc, "Database '$(name)': "
-                "referential integrity could not be checked",
-                "name=%s", dbname));
-        }
-        VCursorRelease(curs);
+                "sequence table can not be read", "name=%s", dbname));
     }
+    if (rc == 0) {
+        size_t const chunk = work_chunk(count);
+        id_pair_t *const pair = malloc((sizeof(id_pair_t)+sizeof(int64_t)) * chunk);
+
+        if (pair) {
+            void *scratch = NULL;
+            
+            rc = ric_align_generic(startId, count, chunk, pair, &scratch,
+                                   acurs, &aci, bcurs, &bci);
+            if (scratch)
+                free(scratch);
+            
+            if (GetRCObject(rc) == (enum RCObject)rcData && GetRCState(rc) == rcUnexpected)
+                (void)PLOGERR(klogErr, (klogErr, rc,
+                    "Database '$(name)': failed referential "
+                    "integrity check", "name=%s", dbname));
+            else if (GetRCObject(rc) == (enum RCObject)rcData &&
+                     GetRCState(rc) == rcInconsistent)
+                (void)PLOGERR(klogErr, (klogErr, rc,
+"Database '$(name)': column 'SEQ_SPOT_ID' failed referential integrity check",
+"name=%s", dbname));
+            else if (GetRCObject(rc) == (enum RCObject)rcData &&
+                     GetRCState(rc) == rcTooBig)
+                (void)PLOGERR(klogWarn, (klogWarn, rc = 0, "Database '$(name)':"
+                         " referential integrity could not be checked, skipped",
+                         "name=%s", dbname));
+            else if (rc)
+                (void)PLOGERR(klogErr, (klogErr, rc,
+"Database '$(name)': sequence table can not be read", "name=%s", dbname));
+
+            free(pair);
+        }
+        else
+            (void)PLOGERR(klogWarn, (klogWarn, rc = 0, "Database '$(name)':"
+                         " referential integrity could not be checked, skipped",
+                         "name=%s", dbname));
+    }
+    VCursorRelease(acurs);
+    VCursorRelease(bcurs);
     return rc;
 }
 
@@ -1244,10 +1535,10 @@ static rc_t dbric_align(char const dbname[],
                         VTable const *ref)
 {
     rc_t rc = 0;
-    
+
     if ((rc == 0 || exhaustive) && (pri != NULL && seq != NULL)) {
         rc_t rc2 = ric_align_seq_and_pri(dbname, seq, pri);
-        
+
         if (rc2 == 0) {
             (void)PLOGMSG(klogInfo, (klogInfo, "Database '$(dbname)': "
                "SEQUENCE.PRIMARY_ALIGNMENT_ID <-> PRIMARY_ALIGNMENT.SEQ_SPOT_ID"
@@ -1259,7 +1550,7 @@ static rc_t dbric_align(char const dbname[],
     }
     if ((rc == 0 || exhaustive) && (pri != NULL && ref != NULL)) {
         rc_t rc2 = ric_align_ref_and_align(dbname, ref, pri, 0);
-        
+
         if (rc2 == 0) {
             (void)PLOGMSG(klogInfo, (klogInfo, "Database '$(dbname)': "
                 "REFERENCE.PRIMARY_ALIGNMENT_IDS <-> PRIMARY_ALIGNMENT.REF_ID "
@@ -1287,12 +1578,12 @@ static rc_t verify_database_align(VDatabase const *db,
         tbSequence           = ( 1u << 4 ),
         tbSecondaryAlignment = ( 1u << 5 )
     };
-    
+
     if (nodes[0].firstChild) {
         for ( ; ; ) {
             char const *tname = &names[tbl->name];
             unsigned this_table = 0;
-            
+
             if (tbl->objType == kptTable) {
                 switch (tname[0]) {
                 case 'E':
@@ -1363,7 +1654,7 @@ static rc_t verify_database_align(VDatabase const *db,
         VTable const *pri = NULL;
         VTable const *seq = NULL;
         VTable const *ref = NULL;
-        
+
         if ((tables & tbPrimaryAlignment) != 0) {
             rc = VDatabaseOpenTableRead(db, &pri, "PRIMARY_ALIGNMENT");
             if (rc) break;
@@ -1379,7 +1670,7 @@ static rc_t verify_database_align(VDatabase const *db,
         rc = dbric_align(name, pri, seq, ref);
         break;
     }
-    return rc;    
+    return rc;
 }
 
 static rc_t verify_database(VDatabase const *db,
@@ -1388,7 +1679,7 @@ static rc_t verify_database(VDatabase const *db,
     char schemaName[1024];
     char *schemaVers = NULL;
     rc_t rc;
-    
+
     rc = get_db_schema_info(db, schemaName, sizeof(schemaName), &schemaVers);
     if (rc) {
         (void)PLOGERR(klogErr, (klogErr, rc,
@@ -1415,12 +1706,19 @@ static rc_t verify_database(VDatabase const *db,
     return rc;
 }
 
-static rc_t verify_mgr_database(VDBManager const *mgr,
+static rc_t verify_mgr_database(const vdb_validate_params *pb,
     char const name[], node_t const nodes[], char const names[])
 {
+    rc_t rc = 0;
     VDatabase const *child;
-    rc_t rc = VDBManagerOpenDBRead(mgr, &child, NULL, name);
+    const VDBManager *mgr = NULL;
     
+    assert(pb);
+
+    mgr = pb->vmgr;
+
+    rc = VDBManagerOpenDBRead(mgr, &child, NULL, "%s", name);
+
     if (rc == 0) {
         rc = verify_database(child, name, nodes, names);
         VDatabaseRelease(child);
@@ -1429,16 +1727,16 @@ static rc_t verify_mgr_database(VDBManager const *mgr,
     return rc;
 }
 
-static rc_t sra_dbcc(const VDBManager *mgr,
+static rc_t sra_dbcc(const vdb_validate_params *pb,
     char const name[], node_t const nodes[], char const names[])
 {
-    rc_t rc;
+    rc_t rc = 0;
 
     if (nodes[0].objType == kptDatabase)
-        rc = verify_mgr_database(mgr, name, nodes, names);
+        rc = verify_mgr_database(pb, name, nodes, names);
     else
-        rc = verify_mgr_table(mgr, name);
-    
+        rc = verify_mgr_table(pb, name);
+
     return rc;
 }
 
@@ -1453,13 +1751,13 @@ rc_t get_platform(const VDBManager *mgr,
     if (tbl == NULL) {
         VSchema *sra_schema = NULL;
         for ( ; rc == 0; ) {
-            rc = VDBManagerOpenTableRead(mgr, &tbl, sra_schema, name);
+            rc = VDBManagerOpenTableRead(mgr, &tbl, sra_schema, "%s", name);
             VSchemaRelease(sra_schema);
             if (rc == 0) {
                 rc = VTable_get_platform(tbl, platform);
                 break;
             }
-            else if (GetRCState(rc) == rcNotFound && GetRCObject(rc) == rcSchema
+            else if (GetRCState(rc) == rcNotFound && GetRCObject(rc) == (enum RCObject)rcSchema
                 && sra_schema == NULL)
             {
                 rc = VDBManagerMakeSRASchema(mgr, &sra_schema);
@@ -1472,19 +1770,6 @@ rc_t get_platform(const VDBManager *mgr,
 
     return rc;
 }
-
-typedef struct vdb_validate_params vdb_validate_params;
-struct vdb_validate_params
-{
-    const KDirectory *wd;
-    const KDBManager *kmgr;
-    const VDBManager *vmgr;
-
-    bool md5_chk;
-    bool md5_chk_explicit;
-    bool blob_crc;
-    bool index_chk;
-};
 
 static
 rc_t dbcc ( const vdb_validate_params *pb, const char *path, bool is_file )
@@ -1511,7 +1796,7 @@ rc_t dbcc ( const vdb_validate_params *pb, const char *path, bool is_file )
         if ( rc == 0 )
             rc = vdbcc ( pb -> vmgr, path, mode, & pathType, is_file );
         if ( rc == 0 )
-            rc = sra_dbcc ( pb -> vmgr, path, nodes, names );
+            rc = sra_dbcc(pb, path, nodes, names);
     }
 
     obj_type = ( pathType == kptDatabase ) ? "Database" : "Table";
@@ -1545,10 +1830,10 @@ const char *generate_relpath ( const vdb_validate_params *pb, const KDirectory *
     if ( dir != pb -> wd )
     {
         char full [ 4096 ];
-        rc_t rc = KDirectoryResolvePath ( dir, true, full, sizeof full, path );
+        rc_t rc = KDirectoryResolvePath ( dir, true, full, sizeof full, "%s", path );
         if ( rc == 0 )
         {
-            rc = KDirectoryResolvePath ( pb -> wd, false, buffer, bsize, full );
+            rc = KDirectoryResolvePath ( pb -> wd, false, buffer, bsize, "%s", full );
             if ( rc == 0 )
                 path = buffer;
         }
@@ -1564,7 +1849,7 @@ rc_t vdb_validate_file ( const vdb_validate_params *pb, const KDirectory *dir, c
     const char *relpath = generate_relpath ( pb, dir, buffer, sizeof buffer, path );
 
     const KFile *f;
-    rc_t rc = KDirectoryOpenFileRead ( dir, & f, path );
+    rc_t rc = KDirectoryOpenFileRead ( dir, & f, "%s", path );
     if ( rc != 0 )
         PLOGERR ( klogErr, ( klogErr, rc, "File '$(fname)' could not be opened", "fname=%s", relpath ) );
     else
@@ -1669,10 +1954,10 @@ static
 KPathType vdb_subdir_type ( const vdb_validate_params *pb, const KDirectory *dir, const char *name )
 {
     char full [ 4096 ];
-    rc_t rc = KDirectoryResolvePath ( dir, true, full, sizeof full, name );
+    rc_t rc = KDirectoryResolvePath ( dir, true, full, sizeof full, "%s", name );
     if ( rc == 0 )
     {
-        switch ( KDBManagerPathType ( pb -> kmgr, full ) )
+        switch ( KDBManagerPathType ( pb -> kmgr, "%s", full ) )
         {
         case kptDatabase:
             return kptDatabase;
@@ -1698,7 +1983,7 @@ rc_t CC vdb_validate_dir ( const KDirectory *dir, uint32_t type, const char *nam
         case kptTable:
             return vdb_validate_table ( data, dir, name );
         default:
-            return KDirectoryVisit ( dir, false, vdb_validate_dir, data, name );
+            return KDirectoryVisit ( dir, false, vdb_validate_dir, data, "%s", name );
         }
     }
 
@@ -1742,13 +2027,13 @@ static rc_t vdb_validate(const vdb_validate_params *pb, const char *aPath) {
     }
 
     /* what type of thing is this path? */
-    pt = KDirectoryPathType(pb->wd, path);
+    pt = KDirectoryPathType(pb->wd, "%s", path);
 
     if ((pt & ~kptAlias) == kptNotFound) {
         const VPath *pLocal = NULL;
         VPath *acc = NULL;
         bad = true;
-        rc = VFSManagerMakePath (mgr, &acc, path);
+        rc = VFSManagerMakePath (mgr, &acc, "%s", path);
         if (rc != 0) {
             PLOGERR(klogErr, (klogErr, rc,
                 "VPathMake($(path)) failed", PLOG_S(path), path));
@@ -1774,7 +2059,7 @@ static rc_t vdb_validate(const vdb_validate_params *pb, const char *aPath) {
             path = local->addr;
             PLOGMSG(klogInfo, (klogInfo,
                 "Validating '$(path)'...", PLOG_S(path), path));
-            pt = KDirectoryPathType(pb -> wd, path);
+            pt = KDirectoryPathType(pb -> wd, "%s", path);
             bad = false;
         }
 
@@ -1798,7 +2083,7 @@ static rc_t vdb_validate(const vdb_validate_params *pb, const char *aPath) {
                 rc = vdb_validate_file(pb, pb->wd, path);
                 break;
             case kptDir:
-                switch(KDBManagerPathType (pb->kmgr, path)) {
+                switch(KDBManagerPathType (pb->kmgr, "%s", path)) {
                     case kptDatabase:
                         rc = vdb_validate_database(pb, pb->wd, path);
                         break;
@@ -1814,7 +2099,7 @@ static rc_t vdb_validate(const vdb_validate_params *pb, const char *aPath) {
                         break;
                     default:
                         rc = KDirectoryVisit(pb -> wd, false,
-                            vdb_validate_dir, (void*)pb, path);
+                                             vdb_validate_dir, (void*)pb, "%s", path);
                         break;
                 }
                 break;
@@ -1833,12 +2118,12 @@ static rc_t vdb_validate(const vdb_validate_params *pb, const char *aPath) {
     return rc;
 }
 
-static char const* const defaultLogLevel = 
+/*static char const* const defaultLogLevel =
 #if _DEBUGGING
 "debug5";
 #else
 "info";
-#endif
+#endif*/
 
 /******************************************************************************
  * Usage
@@ -1852,7 +2137,7 @@ rc_t CC UsageSummary(const char *prog_name)
                      , prog_name );
 }
 
-/*static char const *help_text[] = 
+/*static char const *help_text[] =
 {
     "Check components md5s if present, "
             "fail unless other checks are requested (default: yes)", NULL,
@@ -1863,21 +2148,26 @@ rc_t CC UsageSummary(const char *prog_name)
     "Check index-only with blobs CRC32 (default: no)", NULL
 };*/
 
-#define OPTION_md5 "md5"
 #define ALIAS_md5  "5"
+#define OPTION_md5 "md5"
 static const char *USAGE_MD5[] = { "Check components md5s if present, "
     "fail unless other checks are requested (default: yes)", NULL };
 /*
 #define ALIAS_MD5  "M"
 #define OPTION_MD5 "MD5"
 */
-#define OPTION_blob_crc "blob-crc"
 #define ALIAS_blob_crc  "b"
+#define OPTION_blob_crc "blob-crc"
 static const char *USAGE_BLOB_CRC[] =
 { "Check blobs CRC32 (default: yes)", NULL };
 
 #define ALIAS_BLOB_CRC  "B"
 #define OPTION_BLOB_CRC "BLOB-CRC"
+
+#define ALIAS_CNS_CHK  "C"
+#define OPTION_CNS_CHK "CONSISTENCY-CHECK"
+static const char *USAGE_CNS_CHK[] =
+{ "Deeply check data consistency for tables (default: no)", NULL };
 
 #if CHECK_INDEX
 #define ALIAS_INDEX  "i"
@@ -1890,8 +2180,8 @@ static const char *USAGE_INDEX[] = { "Check 'skey' index (default: no)", NULL };
 static const char *USAGE_EXHAUSTIVE[] =
 { "Continue checking object for all possible errors (default: false)", NULL };
 
-#define OPTION_ref_int "referential-integrity"
 #define ALIAS_ref_int  "d"
+#define OPTION_ref_int "referential-integrity"
 static const char *USAGE_REF_INT[] =
 { "Check data referential integrity for databases (default: yes)", NULL };
 
@@ -1904,7 +2194,7 @@ static const char *USAGE_DRI[] =
 static const char *USAGE_IND_ONLY[] =
 { "Check index-only with blobs CRC32 (default: no)", NULL };
 
-static OptDef options [] = 
+static OptDef options [] =
 {                                                    /* needs_value, required */
 /*  { OPTION_MD5     , ALIAS_MD5     , NULL, USAGE_MD5     , 1, true , false }*/
     { OPTION_BLOB_CRC, ALIAS_BLOB_CRC, NULL, USAGE_BLOB_CRC, 1, true , false }
@@ -1914,6 +2204,7 @@ static OptDef options [] =
   , { OPTION_EXHAUSTIVE,
                    ALIAS_EXHAUSTIVE, NULL, USAGE_EXHAUSTIVE, 1, false, false }
   , { OPTION_REF_INT , ALIAS_REF_INT , NULL, USAGE_REF_INT , 1, true , false }
+  , { OPTION_CNS_CHK , ALIAS_CNS_CHK , NULL, USAGE_CNS_CHK , 1, true , false }
 
     /* not printed by --help */
   , { "dri"          , NULL          , NULL, USAGE_DRI     , 1, false, false }
@@ -1947,9 +2238,9 @@ rc_t CC Usage ( const Args * args )
     rc_t rc = ArgsProgram ( args, & fullpath, & progname );
     if ( rc != 0 )
         progname = fullpath = UsageDefaultName;
-    
+
     UsageSummary ( progname );
-    
+
     KOutMsg ( "  Examine directories, files and VDB objects,\n"
               "  reporting any problems that can be detected.\n"
               "\n"
@@ -1964,6 +2255,7 @@ rc_t CC Usage ( const Args * args )
     HelpOptionLine(ALIAS_INDEX   , OPTION_INDEX   , "yes | no", USAGE_INDEX);
 #endif
     HelpOptionLine(ALIAS_REF_INT , OPTION_REF_INT , "yes | no", USAGE_REF_INT);
+    HelpOptionLine(ALIAS_CNS_CHK , OPTION_CNS_CHK , "yes | no", USAGE_CNS_CHK);
     HelpOptionLine(ALIAS_EXHAUSTIVE, OPTION_EXHAUSTIVE, NULL, USAGE_EXHAUSTIVE);
 
 /*
@@ -1977,9 +2269,9 @@ rc_t CC Usage ( const Args * args )
     }
 */
     HelpOptionsStandard ();
-    
+
     HelpVersion ( fullpath, KAppVersion () );
-    
+
     return 0;
 }
 
@@ -1996,9 +2288,11 @@ rc_t parse_args ( vdb_validate_params *pb, Args *args )
     uint32_t cnt;
 
     pb -> md5_chk = true;
+    pb->consist_check = false;
     ref_int_check = pb -> blob_crc
         = pb -> md5_chk_explicit = md5_required = true;
 /*
+  {
     rc = ArgsOptionCount(args, OPTION_MD5, &cnt);
     if (rc != 0) {
         LOGERR(klogErr, rc, "Failure to get '" OPTION_MD5 "' argument");
@@ -2015,7 +2309,8 @@ rc_t parse_args ( vdb_validate_params *pb, Args *args )
             pb -> md5_chk_explicit = md5_required = false;
         }
     }
-*/
+  }
+*/{
     rc = ArgsOptionCount( args, OPTION_BLOB_CRC, &cnt);
     if (rc != 0) {
         LOGERR(klogErr, rc, "Failure to get '" OPTION_BLOB_CRC "' argument");
@@ -2033,12 +2328,33 @@ rc_t parse_args ( vdb_validate_params *pb, Args *args )
             pb -> blob_crc = false;
         }
     }
-
+  }
+  {
+    rc = ArgsOptionCount(args, OPTION_CNS_CHK, &cnt);
+    if (rc != 0) {
+        LOGERR(klogErr, rc, "Failure to get '" OPTION_CNS_CHK "' argument");
+        return rc;
+    }
+    if (cnt != 0) {
+        rc = ArgsOptionValue(args, OPTION_CNS_CHK, 0, &dummy);
+        if (rc != 0) {
+            LOGERR(klogErr, rc,
+                "Failure to get '" OPTION_CNS_CHK "' argument");
+            return rc;
+        }
+        assert(dummy && dummy[0]);
+        if (dummy[0] == 'y') {
+            pb->consist_check = true;
+        }
+    }
+  }
+  {
     rc = ArgsOptionCount ( args, "exhaustive", & cnt );
     if ( rc != 0 )
         return rc;
     exhaustive = cnt != 0;
-
+  }
+  {
     rc = ArgsOptionCount(args, OPTION_REF_INT, &cnt);
     if (rc != 0) {
         LOGERR(klogErr, rc, "Failure to get '" OPTION_REF_INT "' argument");
@@ -2056,29 +2372,35 @@ rc_t parse_args ( vdb_validate_params *pb, Args *args )
             ref_int_check = false;
         }
     }
-
+  }
+  {
     rc = ArgsOptionCount ( args, "dri", & cnt );
     if ( rc != 0 )
         return rc;
     if (cnt != 0) {
         ref_int_check = false;
     }
-
+  }
 #if CHECK_INDEX
+  {
     rc = ArgsOptionCount ( args, "index", & cnt );
     if ( rc != 0 )
         return rc;
     pb -> index_chk = cnt != 0;
+  }
 #endif
-
+  {
     rc = ArgsOptionCount ( args, "index-only", & cnt );
     if ( rc != 0 )
         return rc;
     if ( cnt != 0 )
         s_IndexOnly = pb -> blob_crc = true;
+  }
 
     if ( pb -> blob_crc || pb -> index_chk )
         pb -> md5_chk = pb -> md5_chk_explicit;
+
+    pb->exhaustive = exhaustive;
 
     return 0;
 }
@@ -2160,6 +2482,9 @@ rc_t CC KMain ( int argc, char *argv [] )
                     else
                     {
                         uint32_t i;
+
+                        md5_required = false;
+
                         STSMSG(2, ("exhaustive = %d", exhaustive));
                         STSMSG(2, ("ref_int_check = %d", ref_int_check));
                         STSMSG(2, ("md5_required = %d", md5_required));
@@ -2168,6 +2493,7 @@ rc_t CC KMain ( int argc, char *argv [] )
                         STSMSG(2, ("\tmd5_chk_explicit = %d",
                             pb.md5_chk_explicit));
                         STSMSG(2, ("\tblob_crc = %d", pb.blob_crc));
+                        STSMSG(2, ("\tconsist_check = %d", pb.consist_check));
                         STSMSG(2, ("}"));
                         for ( i = 0; i < pcount; ++ i )
                         {

@@ -594,7 +594,7 @@ rc_t CC KMain ( int argc, char *argv [] )
                                         enum RCTarget targ = rcNoTarg;
 
                                         bool dst_is_dir = false;
-                                        int dst_type = KDBManagerPathType ( caps . kdb, dst ) & ~ kptAlias;
+                                        int dst_type = KDBManagerPathType ( caps . kdb, "%s", dst ) & ~ kptAlias;
                                         if ( dst_type == kptDir )
                                             dst_is_dir = true;
                                         else if ( count != 2 )
@@ -711,7 +711,7 @@ rc_t CC KMain ( int argc, char *argv [] )
                                                     {
                                                     case kptDatabase:
                                                     case kptTable:
-                                                        src_type = KDBManagerPathType ( caps . kdb, tp . src_path ) & ~ kptAlias;
+                                                        src_type = KDBManagerPathType ( caps . kdb, "%s", tp . src_path ) & ~ kptAlias;
                                                         if ( src_type == kptPrereleaseTbl )
                                                             src_type = kptTable;
                                                         if ( src_type != dst_type )

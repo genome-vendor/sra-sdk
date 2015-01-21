@@ -353,11 +353,12 @@ typedef struct IlluminaWriterSpot_struct {
     pstring noise;
     pstring intensity;
     pstring signal;
-    SRAReadFilter filter[ILLUMINAWRITER_MAX_NUM_READS];
+    SRAReadFilter filter[ILLUMINAWRITER_MAX_NUM_READS+1];
 } IlluminaWriterSpot;
 
 static
-rc_t SRAWriterIllumina_Check(SRAWriterIllumina* self, IlluminaSpot* spot, IlluminaWriterSpot* final)
+rc_t SRAWriterIllumina_Check(SRAWriterIllumina* self,
+    IlluminaSpot* spot, IlluminaWriterSpot* final)
 {
     rc_t rc = 0;
     bool done, inject_barcode = false;
@@ -433,12 +434,20 @@ rc_t SRAWriterIllumina_Check(SRAWriterIllumina* self, IlluminaSpot* spot, Illumi
         final->adjust_last_read_len = false;
         if( self->sequence_length != spot_len ) {
             uint16_t barc_len = member_basecall ? strlen(member_basecall) : 0;
-            if( self->sequence_length != (spot_len + barc_len) ) {
+            if ((self->sequence_length != (spot_len + barc_len))
+
+             || (self->barcode_read_id == ILLUMINAWRITER_READID_NONE))
+      /* Otherwise inject_barcode is set
+         and when it is inserted below, it uses read_seg[self->barcode_read_id].
+         I.e. barcode_read_id should be >= 0
+         while ILLUMINAWRITER_READID_NONE == -1 */
+
+            {
                 if( spot_len > self->sequence_length ) {
                     what = "spot too long";
                     rc = RC(rcSRA, rcFormatter, rcValidating, rcData, rcExcessive);
                     PLOGERR(klogErr, (klogErr, rc,
-                        "cummulative length of reads data in file(s): $(l) is greater than"
+                        "cumulative length of reads data in file(s): $(l) is greater than"
                         " spot length declared in experiment: $(e) in spot '$(spot)'",
                         "l=%d,e=%u,spot=%.*s", spot_len, self->sequence_length,
                         (uint32_t)spot->name->len, spot->name->data));
@@ -451,7 +460,7 @@ rc_t SRAWriterIllumina_Check(SRAWriterIllumina* self, IlluminaSpot* spot, Illumi
                     what = "spot too short";
                     rc = RC(rcSRA, rcFormatter, rcValidating, rcData, rcInconsistent);
                     PLOGERR(klogErr, (klogErr, rc,
-                        "cummulative length of reads data in file(s): $(l) is less than"
+                        "cumulative length of reads data in file(s): $(l) is less than"
                         " spot length declared in experiment: $(e), most probably $(x) is absent in spot '$(spot)'",
                         "l=%d,e=%u,spot=%.*s,x=%s", spot_len, self->sequence_length,
                         (uint32_t)spot->name->len, spot->name->data,

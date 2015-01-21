@@ -56,11 +56,24 @@ SHLX = lib
 DLLX = dll
 
 # compilation defines
-DEFINES	:= -DWINDOWS
+DEFINES	:= -DWINDOWS -DPKGNAME=win$(BITS)
 
-# flex+bison: on Windows, use source-controlled generated .c/.h files
-YACC = @ true
-LEX = @ true
+# flex+bison: make sure only correct versions are used
+# otherwise, use source-controlled generated .c/.h files
+ifeq (bison (GNU Bison) 2.5, $(shell bison -V | grep "2\.5"))
+    YACC = bison -l
+else
+    YACC = @ $(warning bison version 2.5 is not found: $(shell bison -V)) true
+endif
+ifeq (flex 2.5.35, $(shell flex -V))
+    LEX  = flex -L
+else
+    LEX = @ $(warning flex version 2.5.35 is not found: $(shell flex -V)) true
+endif
 
 # build matrix
 COMPILERS = VC++
+
+ifeq (dbg, $(BUILD))
+	PED = -pedantic
+endif

@@ -71,6 +71,9 @@ char const *sd_CG_mappings[]          = { "Output CG sequences aligned to refere
 char const *sd_header_usage[]         = { "Always reconstruct header",
                                        NULL };
 
+char const *sd_header_file_usage[]    = { "take all headers from this file",
+                                       NULL };
+
 char const *sd_noheader_usage[]       = { "Do not output headers",
                                        NULL };
 
@@ -136,7 +139,7 @@ char const *sd_cachereport_usage[]    = { "print report about mate-pair-cache",
 char const *sd_unaligned_only_usage[] = { "output reads for spots with no aligned reads",
                                        NULL };
 
-char const *sd_cg_names_usage[]       = { "prints cg-style spotgroup.spotid fromed names",
+char const *sd_cg_names_usage[]       = { "prints cg-style spotgroup.spotid formed names",
                                        NULL };
 
 char const *sd_cur_cache_usage[]      = { "open cached cursor with this size",
@@ -148,10 +151,20 @@ char const *sd_min_mapq_usage[]       = { "min. mapq an alignment has to have, t
 char const *sd_no_mate_cache_usage[]  = { "do not use a mate-cache, slower but less memory usage",
                                        NULL };
 
-char const *rna_splice_usage[]        = { "modify cigar-string and output flags if rna-splicing detected",
+char const *rna_splice_usage[]        = { "modify cigar-string (replace .D. with .N.) and add output flags (XS:A:+/-) ",
+                                           "when rna-splicing is detected by match to spliceosome recognition sites",
                                        NULL };
 
+char const *rna_splicel_usage[]       = { "level of rna-splicing detection (0,1,2)",
+                                           "when testing for spliceosome recognition sites ",
+                                           "0=perfect match, 1=one mismatch, 2=two mismatches ",
+                                           "one on each site",
+                                       NULL };
+
+char const *rna_splice_log_usage[]    = { "file, into which rna-splice events are written", NULL };
+
 char const *no_mt_usage[]             = { "disable multithreading", NULL };                                       
+
                                       
 OptDef SamDumpArgs[] =
 {
@@ -160,6 +173,7 @@ OptDef SamDumpArgs[] =
     { OPT_CIGAR_LONG,    "c", NULL, sd_cigartype_usage,      0, false, false },  /* use long cigar-string instead of short */
     { OPT_CIGAR_CG,     NULL, NULL, sd_cigarCG_usage,        0, false, false },  /* transform cigar into cg-style ( has B/N ) */
     { OPT_RECAL_HDR,     "r", NULL, sd_header_usage,         0, false, false },  /* recalculate header */
+    { OPT_HDR_FILE,     NULL, NULL, sd_header_file_usage,    0, true, false },  /* take headers from file */
     { OPT_NO_HDR,        "n", NULL, sd_noheader_usage,       0, false, false },  /* do not print header */
     { OPT_HDR_COMMENT,  NULL, NULL, sd_comment_usage,        0, true,  false },  /* insert this comment into header */
     { OPT_REGION,       NULL, NULL, sd_region_usage,         0, true,  false },  /* filter by region */
@@ -173,7 +187,6 @@ OptDef SamDumpArgs[] =
     { OPT_FASTA,        NULL, NULL, sd_fasta_usage,          0, false, false },  /* output-format = fasta ( instead of SAM ) */
     { OPT_PREFIX,        "p", NULL, sd_prefix_usage,         0, true,  false },  /* prefix QNAME with this string */
     { OPT_REVERSE,      NULL, NULL, sd_reverse_usage,        0, false, false },  /* reverse unaligned reads if reverse-flag set*/
-    { OPT_TEST_ROWS,    NULL, NULL, NULL,                    0, true,  false },  /* test-rows, if >0 limit output to this amount of rows */
     { OPT_MATE_GAP,     NULL, NULL, NULL,                    0, true,  false },  /* int value, mate's farther apart than this are not cached */
     { OPT_CIGAR_CG_M,   NULL, NULL, sd_cigarCGMerge_usage,   0, false, false },  /* transform cg-data(length of read/patterns in cigar) into valid SAM (cigar/READ/QUALITY)*/
     { OPT_XI_DEBUG,     NULL, NULL, sd_XI_usage,             0, false, false },  /* output alignment id for debugging... XI:I:NNNNNNN */
@@ -192,11 +205,14 @@ OptDef SamDumpArgs[] =
     { OPT_MIN_MAPQ,     NULL, NULL, sd_min_mapq_usage,       0, true,  false },  /* minimal mapping quality */
     { OPT_NO_MATE_CACHE,NULL, NULL, sd_no_mate_cache_usage,  0, false, false },  /* do not use mate-cache */
     { OPT_RNA_SPLICE,   NULL, NULL, rna_splice_usage,        0, false, false },  /* detect rna-splicing in sequence */
+    { OPT_RNA_SPLICEL,  NULL, NULL, rna_splicel_usage,       0, true,  false },  /* level of rna-splicing detection */
+    { OPT_RNA_SPLICE_LOG,  NULL, NULL, rna_splice_log_usage, 0, true,  false },  /* filename to log rna-splice events into */
     { OPT_NO_MT,        NULL, NULL, no_mt_usage,              0, false, false },   /* force new code-path */    
     { OPT_DUMP_MODE,    NULL, NULL, NULL,                    0, true,  false },  /* how to produce aligned reads if no regions given */
     { OPT_CIGAR_TEST,   NULL, NULL, NULL,                    0, true,  false },  /* test cg-treatment of cigar string */
     { OPT_LEGACY,       NULL, NULL, NULL,                    0, false, false },  /* force legacy code-path */
     { OPT_NEW,          NULL, NULL, NULL,                    0, false, false },   /* force new code-path */
+    { OPT_TIMING,       NULL, NULL, NULL,                    0, true, false }    /* optional timing */
 };
 
 char const *sd_usage_params[] =
@@ -206,6 +222,7 @@ char const *sd_usage_params[] =
     NULL,                       /* cigartype */
     NULL,                       /* cigarCG */
     NULL,                       /* recalc header */
+    "filename",                 /* take headers from file */
     NULL,                       /* no-header */
     "text",                     /* hdr-comment */
     "name[:from-to]",           /* region */
@@ -219,7 +236,6 @@ char const *sd_usage_params[] =
     NULL,                       /* fastq */
     "prefix",                   /* prefix */
     NULL,                       /* reverse */
-    NULL,                       /* test-rows */
     NULL,                       /* mate-row-gap-cacheable */
     NULL,                       /* cigarCGMerge */
     NULL,                       /* XI */
@@ -238,11 +254,14 @@ char const *sd_usage_params[] =
     NULL,                       /* min_mapq */
     NULL,                       /* no mate-cache */
     NULL,                       /* detect rna-splicing in sequence */
+    NULL,                       /* level of rna-splicing detection */
+    NULL,                       /* file to log rna-splice-events into */
     NULL,                       /* no-mt */    
     NULL,                       /* dump_mode */
     NULL,                       /* cigar test */
     NULL,                       /* force legacy code path */
-    NULL                        /* force new code path */
+    NULL,                       /* force new code path */
+    NULL                        /* optional timing */
 };
 
 ver_t CC KAppVersion( void )
@@ -372,8 +391,6 @@ static rc_t print_samdump( const samdump_opts * const opts )
 
                         if ( rc == 0 )
                         {
-                            uint64_t rows_so_far = 0;
-
                             /* print output of header */
                             if ( ( opts->output_format == of_sam )  &&
                                  ( ifs->database_count > 0 )        &&
@@ -389,7 +406,7 @@ static rc_t print_samdump( const samdump_opts * const opts )
                                  ifs->database_count > 0 && 
                                  !opts->dump_unaligned_only )
                             /* ------------------------------------------------------ */
-                                rc = print_aligned_spots( opts, ifs, mc, &rows_so_far ); /* sam-aligned.c */
+                                rc = print_aligned_spots( opts, ifs, mc ); /* sam-aligned.c */
                             /* ------------------------------------------------------ */
 
 
@@ -397,7 +414,7 @@ static rc_t print_samdump( const samdump_opts * const opts )
                             if ( rc == 0 )
                             {
                                 /* ------------------------------------------------------ */
-                                rc = print_unaligned_spots( opts, ifs, mc, &rows_so_far ); /* sam-unaligned.c */
+                                rc = print_unaligned_spots( opts, ifs, mc ); /* sam-unaligned.c */
                                 /* ------------------------------------------------------ */
                             }
 
@@ -475,7 +492,7 @@ static rc_t samdump_main( Args * args, const samdump_opts * const opts )
         {
             if ( opts->input_file_count < 1 )
             {
-                rc = RC( rcExe, rcNoTarg, rcConstructing, rcParam, rcInvalid );
+                rc = RC( rcExe, rcArgv, rcParsing, rcParam, rcInvalid );
                 (void)LOGERR( klogErr, rc, "no inputfiles given at commandline" );
                 Usage( args );
             }

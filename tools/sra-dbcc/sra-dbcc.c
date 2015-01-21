@@ -328,13 +328,13 @@ rc_t kdbcc(const KDirectory *dir, char const name[], uint32_t mode, bool *is_db,
         ctx.nodes = &nodes[0];
         ctx.names = &names[0];
 
-        * is_db = KDBManagerExists ( mgr, kptDatabase, name );
+        * is_db = KDBManagerExists ( mgr, kptDatabase, "%s", name );
         if ( * is_db )
         {
             const KDatabase *db;
             
             objtype = "database";
-            rc = KDBManagerOpenDBRead ( mgr, & db, name );
+            rc = KDBManagerOpenDBRead ( mgr, & db, "%s", name );
             if ( rc == 0 )
             {
                 rc = KDatabaseConsistencyCheck ( db, 0, level, report, & ctx );
@@ -351,7 +351,7 @@ rc_t kdbcc(const KDirectory *dir, char const name[], uint32_t mode, bool *is_db,
             const KTable *tbl;
 
             objtype = "table";
-            rc = KDBManagerOpenTableRead ( mgr, & tbl, name );
+            rc = KDBManagerOpenTableRead ( mgr, & tbl, "%s", name );
             if ( rc == 0 )
             {
                 rc = KTableConsistencyCheck ( tbl, 0, level, report, & ctx,
@@ -390,7 +390,7 @@ rc_t vdbcc(const KDirectory *dir, char const name[], uint32_t mode, bool is_db, 
         if (rc == 0) {
             const VTable *tbl;
             
-            rc = VDBManagerOpenTableRead(mgr, &tbl, NULL, name);
+            rc = VDBManagerOpenTableRead(mgr, &tbl, NULL, "%s", name);
             if (rc == 0)
                 rc = VTableConsistencyCheck(tbl, 2);
         }
@@ -460,12 +460,12 @@ static rc_t init_dbcc(KDirectory const *dir, char const name[], bool is_file, no
     rc_t rc;
     
     if (is_file) {
-        rc = KDirectoryOpenSraArchiveRead_silent(dir, &obj, false, name);
+        rc = KDirectoryOpenSraArchiveRead_silent(dir, &obj, false, "%s", name);
         if (rc)
-            rc = KDirectoryOpenTarArchiveRead_silent(dir, &obj, false, name);
+            rc = KDirectoryOpenTarArchiveRead_silent(dir, &obj, false, "%s", name);
     }
     else {
-        rc = KDirectoryOpenDirRead(dir, &obj, false, name);
+        rc = KDirectoryOpenDirRead(dir, &obj, false, "%s", name);
     }
     if (rc)
         return rc;
@@ -553,7 +553,7 @@ static rc_t sra_dbcc_fastq(VTable const *tbl, char const name[])
         memset(cols, 0, sizeof(cols));
         for (i = 0; i < n; ++i) {
             cols[i].name = cn_FastQ[i];
-            VCursorAddColumn(curs, &cols[i].idx, cols[i].name);
+            VCursorAddColumn(curs, &cols[i].idx, "%s", cols[i].name);
         }
         rc = VCursorOpen(curs);
         if (rc == 0) {
@@ -650,7 +650,7 @@ static rc_t verify_mgr_table(VDBManager const *mgr, char const name[])
     VSchema *sra_schema = NULL;
     
     for ( ; ; ) {
-        rc_t rc = VDBManagerOpenTableRead(mgr, &tbl, sra_schema, name);
+        rc_t rc = VDBManagerOpenTableRead(mgr, &tbl, sra_schema, "%s", name);
         VSchemaRelease(sra_schema);
         if (rc == 0) {
             rc = verify_table(tbl, name);
@@ -675,7 +675,7 @@ static rc_t verify_mgr_table(VDBManager const *mgr, char const name[])
 static rc_t verify_db_table(VDatabase const *db, char const name[])
 {
     VTable const *tbl;
-    rc_t rc = VDatabaseOpenTableRead(db, &tbl, name);
+    rc_t rc = VDatabaseOpenTableRead(db, &tbl, "%s", name);
     
     if (rc == 0) {
         rc = verify_table(tbl, name);
@@ -715,7 +715,7 @@ static rc_t align_dbcc_primary_alignment(VTable const *tbl, char const name[])
         memset(cols, 0, sizeof(cols));
         for (i = 0; i < n; ++i) {
             cols[i].name = cn_SAM[i];
-            VCursorAddColumn(curs, &cols[i].idx, cols[i].name);
+            VCursorAddColumn(curs, &cols[i].idx, "%s", cols[i].name);
         }
         rc = VCursorOpen(curs);
         if (rc == 0) {
@@ -813,7 +813,7 @@ static rc_t ric_align_ref_and_align(char const dbname[],
                 
                 rc = VTableCreateCursorRead(ref, &curs);
                 if (rc == 0)
-                    rc = VCursorAddColumn(curs, &ci.idx, id_col_name);
+                    rc = VCursorAddColumn(curs, &ci.idx, "%s", id_col_name);
                 if (rc == 0)
                     rc = VCursorOpen(curs);
                 if (rc == 0)
@@ -1134,7 +1134,7 @@ static rc_t verify_database(VDatabase const *db, char const name[], node_t const
 static rc_t verify_mgr_database(VDBManager const *mgr, char const name[], node_t const nodes[], char const names[])
 {
     VDatabase const *child;
-    rc_t rc = VDBManagerOpenDBRead(mgr, &child, NULL, name);
+    rc_t rc = VDBManagerOpenDBRead(mgr, &child, NULL, "%s", name);
     
     if (rc == 0) {
         rc = verify_database(child, name, nodes, names);
@@ -1176,7 +1176,7 @@ rc_t get_platform(const KDirectory *dir, const VDBManager *aMgr,
     if (tbl == NULL) {
         VSchema *sra_schema = NULL;
         for ( ; rc == 0; ) {
-            rc = VDBManagerOpenTableRead(mgr, &tbl, sra_schema, name);
+            rc = VDBManagerOpenTableRead(mgr, &tbl, sra_schema, "%s", name);
             VSchemaRelease(sra_schema);
             if (rc == 0) {
                 rc = VTable_get_platform(tbl, platform);
@@ -1376,7 +1376,7 @@ rc_t CC KMain ( int argc, char *argv [] )
                 else
                 {
                     uint32_t type
-                        = KDirectoryPathType(dir, src_path) & ~kptAlias;
+                        = KDirectoryPathType(dir, "%s", src_path) & ~kptAlias;
                     if (type != kptFile && type != kptDir) {
                         /* check for accession */
                         VPath *acc = NULL;
@@ -1432,7 +1432,7 @@ rc_t CC KMain ( int argc, char *argv [] )
                     else {
                         char full[PATH_MAX];
                         rc = KDirectoryResolvePath(dir, true,
-                            full, sizeof full, src_path);
+                                                   full, sizeof full, "%s", src_path);
                         if (rc == 0) {
                             PLOGMSG(klogInfo, (klogInfo,
                                 "Validating '$(path)'...", PLOG_S(path),
@@ -1465,7 +1465,7 @@ rc_t CC KMain ( int argc, char *argv [] )
                     }
                 }
                 
-                rc = KDirectoryOpenDirRead(dir, &src_dir, false, src_dir_path);
+                rc = KDirectoryOpenDirRead(dir, &src_dir, false, "%s", src_dir_path);
                 KDirectoryRelease(dir);
                 if (rc) {
                     (void)PLOGERR(klogErr, (klogErr, rc,
@@ -1473,7 +1473,7 @@ rc_t CC KMain ( int argc, char *argv [] )
                     break;
                 }
                 else {
-                    uint32_t const obj_type = KDirectoryPathType(src_dir, obj_name) & (~((uint32_t)kptAlias));
+                    uint32_t const obj_type = KDirectoryPathType(src_dir, "%s", obj_name) & (~((uint32_t)kptAlias));
                     
                     switch (obj_type) {
                     case kptFile:

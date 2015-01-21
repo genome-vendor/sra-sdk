@@ -225,9 +225,10 @@ rc_t CC Usage (const Args * args)
         "Encryption key (file password):\n"
         "  The encryption key or file password is handled by configuration. If not yet\n"
         "  set, this program will fail.\n\n"
-        "  You can set the encryption key by running:\n\n"
-        "    perl configuration-assistant.perl\n"
-        "\n");
+        "  Please consult configuration page at\n"
+        "  http://www.ncbi.nlm.nih.gov/Traces/sra/sra.cgi?view=toolkit_doc&f=std or\n"
+        "  https://github.com/ncbi/sra-tools/wiki/Toolkit-Configuration\n"        
+        );
 
     HelpVersion (fullpath, KAppVersion());
 
@@ -283,7 +284,7 @@ ArcScheme ArchiveTypeCheck (const KFile * f)
  * return rc_t = 0 for success
  * return rc_t != 0 for failure
  */
-rc_t CopyFile (const KFile * src, KFile * dst, const char * source, const char * dest)
+rc_t CopyKFile (const KFile * src, KFile * dst, const char * source, const char * dest)
 {
     rc_t rc;
     uint8_t	buff	[256 * 1024];
@@ -403,7 +404,7 @@ bool IsTmpFile (const char * path)
     return (strcmp (pc, TmpLockExt) == 0);
 }
 
-
+#if 0
 static
 bool IsCacheFile (const char * path)
 {
@@ -422,7 +423,7 @@ bool IsCacheFile (const char * path)
 
     return (strcmp (pc, CacheLockExt) == 0);
 }
-
+#endif
 
 static
 rc_t FileInPlace (KDirectory * cwd, const char * leaf, bool try_rename)
@@ -461,7 +462,7 @@ rc_t FileInPlace (KDirectory * cwd, const char * leaf, bool try_rename)
             uint32_t kcm;
 
             kcm = kcmCreate|kcmParents;
-            kpt = KDirectoryPathType (cwd, temp);
+            kpt = KDirectoryPathType (cwd, "%s", temp);
             if (kpt != kptNotFound)
             {
                 /* log busy */
@@ -536,7 +537,7 @@ rc_t FileInPlace (KDirectory * cwd, const char * leaf, bool try_rename)
 
                                 rc = KDirectoryCreateExclusiveAccessFile (cwd, &outfile,
                                                                           false, 0600, kcm,
-                                                                          temp);
+                                                                          "%s", temp);
                                 if (rc == 0)
                                 {
                                     const KFile * Infile;
@@ -548,7 +549,7 @@ rc_t FileInPlace (KDirectory * cwd, const char * leaf, bool try_rename)
                                     {
                                         STSMSG (1, ("copying %s to %s", leaf, temp));
 
-                                        rc = CopyFile (Infile, Outfile, leaf, temp);
+                                        rc = CopyKFile (Infile, Outfile, leaf, temp);
 
                                         if (rc == 0)
                                         {
@@ -712,7 +713,7 @@ rc_t FileToFile (const KDirectory * sd, const char * source,
                             rc = CryptFile (infile, &Infile, outfile, &Outfile, scheme);
                             if (rc == 0)
                             {
-                                rc = CopyFile (Infile, Outfile, source, dest);
+                                rc = CopyKFile (Infile, Outfile, source, dest);
                                 if (rc == 0)
                                 {
                                     if (UseStdin || UseStdout)
@@ -774,7 +775,7 @@ rc_t DoDir (const KDirectory * sd, KDirectory * dd)
                     KDirectory * ndd;
                     KPathType kpt;
 
-                    kpt = KDirectoryPathType (sd, name);
+                    kpt = KDirectoryPathType (sd, "%s", name);
 
                     switch (kpt)
                     {
@@ -805,7 +806,7 @@ rc_t DoDir (const KDirectory * sd, KDirectory * dd)
                         }
                         else
                         {
-                            rc = KDirectoryOpenDirRead (sd, &nsd, false, name);
+                            rc = KDirectoryOpenDirRead (sd, &nsd, false, "%s", name);
                             if (rc)
                                 ;
                             else
@@ -912,7 +913,7 @@ rc_t Start (KDirectory * cwd, const char * src, const char * dst)
         return rc;
     }
 
-    stype = KDirectoryPathType (cwd, spath);
+    stype = KDirectoryPathType (cwd, "%s", spath);
 
     switch (stype)
     {
@@ -974,7 +975,7 @@ rc_t Start (KDirectory * cwd, const char * src, const char * dst)
             else
             {
                 *pc++ = '\0';
-                rc = KDirectoryOpenDirUpdate (cwd, &ndir, false, spath);
+                rc = KDirectoryOpenDirUpdate (cwd, &ndir, false, "%s", spath);
             }
 
             if (rc == 0)
@@ -990,7 +991,7 @@ rc_t Start (KDirectory * cwd, const char * src, const char * dst)
         {
             KDirectory * ndir;
 
-            rc = KDirectoryOpenDirUpdate (cwd, &ndir, false, spath);
+            rc = KDirectoryOpenDirUpdate (cwd, &ndir, false, "%s", spath);
             if (rc)
                 ;
             else
@@ -1024,7 +1025,7 @@ rc_t Start (KDirectory * cwd, const char * src, const char * dst)
             LOGERR (klogErr, rc, "can't resolve destination");
             return rc;
         }
-        dtype = KDirectoryPathType (cwd, dpath);
+        dtype = KDirectoryPathType (cwd, "%s", dpath);
         switch (dtype)
         {
         default:
@@ -1085,7 +1086,7 @@ rc_t Start (KDirectory * cwd, const char * src, const char * dst)
                 const KDirectory * sdir;
                 KDirectory * ddir;
 
-                rc = KDirectoryOpenDirRead (cwd, &sdir, false, spath);
+                rc = KDirectoryOpenDirRead (cwd, &sdir, false, "%s", spath);
                 if (rc)
                     ;
                 else
@@ -1098,7 +1099,7 @@ rc_t Start (KDirectory * cwd, const char * src, const char * dst)
                     }
                     if (rc == 0)
                     {
-                        rc = KDirectoryOpenDirUpdate (cwd, &ddir, false, dpath);
+                        rc = KDirectoryOpenDirUpdate (cwd, &ddir, false, "%s", dpath);
                         if (rc)
                             ;
                         else
@@ -1134,7 +1135,7 @@ rc_t Start (KDirectory * cwd, const char * src, const char * dst)
                 {
 
                     STSMSG (1, ("opening output directory %s", dpath));
-                    rc = KDirectoryOpenDirUpdate (cwd, &ndir, false, dpath);
+                    rc = KDirectoryOpenDirUpdate (cwd, &ndir, false, "%s", dpath);
                     if (rc)
                         ;
                     else

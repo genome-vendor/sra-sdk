@@ -27,7 +27,7 @@ default: std
 
 USE_GCC_IF_ICC = 1
 
-TOP ?= $(shell ../../build/abspath.sh ../..)
+TOP ?= $(abspath ../..)
 MODULE = tools/vdb-decrypt
 
 include $(TOP)/build/Makefile.env
@@ -92,7 +92,7 @@ VDB_DECRYPT_OBJ = \
 
 VDB_DECRYPT_LIB = \
 	-lkapp \
-	-lncbi-vdb
+	-sncbi-vdb
 
 $(BINDIR)/vdb-decrypt: $(VDB_DECRYPT_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(VDB_DECRYPT_LIB)
@@ -111,7 +111,7 @@ VDB_ENCRYPT_OBJ = \
 
 VDB_ENCRYPT_LIB = \
 	-lkapp \
-	-lncbi-vdb
+	-sncbi-vdb
 
 $(BINDIR)/vdb-encrypt: $(VDB_ENCRYPT_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(VDB_ENCRYPT_LIB)

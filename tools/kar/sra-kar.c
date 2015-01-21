@@ -127,7 +127,7 @@ rc_t run ( srakar_parms *pb )
     else
     {
         const SRATable *tbl;
-        rc = SRAMgrOpenTableRead ( mgr, & tbl, pb -> src_path );
+        rc = SRAMgrOpenTableRead ( mgr, & tbl, "%s", pb -> src_path );
         if ( rc != 0 )
             PLOGERR ( klogInt, (klogInt, rc,
                 "failed to open SRATable '$(spec)'", "spec=%s",
@@ -135,7 +135,7 @@ rc_t run ( srakar_parms *pb )
         else
         {
             rc = KDirectoryCreateFile (pb->dir, &outfile, false, 0446,
-                kcmParents | ( pb->force ? kcmInit : kcmCreate) , pb->dst_path);
+                                       kcmParents | ( pb->force ? kcmInit : kcmCreate) , "%s", pb->dst_path);
             if (rc == 0)
             {
                 const KFile * archive;
@@ -154,7 +154,7 @@ rc_t run ( srakar_parms *pb )
         SRAMgrRelease (mgr);
     }
 /*
-    rc = KDirectoryCreateFile (pb->dir, &outfile, false, 0446, kcmParents | ( pb->force ? kcmInit : kcmCreate) , pb->dst_path);
+    rc = KDirectoryCreateFile (pb->dir, &outfile, false, 0446, kcmParents | ( pb->force ? kcmInit : kcmCreate) , "%s", pb->dst_path);
 
     if (rc == 0)
     {
@@ -166,7 +166,7 @@ rc_t run ( srakar_parms *pb )
         else
         {
             const SRATable *tbl;
-            rc = SRAMgrOpenTableRead ( mgr, & tbl, pb -> src_path );
+            rc = SRAMgrOpenTableRead ( mgr, & tbl, "%s", pb -> src_path );
             if ( rc != 0 )
                 PLOGERR ( klogInt, (klogInt, rc, "failed to open SRATable '$(spec)'", "spec=%s", pb -> src_path ));
             else
@@ -389,7 +389,7 @@ rc_t CC Usage (const Args * args)
             {
                 KPathType kpt;
 
-                kpt = KDirectoryPathType (pwd, pb.dst_path);
+                kpt = KDirectoryPathType (pwd, "%s", pb.dst_path);
 
                 switch (kpt & ~kptAlias)
                 {

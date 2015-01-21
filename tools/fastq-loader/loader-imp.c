@@ -59,7 +59,8 @@ rc_t AcrhiveFASTQ(CommonWriterSettings* G,
                 unsigned seqFiles, 
                 char const *seqFile[], 
                 uint8_t qualityOffset, 
-                const int8_t defaultReadNumbers[])
+                const int8_t defaultReadNumbers[],
+                bool ignoreSpotGroups)
 {
     rc_t rc = 0;
     unsigned i;
@@ -80,9 +81,9 @@ rc_t AcrhiveFASTQ(CommonWriterSettings* G,
     for (i = 0; i < seqFiles; ++i) {
         const ReaderFile *reader;
         if (G->platform == SRA_PLATFORM_PACBIO_SMRT)  
-            rc = FastqReaderFileMake(&reader, dir, seqFile[i], 33, 33 + 93, -1); 
+            rc = FastqReaderFileMake(&reader, dir, seqFile[i], 33, 33 + 93, -1, ignoreSpotGroups); 
         else
-            rc = FastqReaderFileMake(&reader, dir, seqFile[i], qualityOffset, 0, defaultReadNumbers[i]);
+            rc = FastqReaderFileMake(&reader, dir, seqFile[i], qualityOffset, 0, defaultReadNumbers[i], ignoreSpotGroups);
         
         if (rc == 0) 
         {
@@ -139,7 +140,7 @@ rc_t OpenPath(char const path[], KDirectory **dir)
     rc_t rc = KDirectoryNativeDir(&p);
     
     if (rc == 0) {
-        rc = KDirectoryOpenDirUpdate(p, dir, false, path);
+        rc = KDirectoryOpenDirUpdate(p, dir, false, "%s", path);
         KDirectoryRelease(p);
     }
     return rc;
@@ -165,12 +166,19 @@ rc_t ConvertDatabaseToUnmapped(VDatabase* db)
     return rc;
 }
 
-rc_t run(char const progName[], CommonWriterSettings* G, unsigned seqFiles, const char *seqFile[], uint8_t qualityOffset, const int8_t defaultReadNumbers[])
+rc_t run ( char const progName[], 
+           CommonWriterSettings* G, 
+           unsigned seqFiles, 
+           const char *seqFile[], 
+           uint8_t qualityOffset, 
+           const int8_t defaultReadNumbers[],
+           bool ignoreSpotGroups )
 {
     VDBManager *mgr;
     rc_t rc;
     rc_t rc2;
     char const *db_type = "NCBI:align:db:alignment_sorted"; 
+/*    char const *db_type = "NCBI:align:db:unaligned"; */
     
     rc = VDBManagerMakeUpdate(&mgr, NULL);
     if (rc) {
@@ -184,22 +192,22 @@ rc_t run(char const progName[], CommonWriterSettings* G, unsigned seqFiles, cons
             (void)LOGERR (klogErr, rc, "failed to create schema");
         }
         else {
-            (void)(rc = VSchemaAddIncludePath(schema, G->schemaIncludePath));
-            rc = VSchemaParseFile(schema, G->schemaPath);
+            (void)(rc = VSchemaAddIncludePath(schema, "%s", G->schemaIncludePath));
+            rc = VSchemaParseFile(schema, "%s", G->schemaPath);
             if (rc) {
                 (void)PLOGERR(klogErr, (klogErr, rc, "failed to parse schema file $(file)", "file=%s", G->schemaPath));
             }
             else {
                 VDatabase *db;
                 
-                rc = VDBManagerCreateDB(mgr, &db, schema, db_type, kcmInit + kcmMD5, G->outpath);
+                rc = VDBManagerCreateDB(mgr, &db, schema, db_type, kcmInit + kcmMD5, "%s", G->outpath);
                 rc2 = VSchemaRelease(schema);
                 if (rc2)
                     (void)LOGERR(klogWarn, rc2, "Failed to release schema");
                 if (rc == 0)
                     rc = rc2;
                 if (rc == 0) {
-                    rc = AcrhiveFASTQ(G, mgr, db, seqFiles, seqFile, qualityOffset, defaultReadNumbers);
+                    rc = AcrhiveFASTQ(G, mgr, db, seqFiles, seqFile, qualityOffset, defaultReadNumbers, ignoreSpotGroups);
                 }
 
                 if (rc == 0) {
@@ -222,7 +230,7 @@ rc_t run(char const progName[], CommonWriterSettings* G, unsigned seqFiles, cons
                     if (rc == 0) {
                         KDatabase *kdb;
                         
-                        rc = KDBManagerOpenDBUpdate(kmgr, &kdb, G->outpath);
+                        rc = KDBManagerOpenDBUpdate(kmgr, &kdb, "%s", G->outpath);
                         if (rc == 0) {
                             rc = KDatabaseOpenMetadataUpdate(kdb, &meta);
                             KDatabaseRelease(kdb);

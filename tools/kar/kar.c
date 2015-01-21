@@ -363,11 +363,11 @@ static KSRAFileAlignment get_alignment (const char * str)
 static
 int CC sort_cmp (const void ** l, const void ** r, void * data)
 {
-    KDirectory * d;
+/*  KDirectory * d; */
     uint64_t lz, rz;
     rc_t rc;
 
-    d = data;
+/*    d = data; */
 /*     lz = l; */
 /*     rz = r; */
 
@@ -1003,10 +1003,10 @@ rc_t CC list_action (const KDirectory * dir, const char * path, void * _adata)
     }
     if (rc == 0)
     {
-        rc = KDirectoryVAccess (dir, &access, path, NULL);
+        rc = KDirectoryAccess (dir, &access, "%s", path);
         if (rc == 0)
         {
-            rc = KDirectoryVDate (dir, &mtime, path, NULL);
+            rc = KDirectoryDate (dir, &mtime, "%s", path);
 
             if (rc == 0)
             {

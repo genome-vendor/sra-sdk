@@ -26,6 +26,9 @@
 
 
 #include "sam-dump-opts.h"
+#include "perf_log.h"
+
+#include <klib/time.h>
 #include <align/quality-quantizer.h>
 #include <sysalloc.h>
 
@@ -803,6 +806,15 @@ static rc_t gather_flag_options( Args * args, samdump_opts * opts )
     /* do we disable multi-threading */    
     rc = get_bool_option( args, OPT_NO_MT, &opts->no_mt );
     
+    /* forcing to use the legacy code in case of Evidence-Dnb was requested */
+    if ( rc == 0 )
+    {
+        if ( opts->dump_cg_ev_dnb )
+        {
+            opts->force_legacy = true;
+            opts->force_new = false;
+        }
+    }
     return rc;
 }
 
@@ -829,7 +841,7 @@ static rc_t get_str_option( Args * args, const char * name, const char ** s )
 }
 
 
-static rc_t get_int_option( Args * args, const char * name, uint32_t def, uint32_t * value, bool dflt_if_zero )
+static rc_t get_uint32_option( Args * args, const char * name, uint32_t def, uint32_t * value, bool dflt_if_zero )
 {
     const char * s;
     rc_t rc = get_str_option( args, name, &s );
@@ -865,13 +877,14 @@ static rc_t get_int32_options( Args * args, const char * name, int32_t * value, 
         }
         else
         {
-            *used = true;
+            if ( used != NULL )
+                *used = true;
         }
     }
     return rc;
 }
 
-
+/*
 static rc_t get_int64_option( Args * args, const char * name, uint64_t def, uint64_t * value )
 {
     const char * s;
@@ -891,26 +904,26 @@ static rc_t get_int64_option( Args * args, const char * name, uint64_t def, uint
     }
     return rc;
 }
-
+*/
 
 static rc_t gather_int_options( Args * args, samdump_opts * opts )
 {
-    rc_t rc = get_int_option( args, OPT_MATE_GAP, 10000, &opts->mape_gap_cache_limit, true );
+    rc_t rc = get_uint32_option( args, OPT_MATE_GAP, 10000, &opts->mape_gap_cache_limit, true );
     if ( rc == 0 )
-        rc = get_int64_option( args, OPT_TEST_ROWS, 0, &opts->test_rows );
-    if ( rc == 0 )
-        rc = get_int_option( args, OPT_OUTBUFSIZE, 1024 * 32, &opts->output_buffer_size, false );
+        rc = get_uint32_option( args, OPT_OUTBUFSIZE, 1024 * 32, &opts->output_buffer_size, false );
+
     if ( rc == 0 )
     {
         uint32_t cs;
-        rc = get_int_option( args, OPT_CURSOR_CACHE, CURSOR_CACHE_SIZE, &cs, false );
+        rc = get_uint32_option( args, OPT_CURSOR_CACHE, CURSOR_CACHE_SIZE, &cs, false );
         if ( rc == 0 )
             opts->cursor_cache_size = ( size_t )cs;
     }
+
     if ( rc == 0 )
     {
         uint32_t mode;
-        rc = get_int_option( args, OPT_DUMP_MODE, 0, &mode, true );
+        rc = get_uint32_option( args, OPT_DUMP_MODE, 0, &mode, true );
         if ( rc == 0 )
         {
             switch( mode )
@@ -921,10 +934,13 @@ static rc_t gather_int_options( Args * args, samdump_opts * opts )
             }
         }
     }
+
     if ( rc == 0 )
-    {
         rc = get_int32_options( args, OPT_MIN_MAPQ, &opts->min_mapq, &opts->use_min_mapq );
-    }
+
+    if ( rc == 0 )
+        rc = get_uint32_option( args, OPT_RNA_SPLICEL, 0, &opts->rna_splice_level, true );
+
     return rc;
 }
 
@@ -1058,8 +1074,51 @@ static rc_t gather_string_options( Args * args, samdump_opts * opts )
         if ( opts->cigar_test == NULL )
         {
             rc = RC( rcExe, rcNoTarg, rcValidating, rcMemory, rcExhausted );
-            (void)LOGERR( klogErr, rc, "error storing CIGAR-TEST" );
+            (void)LOGERR( klogErr, rc, "error storing CIGAR-TEST into sam-dump-options" );
         }
+    }
+
+    rc = get_str_option( args, OPT_HDR_FILE, &s );
+    if ( rc == 0 && s != NULL )
+    {
+        opts->header_file = string_dup_measure( s, NULL );
+        if ( opts->header_file == NULL )
+        {
+            rc = RC( rcExe, rcNoTarg, rcValidating, rcMemory, rcExhausted );
+            (void)LOGERR( klogErr, rc, "error storing HDR-FILE into sam-dump-options" );
+        }
+        else
+            opts->header_mode = hm_file;
+    }
+
+    opts->perf_log = NULL;
+
+#if _DEBUGGING
+    rc = get_str_option( args, OPT_TIMING, &s );
+    if ( rc == 0 && s != NULL )
+    {
+        opts->timing_file = string_dup_measure( s, NULL );
+        if ( opts->timing_file == NULL )
+        {
+            rc = RC( rcExe, rcNoTarg, rcValidating, rcMemory, rcExhausted );
+            (void)LOGERR( klogErr, rc, "error storing timing-FILE into sam-dump-options" );
+        }
+        else
+            opts->perf_log = make_perf_log( opts->timing_file, "sam-dump" );
+    }
+#endif
+
+    rc = get_str_option( args, OPT_RNA_SPLICE_LOG, &s );
+    if ( rc == 0 && s != NULL )
+    {
+        opts->rna_splice_log_file = string_dup_measure( s, NULL );
+        if ( opts->rna_splice_log_file == NULL )
+        {
+            rc = RC( rcExe, rcNoTarg, rcValidating, rcMemory, rcExhausted );
+            (void)LOGERR( klogErr, rc, "error storing rna-splice-log-FILE into sam-dump-options" );
+        }
+        else
+            opts->rna_splice_log = make_rna_splice_log( opts->rna_splice_log_file, "sam-dump" );
     }
 
     return rc;
@@ -1163,6 +1222,7 @@ void report_options( const samdump_opts * opts )
         case hm_none   : KOutMsg( "header-mode           : dont print\n" ); break;
         case hm_recalc : KOutMsg( "header-mode           : recalculate\n" ); break;
         case hm_dump   : KOutMsg( "header-mode           : print meta-data\n" ); break;
+        case hm_file   : KOutMsg( "header-mode           : take from '%s'\n", opts->header_file ); break;
         default        : KOutMsg( "header-mode           : unknown\n" ); break;
     }
 
@@ -1262,7 +1322,6 @@ void report_options( const samdump_opts * opts )
     }
 
     KOutMsg( "mate-gap-cache-limit  : %u\n",  opts->mape_gap_cache_limit );
-    KOutMsg( "test-row limit        : %u\n",  opts->test_rows );
     KOutMsg( "outputfile            : %s\n",  opts->outputfile );
     KOutMsg( "outputbuffer-size     : %u\n",  opts->output_buffer_size );
     KOutMsg( "cursor-cache-size     : %u\n",  opts->cursor_cache_size );
@@ -1272,8 +1331,18 @@ void report_options( const samdump_opts * opts )
     KOutMsg( "use min-mapq          : %s\n",  opts->use_min_mapq ? "YES" : "NO" );
     KOutMsg( "min-mapq              : %i\n",  opts->min_mapq );
     KOutMsg( "rna-splicing          : %s\n",  opts->rna_splicing ? "YES" : "NO" );
+    KOutMsg( "rna-splice-level      : %u\n",  opts->rna_splice_level );
+    KOutMsg( "rna-splice-log        : %s\n",  opts->rna_splice_log_file );
 
     KOutMsg( "multithreading        : %s\n",  opts->no_mt ? "NO" : "YES" );    
+
+#if _DEBUGGING
+    if ( opts->timing_file != NULL )
+        KOutMsg( "timing-file           : '%s'\n",  opts->timing_file );
+    else
+        KOutMsg( "timing-file           : NONE\n" );
+#endif
+
 }
 
 
@@ -1289,6 +1358,21 @@ void release_options( samdump_opts * opts )
         free( (void*)opts->qual_quant );
     if( opts->outputfile != NULL )
         free( (void*)opts->outputfile );
+    if( opts->header_file != NULL )
+        free( (void*)opts->header_file );
+    if( opts->timing_file != NULL )
+        free( (void*)opts->timing_file );
+    if( opts->rna_splice_log_file != NULL )
+        free( (void*)opts->rna_splice_log_file );
+
+#if _DEBUGGING
+    if ( opts->perf_log != NULL )
+        free_perf_log( opts->perf_log );
+#endif
+
+    if ( opts->rna_splice_log != NULL )
+        free_rna_splice_log( opts->rna_splice_log );
+
     VNamelistRelease( opts->hdr_comments );
     VNamelistRelease( opts->input_files );
     VectorWhack ( &opts->mp_dist, release_range_wrapper, NULL );
@@ -1335,15 +1419,6 @@ bool is_this_alignment_requested( const samdump_opts * opts, const char *refname
             }
         }
     }
-    return res;
-}
-
-
-bool test_limit_reached( const samdump_opts * opts, uint64_t rows_so_far )
-{
-    bool res = false;
-    if ( opts->test_rows > 0 )
-        res = ( rows_so_far >= opts->test_rows );
     return res;
 }
 
@@ -1411,29 +1486,58 @@ rc_t dump_name_legacy( const samdump_opts * opts, const char * name, size_t name
     return rc;
 }
 
+#define USE_KWRT_HANDLER 1
 
 rc_t dump_quality( const samdump_opts * opts, char const *quality, uint32_t qual_len, bool reverse )
 {
+    uint32_t i;
     rc_t rc = 0;
     bool quantize = ( opts->qual_quant != NULL );
-    uint32_t i;
+
+    size_t size = 0;
+    char buffer [ 4096 ];
+#if USE_KWRT_HANDLER
+    size_t num_writ;
+    KWrtHandler * kout_msg_handler = KOutHandlerGet ();
+    assert ( kout_msg_handler != NULL );
+#endif
     if ( reverse )
     {
         if ( quantize )
         {
-            for ( i = 0; i < qual_len && rc == 0; ++i )
+            for ( i = qual_len; i > 0; )
             {
-                uint32_t qual = quality[ qual_len - i - 1 ];
-                char newValue = ( opts->qual_quant_matrix[ qual ] + 33 );
-                rc = KOutMsg( "%c", newValue );
+                uint32_t qual = quality[ -- i ];
+                buffer [ size ] = ( opts->qual_quant_matrix[ qual ] + 33 );
+                if ( ++ size == sizeof buffer )
+                {
+#if USE_KWRT_HANDLER
+                    rc = ( * kout_msg_handler -> writer ) ( kout_msg_handler -> data, buffer, size, & num_writ );
+#else
+                    rc = KOutMsg( "%.*s", ( uint32_t ) size, buffer );
+#endif
+                    if ( rc != 0 )
+                        break;
+                    size = 0;
+                }
             }
         }
         else
         {
-            for ( i = 0; i < qual_len && rc == 0; ++i )
+            for ( i = qual_len; i > 0; )
             {
-                char qual = quality[ qual_len - i - 1 ] + 33;
-                rc = KOutMsg( "%c", qual );
+                buffer [ size ] = quality[ -- i ] + 33;
+                if ( ++ size == sizeof buffer )
+                {
+#if USE_KWRT_HANDLER
+                    rc = ( * kout_msg_handler -> writer ) ( kout_msg_handler -> data, buffer, size, & num_writ );
+#else
+                    rc = KOutMsg( "%.*s", ( uint32_t ) size, buffer );
+#endif
+                    if ( rc != 0 )
+                        break;
+                    size = 0;
+                }
             }
         }
     }
@@ -1441,11 +1545,21 @@ rc_t dump_quality( const samdump_opts * opts, char const *quality, uint32_t qual
     {
         if ( quantize )
         {
-            for ( i = 0; i < qual_len && rc == 0; ++i )
+            for ( i = 0; i < qual_len; ++i )
             {
                 uint32_t qual = quality[ i ];
-                char newValue = opts->qual_quant_matrix[ qual ] + 33;
-                rc = KOutMsg( "%c", newValue );
+                buffer [ size ] = opts->qual_quant_matrix[ qual ] + 33;
+                if ( ++ size == sizeof buffer )
+                {
+#if USE_KWRT_HANDLER
+                    rc = ( * kout_msg_handler -> writer ) ( kout_msg_handler -> data, buffer, size, & num_writ );
+#else
+                    rc = KOutMsg( "%.*s", ( uint32_t ) size, buffer );
+#endif
+                    if ( rc != 0 )
+                        break;
+                    size = 0;
+                }
             }
 
         }
@@ -1453,10 +1567,29 @@ rc_t dump_quality( const samdump_opts * opts, char const *quality, uint32_t qual
         {
             for ( i = 0; i < qual_len && rc == 0; ++i )
             {
-                char qual = quality[ i ] + 33;
-                rc = KOutMsg( "%c", qual );
+                buffer [ size ] = quality[ i ] + 33;
+                if ( ++ size == sizeof buffer )
+                {
+#if USE_KWRT_HANDLER
+                    rc = ( * kout_msg_handler -> writer ) ( kout_msg_handler -> data, buffer, size, & num_writ );
+#else
+                    rc = KOutMsg( "%.*s", ( uint32_t ) size, buffer );
+#endif
+                    if ( rc != 0 )
+                        break;
+                    size = 0;
+                }
             }
         }
+    }
+
+    if ( rc == 0 && size != 0 )
+    {
+#if USE_KWRT_HANDLER
+        rc = ( * kout_msg_handler -> writer ) ( kout_msg_handler -> data, buffer, size, & num_writ );
+#else
+        rc = KOutMsg( "%.*s", ( uint32_t ) size, buffer );
+#endif
     }
     return rc;
 }
@@ -1464,9 +1597,13 @@ rc_t dump_quality( const samdump_opts * opts, char const *quality, uint32_t qual
 
 rc_t dump_quality_33( const samdump_opts * opts, char const *quality, uint32_t qual_len, bool reverse )
 {
+    uint32_t i;
     rc_t rc = 0;
     bool quantize = ( opts->qual_quant != NULL );
-    uint32_t i;
+
+    size_t size = 0;
+    char buffer [ 4096 ];
+
     if ( reverse )
     {
         if ( quantize )
@@ -1474,16 +1611,28 @@ rc_t dump_quality_33( const samdump_opts * opts, char const *quality, uint32_t q
             for ( i = 0; i < qual_len && rc == 0; ++i )
             {
                 uint32_t qual = quality[ qual_len - i - 1 ] - 33;
-                char newValue = ( opts->qual_quant_matrix[ qual ] + 33 );
-                rc = KOutMsg( "%c", newValue );
+                buffer [ size ] = ( opts->qual_quant_matrix[ qual ] + 33 );
+                if ( ++ size == sizeof buffer )
+                {
+                    rc = KOutMsg( "%.*s", ( uint32_t ) size, buffer );
+                    if ( rc != 0 )
+                        break;
+                    size = 0;
+                }
             }
         }
         else
         {
             for ( i = 0; i < qual_len && rc == 0; ++i )
             {
-                char qual = quality[ qual_len - i - 1 ];
-                rc = KOutMsg( "%c", qual );
+                buffer [ size ] = quality[ qual_len - i - 1 ];
+                if ( ++ size == sizeof buffer )
+                {
+                    rc = KOutMsg( "%.*s", ( uint32_t ) size, buffer );
+                    if ( rc != 0 )
+                        break;
+                    size = 0;
+                }
             }
         }
     }
@@ -1494,8 +1643,14 @@ rc_t dump_quality_33( const samdump_opts * opts, char const *quality, uint32_t q
             for ( i = 0; i < qual_len && rc == 0; ++i )
             {
                 uint32_t qual = quality[ i ] - 33;
-                char newValue = opts->qual_quant_matrix[ qual ] + 33;
-                rc = KOutMsg( "%c", newValue );
+                buffer [ size ] = opts->qual_quant_matrix[ qual ] + 33;
+                if ( ++ size == sizeof buffer )
+                {
+                    rc = KOutMsg( "%.*s", ( uint32_t ) size, buffer );
+                    if ( rc != 0 )
+                        break;
+                    size = 0;
+                }
             }
 
         }
@@ -1504,7 +1659,9 @@ rc_t dump_quality_33( const samdump_opts * opts, char const *quality, uint32_t q
             rc = KOutMsg( "%.*s", qual_len, quality );
         }
     }
+
+    if ( rc == 0 && size != 0 )
+        rc = KOutMsg( "%.*s", ( uint32_t ) size, buffer );
+
     return rc;
 }
-
-

@@ -25,25 +25,21 @@
 */
  
 %{ 
+    #include <sysalloc.h>   
     #include <ctype.h>
     
     #include <klib/rc.h>
+    #include <klib/log.h>
 
-	#include "fastq-parse.h"
-	#include "fastq-tokens.h"    
-	
+    #include "fastq-parse.h"
+    #include "fastq-tokens.h"    
+    
     #define YYSTYPE FASTQToken
 
     /* code to populate token with internal values */
-    #define YY_USER_ACTION              \
-        yylval -> tokenText		= yytext;	\
-        yylval -> tokenLength	= yyleng;	\
-        yylval -> line_no		= yylineno;	\
-        yylval -> column_no		= yyextra -> column; \
-        yyextra -> column += yyleng; \
-        yyextra -> length += yyleng; \
-        yyextra -> lastToken = yylval; 
-
+	static void ConsumeToken(FASTQToken* token, FASTQParseBlock* pb);
+    #define YY_USER_ACTION ConsumeToken(yylval, yyextra);
+	
     #define ENDLINE \
         yyextra -> column=1;\
         return fqENDLINE;
@@ -53,20 +49,9 @@
 
     #define ECHO
 
-    static bool IsDecList(const char*, size_t*, int*);
-
-    #define CHECK_FOR_DECLIST                               \
-        int token;                                          \
-        size_t firstNumLen = yylval -> tokenLength;         \
-        if (IsDecList(yytext, & firstNumLen, & token))      \
-        {                                                   \
-            yyextra -> column -= (yyleng - firstNumLen);    \
-            yyextra -> length -= (yyleng - firstNumLen);    \
-            yylval -> tokenLength   = firstNumLen;          \
-            BEGIN DECLIST;                                  \
-            yyless(firstNumLen);                            \
-            return token;                                   \
-        }
+    static void FASTQ_fatal_error(yyconst char* msg);
+    #define YY_FATAL_ERROR(msg) FASTQ_fatal_error(msg)
+    
 %}
 
 %option never-interactive nounistd yylineno reentrant bison-bridge stack noyywrap
@@ -86,11 +71,10 @@
 %x IN_QUALITY
 %x INLINE_SEQUENCE
 %x INLINE_QUALITY
-%x DECLIST
 
 ws          [ \t]+
 digits      [0-9]+
-alphanum    [A-Za-z0-9]+
+alphanum    [A-Za-z0-9\-]+
 eol         (\r\n|\r|\n)
 
 /* there are more: =ACMGRSVTWYHKDBN. plus lowercase */
@@ -98,8 +82,7 @@ base [ACGTacgtNn.]
 cskey [ACGTacgt]
 color   [0-3.]
 
-asc33qual   [\x0E-\x1F \x21-\x7E]+
-asc64qual   [\x40-\x7E]+
+ascqual   [\x0E-\x1F \x21-\x7F]+
 
 %%
 
@@ -110,23 +93,26 @@ asc64qual   [\x40-\x7E]+
 
 <INITIAL,TAG_LINE>
 {
+    :{digits}:{digits}:{digits}:{digits}                    { return fqCOORDS; }
+    [SDE]RR{digits}\.{digits}   { return fqRUNDOTSPOT; } 
     {digits}                    { return fqNUMBER; }
     {alphanum}                  { return fqALPHANUM; }
     {ws}                        { return fqWS; }
+    ^{base}+/{eol}              { return fqBASESEQ; }
+    ^{cskey}{color}+/{eol}      { return fqCOLORSEQ; }
     .                           { return yytext[0]; }
 }
 
-<TAG_LINE>[ \t]*{eol}           { BEGIN IN_SEQUENCE; ENDLINE; }
+<TAG_LINE>[ \t]*{eol}           { BEGIN IN_SEQUENCE; ENDLINE; } 
 
 <IN_SEQUENCE>
 {
     ^{base}+/{eol}              { BEGIN 0; return fqBASESEQ; }
     ^{cskey}{color}+/{eol}      { BEGIN 0; return fqCOLORSEQ; }
-    ^{asc64qual}/{eol}          { CHECK_FOR_DECLIST; BEGIN 0; return fqASC64QUAL; }
-    ^{asc33qual}/{eol}          { CHECK_FOR_DECLIST; BEGIN 0; return fqASC33QUAL; }
+    ^{ascqual}/{eol}            { BEGIN 0; return fqASCQUAL; }
     ^.*$                        { BEGIN 0; return fqUNRECOGNIZED; }
 }
-
+  
 <INLINE_SEQUENCE>
 {
     {base}+                     { BEGIN 0; return fqBASESEQ; }
@@ -139,32 +125,27 @@ asc64qual   [\x40-\x7E]+
     {eol}                       { BEGIN IN_QUALITY; ENDLINE }
 }
 
-<IN_QUALITY,INLINE_QUALITY,DECLIST>
+<IN_QUALITY,INLINE_QUALITY>
 {
     {ws}                        { } 
-    {digits}                    { BEGIN DECLIST; return fqNUMBER; }
 }
 
 <IN_QUALITY>
 {
-    ^{asc64qual}/{eol}          { CHECK_FOR_DECLIST; return fqASC64QUAL; }
-    ^{asc33qual}/{eol}          { CHECK_FOR_DECLIST; return fqASC33QUAL; }
-    {eol}                       { BEGIN 0; ENDLINE; }
+    ^{ascqual}/{eol}            { return fqASCQUAL; }
+    {eol}                       {   /* if read was split across several lines, expect the same number of lines in quality */
+                                    if (yyextra->expectedQualityLines <= 1) 
+                                        BEGIN 0; 
+                                    else 
+                                        --yyextra->expectedQualityLines;
+                                    ENDLINE; 
+                                }
     .                           { return yytext[0]; }
 }
 
 <INLINE_QUALITY>
 {
-    {digits}/{eol}              { BEGIN DECLIST; return fqNUMBER; }
-    {asc64qual}/{eol}           { CHECK_FOR_DECLIST; return fqASC64QUAL; }
-    {asc33qual}/{eol}           { CHECK_FOR_DECLIST; return fqASC33QUAL; }
-    {eol}                       { BEGIN 0; ENDLINE; }
-    .                           { return yytext[0]; }
-}
-
-<DECLIST>
-{
-    {digits}/{eol}              { return fqNUMBER; }
+    {ascqual}/{eol}             { return fqASCQUAL; }
     {eol}                       { BEGIN 0; ENDLINE; }
     .                           { return yytext[0]; }
 }
@@ -175,30 +156,35 @@ asc64qual   [\x40-\x7E]+
 
 rc_t CC FASTQScan_yylex_init(FASTQParseBlock* sb, bool debug)
 {
-	if (yylex_init_extra(sb, &sb->scanner) != 0)
-	{
-		return RC ( rcKFG, rcMgr, rcParsing, rcMemory, rcExhausted );
-	}		
+    if (yylex_init_extra(sb, &sb->scanner) != 0)
+    {
+        return RC ( rcApp, rcFile, rcParsing, rcMemory, rcExhausted );
+    }       
 
-	yyset_debug(debug ? 1 : 0, sb->scanner);
+    sb->length = 0;
+    sb->lastToken = NULL;
+    sb->record = NULL;
+    sb->column = 1;
+     
+    sb->expectedQualityLines = 0;
+    
+    yyset_debug(debug ? 1 : 0, sb->scanner);
 
     yy_push_state(INITIAL, sb->scanner);
-
-    sb->column = 1;
-
-	return 0;
+    
+    return 0;
 }
 
 void CC FASTQScan_yylex_destroy(FASTQParseBlock* sb)
 {
-	if (sb->scanner)
-	{
-		yylex_destroy(sb->scanner);
-	}		
-	sb->scanner=0;
+    if (sb->scanner)
+    {
+        yylex_destroy(sb->scanner);
+    }       
+    sb->scanner=0;
 }
 
-void CC FASTQScan_inline_sequence(FASTQParseBlock* pb)
+void CC FASTQScan_inline_sequence(FASTQParseBlock* pb) 
 {
     yy_pop_state(pb->scanner);
     yy_push_state(INLINE_SEQUENCE, pb->scanner);
@@ -210,85 +196,42 @@ void CC FASTQScan_inline_quality(FASTQParseBlock* pb)
     yy_push_state(INLINE_QUALITY, pb->scanner);
 }
 
-/* 
- * True if the token appears to be a comma/whitespace separated list of signed decimals, each no longer than 3 decimal positions.
- */
-bool IsDecList(const char* token, size_t* size, int* p_newToken)
-{
-    size_t firstTokenSize = 0;
-    size_t curNumberSize = 0;
-    int newToken;
-    bool inFirstToken = true;
-    size_t i;
-    for (i=0; i < *size; ++i)
-    {
-        char ch=token[i];
-        if (strchr("0123456789, -+", ch) == NULL)
-        {
-            return false;
-        }
-        if (inFirstToken)
-        {
-            if (i == 0)
-            {   /* decide on the first character */ 
-                if (isdigit(ch))
-                {
-                    newToken = fqNUMBER;
-                    firstTokenSize = 1;
-                    curNumberSize = 1;
-                }
-                else if (ch == '-' || ch == '+')
-                {
-                    newToken = ch;
-                    firstTokenSize = 1;
-                    inFirstToken = false;
-                }
-                else
-                {
-                    return false;
-                }
-            }
-            else if (isdigit(ch))
-            {   /* keep on tracking the first token's size */
-                ++firstTokenSize;
-                ++curNumberSize;
-                if (curNumberSize > 3)
-                {
-                    return false;
-                }
-            }
-            else
-            {   /* end of the first token */ 
-                curNumberSize = 0;
-                inFirstToken = false;
-            }
-        }
-        else if (isdigit(ch))
-        {   /* keep on tracking the current number's size */
-            ++curNumberSize;
-            if (curNumberSize > 3)
-            {
-                return false;
-            }
-        }
-        else
-        {
-            curNumberSize = 0;
-        }
-    }
-    *size = firstTokenSize;
-    *p_newToken = newToken;
-    return true;
-}
-
 void CC FASTQ_unlex(FASTQParseBlock* pb, FASTQToken* token)
 {
     size_t i;
     struct yyguts_t* yyg = (struct yyguts_t*)pb->scanner;
     for (i = 0; i < token->tokenLength; ++i)
     {
-        yyunput(token->tokenText[token->tokenLength-1-i], yyg->yytext_r, pb->scanner);
+        yyunput(TokenTextPtr(pb, token)[token->tokenLength - 1 - i], yyg->yytext_r, pb->scanner);
     }
     yyextra -> column -= token->tokenLength; 
     yyextra -> length -= token->tokenLength; 
+	KDataBufferResize( & pb->record->source, KDataBufferBytes( & pb->record->source ) - token->tokenLength );
+}
+
+void FASTQ_fatal_error(yyconst char* msg)
+{
+    rc_t rc = RC ( rcApp, rcFile, rcParsing, rcError, rcUnexpected );
+    if (strcmp(msg, "input buffer overflow, can't enlarge buffer because scanner uses REJECT") == 0)
+        pLogErr(klogErr, rc, "line is too long (maximum line length = $(B) bytes)", "B=%d", YY_BUF_SIZE);
+    else
+        LogErr(klogErr, rc, msg);
+    exit(rc);  
+}
+
+void ConsumeToken(FASTQToken* token, FASTQParseBlock* pb)
+{
+    struct yyguts_t* yyg = (struct yyguts_t*)pb->scanner;
+	
+	token -> tokenStart = KDataBufferBytes( & pb->record->source );
+	token -> tokenLength   = yyleng;   
+	token -> line_no       = yylineno; 
+	token -> column_no     = pb -> column; 
+	
+	KDataBufferResize( & pb->record->source, KDataBufferBytes( & pb->record->source ) + token->tokenLength );
+	strncpy((char*)TokenTextPtr(pb, token), yytext, token->tokenLength);
+    
+	pb -> column += token->tokenLength; 
+	pb -> length += token->tokenLength; 
+	pb -> lastToken = token; 
 }

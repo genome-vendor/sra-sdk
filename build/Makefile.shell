@@ -22,6 +22,10 @@
 #
 # ===========================================================================
 
+CONFIG_FILE = $(TOP)/build/Makefile.config
+ifeq (no, $(shell test -f $(CONFIG_FILE) && echo yes || echo no))
+    $(error "*** File '$(CONFIG_FILE)' is missing. Please run $(TOP)/build/configure")
+endif
 
 # determine OS
 UNAME = $(shell uname -s)
@@ -95,13 +99,13 @@ REMOTE_ARCH = $(ARCH)
 # pick up dependencies from object directory
 ifdef SRCDIR
 	include $(wildcard *.d)
-else
+endif
 
 # determine SRCDIR
 ifdef MODULE
-	SRCDIR=$(TOP)/$(MODULE)
+    SRCDIR=$(TOP)/$(MODULE)
 else
-	SRCDIR=$(TOP)
+    SRCDIR=$(TOP)
 endif
 
 # set COMP, LNKG and BUILD
@@ -111,14 +115,29 @@ BUILD = $(shell test -f $(TOP)/build/BUILD && mv $(TOP)/build/BUILD $(TOP)/build
 TOOLSET := $(COMP)
 
 ifdef USE_GCC_IF_ICC
-ifeq (icc,$(COMP))
-COMP = gcc
-endif
-ifeq (clang,$(COMP))
-COMP = gcc
-endif
+    ifeq (icc,$(COMP))
+        COMP = gcc
+    endif
+    ifeq (clang,$(COMP))
+        COMP = gcc
+    endif
 endif
 
+RHOSTS = $(shell (test -d $(TOP)/rhosts && test -n "$$(ls $(TOP)/rhosts/)") && \
+                  ls $(TOP)/rhosts/ | xargs -n1 basename | grep -v CVS | grep -v example | grep -v "~")
+
+# detect RHOST
+HAS_RHOST = $(shell test -f $(TOP)/build/RHOST.$(HOST_OS) && echo yes || echo no)
+ifeq (yes,$(HAS_RHOST))
+    include $(TOP)/build/RHOST.$(HOST_OS)
+	ifeq (,$(RPORT))
+		RPORT = 20000
+	endif
+	BUILD_OS = r$(OS)
+	REMOTE_ARCH = $(ARCH)
+	ifeq (,$(LHOME))
+	    LHOME=$(HOME)
+	endif
 endif
 
 # set OUTDIR
@@ -132,8 +151,14 @@ ifeq (,$(ROUTDIR))
 	ROUTDIR = $(RHOME)
 endif
 
-# OS flavor is normally OS
-OSFLAV = $(OS)
+ifeq (yes,$(HAS_RHOST))
+	# set remote flags for calling win-cc.sh and ld.sh)
+	RFLAGS=--rhome "$(RHOME)" --lhome "$(LHOME)" --rhost "$(RHOST)" --rport $(RPORT) --proxy_tool "$(PROXY_TOOL)" \
+ --loutdir "$(OUTDIR)" --routdir "$(ROUTDIR)"
+	# RWORKDIR can be redefined by individual makefiles as needed
+	RWORKDIR = . 
+	RUN_REMOTELY = $(TOP)/build/run_remotely.sh $(PROXY_TOOL) $(RHOST) $(RPORT) $(RHOME) $(LHOME) $(RWORKDIR) $(ROUTDIR) $(OUTDIR)
+endif
 
 # determine BITS
 ifeq (x86_64, $(ARCH))
@@ -148,3 +173,4 @@ endif
 ifeq (sparc32, $(ARCH))
 	BITS = 32
 endif
+

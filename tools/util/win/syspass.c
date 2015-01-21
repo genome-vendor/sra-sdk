@@ -24,7 +24,7 @@
 *
 */
 
-#include "syspass-priv.h" /* get_pass */
+#include "../syspass-priv.h" /* get_pass */
 
 #include <klib/rc.h>
 

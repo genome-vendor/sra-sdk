@@ -328,7 +328,7 @@ bool matcher_src_has_type( const matcher* self, const VSchema * s,
     if ( col->type_cast == NULL ) return res; /* column has no typecast */ 
 
     /* we use the destination-type-cast */
-    if ( VSchemaResolveTypedecl ( s, &td, col->type_cast->dst->name ) == 0 )
+    if ( VSchemaResolveTypedecl ( s, &td, "%s", col->type_cast->dst->name ) == 0 )
         res = match_type_with_id_vector( s, &td, id_vector );
 /*
     if ( res )
@@ -433,7 +433,7 @@ static rc_t matcher_append_type( const char *name, const bool dflt,
         rc = VectorAppend( v, NULL, t );
         if ( rc == 0 )
         {
-            rc = VSchemaResolveTypedecl( schema, &(t->type_decl), name );
+            rc = VSchemaResolveTypedecl( schema, &(t->type_decl), "%s", name );
             if ( rc == 0 )
             {
                 rc = VSchemaDescribeTypedecl( schema, &(t->type_desc), &(t->type_decl) );
@@ -766,7 +766,7 @@ rc_t matcher_execute( matcher* self, const p_matcher_input in )
     rc = helper_parse_schema( in->manager, &dflt_schema, in->add_schemas );
     if ( rc != 0 ) return rc;
 
-    rc = VDBManagerOpenTableRead( in->manager, &src_table, dflt_schema, in->src_path );
+    rc = VDBManagerOpenTableRead( in->manager, &src_table, dflt_schema, "%s", in->src_path );
     if ( rc == 0 )
     {
         const VSchema * src_schema;
@@ -777,7 +777,7 @@ rc_t matcher_execute( matcher* self, const p_matcher_input in )
             if ( rc == 0 )
             {
                 if ( in->legacy_schema != NULL )
-                    rc = VSchemaParseFile ( dflt_schema, in->legacy_schema );
+                    rc = VSchemaParseFile ( dflt_schema, "%s", in->legacy_schema );
                 if ( rc == 0 )
                 {
                     VTable * dst_table;
@@ -788,7 +788,7 @@ rc_t matcher_execute( matcher* self, const p_matcher_input in )
                         dst_schema = dflt_schema;
 
                     if ( in->force_unlock )
-                        VDBManagerUnlock ( in->manager, in->dst_path );
+                        VDBManagerUnlock ( in->manager, "%s", in->dst_path );
 
                     if ( in->force_kcmInit )
                         cmode |= kcmInit;
@@ -796,7 +796,7 @@ rc_t matcher_execute( matcher* self, const p_matcher_input in )
                         cmode |= kcmCreate;
 
                     rc = VDBManagerCreateTable( in->manager, &dst_table, 
-                                dst_schema, in->dst_tabname, cmode, in->dst_path );
+                                                dst_schema, in->dst_tabname, cmode, "%s", in->dst_path );
 
                     if ( rc == 0 )
                     {
@@ -809,7 +809,7 @@ rc_t matcher_execute( matcher* self, const p_matcher_input in )
                         }
                         VTableRelease( dst_table );
                         if ( !(in->force_kcmInit) )
-                            KDirectoryRemove ( in->dir, true, in->dst_path );
+                            KDirectoryRemove ( in->dir, true, "%s", in->dst_path );
                     }
                 }
             }

@@ -25,7 +25,7 @@
 
 default: std
 
-TOP ?= $(shell ../../build/abspath.sh ../..)
+TOP ?= $(abspath ../..)
 MODULE = tools/vdb-dump
 
 include $(TOP)/build/Makefile.env
@@ -85,7 +85,6 @@ clean: stdclean
 #  vdb dump tool
 #
 VDB_DUMP_SRC = \
-	vdb-dump-num-gen \
 	vdb-dump-context \
 	vdb-dump-coldefs \
 	vdb-dump-tools \
@@ -95,16 +94,18 @@ VDB_DUMP_SRC = \
 	vdb-dump-formats \
 	vdb-dump-redir \
 	vdb-dump-fastq \
+	vdb-dump-bin \
+	vdb_info \
 	vdb-dump
 
 VDB_DUMP_OBJ = \
 	$(addsuffix .$(OBJX),$(VDB_DUMP_SRC))
 
 VDB_DUMP_LIB = \
-	-lkapp \
-	-lncbi-vdb \
-	-lxml2 \
+	-skapp \
+	-sncbi-vdb \
 	-lm
 
 $(BINDIR)/vdb-dump: $(VDB_DUMP_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(VDB_DUMP_LIB)
+

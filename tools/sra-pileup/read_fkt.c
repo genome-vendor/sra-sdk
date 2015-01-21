@@ -684,7 +684,7 @@ bool namelist_contains( const KNamelist *names, const char * a_name )
 
 rc_t add_column( const VCursor * cursor, const char *colname, uint32_t * idx )
 {
-    rc_t rc = VCursorAddColumn( cursor, idx, colname );
+    rc_t rc = VCursorAddColumn( cursor, idx, "%s", colname );
     if ( rc != 0 )
     {
         (void)PLOGERR( klogInt, ( klogInt, rc, "VCursorAddColumn( $(cn) ) failed", "cn=%s", colname ) );
@@ -707,7 +707,7 @@ void add_opt_column( const VCursor * cursor, const KNamelist *names, const char 
     bool available = namelist_contains( names, col_name_without_type( colname ) );
     if ( available )
     {
-        rc_t rc = VCursorAddColumn( cursor, idx, colname );
+        rc_t rc = VCursorAddColumn( cursor, idx, "%s", colname );
         if ( rc != 0 )
             *idx = COL_NOT_AVAILABLE;
     }

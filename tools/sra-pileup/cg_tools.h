@@ -36,6 +36,8 @@ extern "C" {
 
 #include <klib/rc.h>
 #include <insdc/sra.h>
+#include <insdc/sra.h>
+#include <align/reference.h>
 
 #define MAX_CG_CIGAR_LEN ( ( 11 * 35 ) + 1 )
 #define MAX_GC_LEN ( ( 11 * 3 ) + 1 )
@@ -98,27 +100,38 @@ int32_t ExplodeCIGAR( CigOps dst[], uint32_t len, char const cigar[], uint32_t c
 uint32_t CombineCIGAR( char dst[], CigOps const seqOp[], uint32_t seq_len,
                        uint32_t refPos, CigOps const refOp[], uint32_t ref_len );
 
+#define RNA_SPLICE_UNKNOWN 0
+#define RNA_SPLICE_FWD 1
+#define RNA_SPLICE_REV 2
 
 typedef struct rna_splice_candidate
 {
-    uint32_t offset;
+    uint32_t ref_offset;
     uint32_t len;
     uint32_t op_idx;
-    uint32_t matched;
+    uint32_t matched;   /* 0..unknown, 1..fwd, 2..rev */
 } rna_splice_candidate;
 
 
-#define MAX_RNA_SPLICE_CANDIDATES 10
+#define MAX_RNA_SPLICE_CANDIDATES 20
 
 typedef struct rna_splice_candidates
 {
     rna_splice_candidate candidates[ MAX_RNA_SPLICE_CANDIDATES ];
-    uint32_t count, fwd_matched, rev_matched;
+    CigOps * cigops;
+    uint32_t count, fwd_matched, rev_matched, cigops_len;
+    int32_t n_cigops;
 } rna_splice_candidates;
 
 
 rc_t discover_rna_splicing_candidates( uint32_t cigar_len, const char * cigar, uint32_t min_len, rna_splice_candidates * candidates );
 
-rc_t change_rna_splicing_cigar( uint32_t cigar_len, char * cigar, rna_splice_candidates * candidates );
+rc_t check_rna_splicing_candidates_against_ref( struct ReferenceObj const * ref_obj,
+                                                uint32_t splice_level,
+                                                INSDC_coord_zero pos,
+                                                rna_splice_candidates * candidates );
+
+rc_t change_rna_splicing_cigar( uint32_t cigar_len, char * cigar, rna_splice_candidates * candidates, uint32_t * NM_adjustment );
+rc_t cg_canonical_print_cigar( const char * cigar, size_t cigar_len);
 
 #endif

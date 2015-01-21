@@ -122,14 +122,14 @@ rc_t parse_FILE(const KXMLNode* FILE, DataBlockFile* file)
 
 /* <!-- custom pipeline attributes, not from schema! */
     } else if( (rc = KXMLNodeReadAttrCStr(FILE, "upload_id", &file->cc_xml, NULL)) != 0 &&
-               !(GetRCObject(rc) == rcAttr && GetRCState(rc) == rcNotFound) ) {
+               !(GetRCObject(rc) == (enum RCObject)rcAttr && GetRCState(rc) == rcNotFound) ) {
         PLOGERR(klogErr, (klogErr, rc, "FILE $(file) @upload_id", PLOG_S(file), file->filename));
     } else if( file->cc_xml != NULL && file->cc_xml[0] == '\0' ) {
         rc = RC(rcExe, rcStorage, rcConstructing, rcTag, rcInvalid);
         PLOGERR(klogErr, (klogErr, rc, "FILE $(file) @upload_id", PLOG_S(file), file->filename));
 
     } else if( (rc = KXMLNodeReadAttrCStr(FILE, "cc_path", &file->cc_path, NULL)) != 0 &&
-                !(GetRCObject(rc) == rcAttr && GetRCState(rc) == rcNotFound) ) {
+                !(GetRCObject(rc) == (enum RCObject)rcAttr && GetRCState(rc) == rcNotFound) ) {
         PLOGERR(klogErr, (klogErr, rc, "FILE $(file) @cc_path", PLOG_S(file), file->filename));
     } else if( ((file->cc_path == NULL || file->cc_path[0] == '\0') && file->cc_xml != NULL) || 
                 (file->cc_path != NULL && file->cc_xml == NULL) ) {
@@ -138,20 +138,20 @@ rc_t parse_FILE(const KXMLNode* FILE, DataBlockFile* file)
 /* --> */
 
     } else if( (rc = KXMLNodeReadAttrCStr(FILE, "quality_scoring_system", &quality_scoring_system, NULL)) != 0 &&
-                !(GetRCObject(rc) == rcAttr && GetRCState(rc) == rcNotFound) ) {
+                !(GetRCObject(rc) == (enum RCObject)rcAttr && GetRCState(rc) == rcNotFound) ) {
         PLOGERR(klogErr, (klogErr, rc, "FILE $(file) @quality_scoring_system", PLOG_S(file), file->filename));
     } else if( (rc = KXMLNodeReadAttrCStr(FILE, "quality_encoding", &quality_encoding, NULL)) != 0 &&
-                !(GetRCObject(rc) == rcAttr && GetRCState(rc) == rcNotFound) ) {
+                !(GetRCObject(rc) == (enum RCObject)rcAttr && GetRCState(rc) == rcNotFound) ) {
         PLOGERR(klogErr, (klogErr, rc, "FILE $(file) @quality_encoding", PLOG_S(file), file->filename));
     } else if( (rc = KXMLNodeReadAttrCStr(FILE, "ascii_offset", &ascii_offset, NULL)) != 0 &&
-                !(GetRCObject(rc) == rcAttr && GetRCState(rc) == rcNotFound) ) {
+                !(GetRCObject(rc) == (enum RCObject)rcAttr && GetRCState(rc) == rcNotFound) ) {
         PLOGERR(klogErr, (klogErr, rc, "FILE $(file) @ascii_offset", PLOG_S(file), file->filename));
 
     } else if( (rc = KXMLNodeReadAttrCStr(FILE, "checksum_method", &checksum_method, NULL)) != 0 &&
-                !(GetRCObject(rc) == rcAttr && GetRCState(rc) == rcNotFound) ) {
+                !(GetRCObject(rc) == (enum RCObject)rcAttr && GetRCState(rc) == rcNotFound) ) {
         PLOGERR(klogErr, (klogErr, rc, "FILE $(file) @checksum_method", PLOG_S(file), file->filename));
     } else if( (rc = KXMLNodeReadAttrCStr(FILE, "checksum", &checksum, NULL)) != 0 &&
-                !(GetRCObject(rc) == rcAttr && GetRCState(rc) == rcNotFound) ) {
+                !(GetRCObject(rc) == (enum RCObject)rcAttr && GetRCState(rc) == rcNotFound) ) {
         PLOGERR(klogErr, (klogErr, rc, "FILE $(file) @checksum", PLOG_S(file), file->filename));
     } else if( checksum_method != NULL && strcasecmp(checksum_method, "MD5") != 0 ) {
         rc = RC(rcExe, rcStorage, rcConstructing, rcData, rcInvalid);
@@ -270,12 +270,12 @@ rc_t parse_DATA_BLOCK(const KXMLNode* DATA_BLOCK, DataBlock* datablock)
     const KXMLNodeset* FILES;
 
     rc = KXMLNodeReadAttrCStr(DATA_BLOCK, "name", &datablock->name, NULL);
-    if( rc != 0 && !(GetRCObject(rc) == rcAttr && GetRCState(rc) == rcNotFound) ) {
+    if( rc != 0 && !(GetRCObject(rc) == (enum RCObject)rcAttr && GetRCState(rc) == rcNotFound) ) {
         LOGERR(klogErr, rc, "DATA_BLOCK @name");
         return rc;
     }
     rc = KXMLNodeReadAttrCStr(DATA_BLOCK, "member_name", &datablock->member_name, NULL);
-    if( rc != 0 && !(GetRCObject(rc) == rcAttr && GetRCState(rc) == rcNotFound) ) {
+    if( rc != 0 && !(GetRCObject(rc) == (enum RCObject)rcAttr && GetRCState(rc) == rcNotFound) ) {
         LOGERR(klogErr, rc, "DATA_BLOCK @member_name");
         return rc;
     }
@@ -284,19 +284,19 @@ rc_t parse_DATA_BLOCK(const KXMLNode* DATA_BLOCK, DataBlock* datablock)
     }
     datablock->serial = ~0; /* file w/o serial pushed to end of list */
     rc = KXMLNodeReadAttrAsU32(DATA_BLOCK, "serial", &datablock->serial);
-    if( rc != 0 && !(GetRCObject(rc) == rcAttr && GetRCState(rc) == rcNotFound) ) {
+    if( rc != 0 && !(GetRCObject(rc) == (enum RCObject)rcAttr && GetRCState(rc) == rcNotFound) ) {
         LOGERR(klogErr, rc, "DATA_BLOCK @serial");
         return rc;
     }
     datablock->sector = -1;
     rc = KXMLNodeReadAttrAsU64(DATA_BLOCK, "sector", (uint64_t*)&datablock->sector);
-    if( rc != 0 && !(GetRCObject(rc) == rcAttr && GetRCState(rc) == rcNotFound) ) {
+    if( rc != 0 && !(GetRCObject(rc) == (enum RCObject)rcAttr && GetRCState(rc) == rcNotFound) ) {
         LOGERR(klogErr, rc, "DATA_BLOCK @sector");
         return rc;
     }
     datablock->region = -1;
     rc = KXMLNodeReadAttrAsU64(DATA_BLOCK, "region", (uint64_t*)&datablock->region);
-    if( rc != 0 && !(GetRCObject(rc) == rcAttr && GetRCState(rc) == rcNotFound) ) {
+    if( rc != 0 && !(GetRCObject(rc) == (enum RCObject)rcAttr && GetRCState(rc) == rcNotFound) ) {
         LOGERR(klogErr, rc, "DATA_BLOCK @region");
         return rc;
     }

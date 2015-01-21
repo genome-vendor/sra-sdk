@@ -25,13 +25,14 @@
 
 default: std
 
-TOP ?= $(shell ../../build/abspath.sh ../..)
+TOP ?= $(abspath ../..)
 MODULE = tools/sra-sort
 
 include $(TOP)/build/Makefile.env
 include $(SRCDIR)/Makefile.$(COMP)
 
 INT_TOOLS = \
+	dump-blob-boundaries
 
 EXT_TOOLS = \
 
@@ -122,9 +123,23 @@ SRA_SORT_OBJ = \
 
 SRA_SORT_LIB = \
 	-lkapp \
-	-lncbi-wvdb \
-	-lxml2 \
+	-sncbi-wvdb \
 	-lm
 
 $(BINDIR)/sra-sort: $(SRA_SORT_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(SRA_SORT_LIB)
+
+#-------------------------------------------------------------------------------
+# dump-blob-boundaries
+#
+DBB_SRC = \
+	dump-blob-boundaries
+
+DBB_OBJ = \
+	$(addsuffix .$(OBJX),$(DBB_SRC))
+
+DBB_LIB = \
+	-lncbi-vdb \
+
+$(BINDIR)/dump-blob-boundaries: $(DBB_OBJ)
+	$(LD) --exe -o $@ $^ $(DBB_LIB)

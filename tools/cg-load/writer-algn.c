@@ -30,6 +30,7 @@
 #include <kfs/file.h>
 #include <insdc/insdc.h>
 #include <align/dna-reverse-cmpl.h>
+#include <align/align.h>
 
 #include "defs.h"
 #include "writer-algn.h"
@@ -47,6 +48,7 @@ typedef struct CGWriterAlgn_match_struct {
     INSDC_coord_len read_len;
     bool has_ref_offset[CG_READS_SPOT_LEN];
     int32_t ref_offset[CG_READS_SPOT_LEN];
+    uint8_t ref_offset_type[CG_READS_SPOT_LEN];
     bool has_mismatch[CG_READS_SPOT_LEN];
     char mismatch[CG_READS_SPOT_LEN];
     int64_t ref_id;
@@ -116,6 +118,8 @@ rc_t CGWriterAlgn_Make(const CGWriterAlgn** cself, TMappingsData** data, VDataba
                 self->algn[i].has_ref_offset.buffer = self->match[i].has_ref_offset;
                 
                 self->algn[i].ref_offset.buffer = self->match[i].ref_offset;
+                
+                self->algn[i].ref_offset_type.buffer = self->match[i].ref_offset_type;
                 
                 self->algn[i].ref_id.buffer = &self->match[i].ref_id;
                 
@@ -218,7 +222,7 @@ rc_t CGWriterAlgn_Save(CGWriterAlgn *const self,
         }
         for(g = 0; g < CG_READS_NGAPS; g++) {
             if( map->gap[g] > 0 ) {
-                cigar[g * 2 + 1] = (map->gap[g] << 4) | 2; /* 'xN' */
+                cigar[g * 2 + 1] = (map->gap[g] << 4) | 3; /* 'xN' */
             } else if( map->gap[g] < 0 ) {
                 cigar[g * 2 + 1] = (-map->gap[g] << 4) | 9; /* 'xB' */
             } else {
@@ -227,7 +231,7 @@ rc_t CGWriterAlgn_Save(CGWriterAlgn *const self,
         }
         algn->ploidy = 0;
         if( (rc = ReferenceMgr_Compress(self->rmgr, ewrefmgr_cmp_Binary,
-                    map->chr, map->offset, read, read_len, cigar, 7, 0, NULL, 0, 0, NULL, 0, algn)) != 0 ) {
+                    map->chr, map->offset, read, read_len, cigar, 7, 0, NULL, 0, 0, NULL, 0, NCBI_align_ro_complete_genomics, algn)) != 0 ) {
             PLOGERR(klogErr, (klogErr, rc, "compression failed $(id) $(o)",
                     PLOG_2(PLOG_S(id),PLOG_I32(o)), map->chr, map->offset));
         }
@@ -519,14 +523,16 @@ rc_t CGWriterAlgn_Write_int(CGWriterAlgn *const self, TReadsData *const read)
             unsigned j;
             INSDC_coord_len reflen = 35;
             ReferenceSeq const *rseq;
+            bool shouldUnmap = false;
             
             memset(&self->match[i], 0, sizeof(self->match[i]));
             
-            rc = ReferenceMgr_GetSeq(self->rmgr, &rseq, refname);
+            rc = ReferenceMgr_GetSeq(self->rmgr, &rseq, refname, &shouldUnmap);
             if (rc) {
                 (void)PLOGERR(klogErr, (klogErr, rc, "Failed accessing Reference '$(ref)'", "ref=%s", refname));
                 break;
             }
+            assert(shouldUnmap == false);
             rc = ReferenceSeq_Get1stRow(rseq, &self->match[i].ref_id); /* if the above worked, this is infallible */
             assert(rc == 0);
             ReferenceSeq_Release(rseq);

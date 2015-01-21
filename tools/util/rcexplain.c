@@ -104,8 +104,10 @@ rc_t CC KMain ( int argc, char *argv [] )
             if (rc)
                 break;
             
-            if (pcount == 0)
-                rc = MiniUsage(args);
+            if (pcount == 0) {
+                MiniUsage(args);
+                rc = RC(rcExe, rcNoTarg, rcAllocating, rcParam, rcInvalid);
+            }
             else
             {
                 const char * pc;

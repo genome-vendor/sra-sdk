@@ -151,7 +151,7 @@ rc_t parse_header(SRF_context *ctx, ZTR_Context *ztr_ctx, const uint8_t *data, s
 
     while (rc == 0 && !ZTR_BufferIsEmpty(ztr_ctx)) {
         if((rc = ZTR_ParseBlock(ztr_ctx, &ztr_raw)) != 0) {
-            if(GetRCState(rc) == rcInsufficient && GetRCObject(rc) == rcData)
+            if(GetRCState(rc) == rcInsufficient && GetRCObject(rc) == (enum RCObject)rcData)
                 rc = ZTR_BufferGetRemainder(ztr_ctx, &fe->defered, &fe->defered_len);
             break;
         }

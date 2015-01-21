@@ -139,7 +139,7 @@ rc_t CC KMain ( int argc, char *argv [] )
                         LogErr ( klogInt, rc, "failed to open VDB manager" );
                     else
                     {
-                        rc = VDBManagerUnlock ( mgr, target );
+                        rc = VDBManagerUnlock ( mgr, "%s", target );
                         if ( rc == 0 )
                             pLogMsg ( klogInfo, "unlocked '$(target)'", "target=%s", target );
                         else switch ( GetRCState ( rc ) )

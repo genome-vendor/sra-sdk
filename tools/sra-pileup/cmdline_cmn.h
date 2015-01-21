@@ -71,6 +71,7 @@ typedef struct common_options
     const char * output_file;
     const char * input_file;
     const char * schema_file;
+    const char * timing_file;
 } common_options;
 
 
@@ -86,6 +87,15 @@ rc_t init_ref_regions( BSTree * regions, Args * args );
 rc_t foreach_argument( Args * args, KDirectory *dir, bool div_by_spotgrp, bool * empty,
     rc_t ( CC * on_argument ) ( const char * path, const char * spot_group, void * data ), void * data );
 
+
+typedef struct pileup_col_ids
+{
+    uint32_t idx_quality;
+    uint32_t idx_ref_orientation;
+    uint32_t idx_read_filter;
+    uint32_t idx_template_len;
+} pileup_col_ids;
+
     
 typedef struct prepare_ctx
 {
@@ -93,6 +103,15 @@ typedef struct prepare_ctx
     PlacementSetIterator *plset_iter;
     const VDatabase *db;
     const VTable *seq_tab;
+
+    const VCursor *prim_cur;
+    const VCursor *sec_cur;
+    const VCursor *ev_cur;
+
+    pileup_col_ids *prim_cur_ids;
+    pileup_col_ids *sec_cur_ids;
+    pileup_col_ids *ev_cur_ids;
+
     const ReferenceList *reflist;
     const ReferenceObj *refobj;
     const char * spot_group;
@@ -103,7 +122,7 @@ typedef struct prepare_ctx
     bool use_evidence_alignments;
     void * data;
     const char *path;
-    rc_t ( CC * on_section ) ( struct prepare_ctx * ctx, uint32_t start, uint32_t end );
+    rc_t ( CC * on_section ) ( struct prepare_ctx * ctx, const struct reference_range * range );
 } prepare_ctx;
 
 

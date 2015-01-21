@@ -106,14 +106,14 @@ static rc_t copy_metadata_child ( const KMDataNode *src_root, KMDataNode *dst_ro
     KMDataNode *dnode;
     KNamelist *names;
 
-    rc_t rc = KMDataNodeOpenNodeRead ( src_root, & snode, node_path );
+    rc_t rc = KMDataNodeOpenNodeRead ( src_root, & snode, "%s", node_path );
     DISP_RC( rc, "copy_metadata_child:KMDataNodeOpenNodeRead(src) failed" );
     if ( rc != 0 ) return rc;
 
     if ( show_meta )
         KOutMsg( "copy child-node: %s\n", node_path );
 
-    rc = KMDataNodeOpenNodeUpdate ( dst_root, & dnode, node_path );
+    rc = KMDataNodeOpenNodeUpdate ( dst_root, & dnode, "%s", node_path );
     DISP_RC( rc, "copy_metadata_child:KMDataNodeOpenNodeUpdate(dst) failed" );
     if ( rc == 0 )
     {
@@ -415,7 +415,7 @@ static rc_t enter_vdbcopy_node( KMetadata *dst_meta, const bool show_meta )
         if ( rc == 0 )
         {
             KMDataNode *event_node;
-            rc = KMDataNodeOpenNodeUpdate ( hist_node, &event_node, event_name );
+            rc = KMDataNodeOpenNodeUpdate ( hist_node, &event_node, "%s", event_name );
             DISP_RC( rc, "enter_vdbcopy_node:KMDataNodeOpenNodeUpdate('EVENT_NR') failed" );
             if ( rc == 0 )
             {

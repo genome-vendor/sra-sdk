@@ -27,7 +27,7 @@ default: std
 
 USE_GCC_IF_ICC = 1
 
-TOP ?= $(shell ../../build/abspath.sh ../..)
+TOP ?= $(abspath ../..)
 MODULE = tools/nenctool
 
 include $(TOP)/build/Makefile.env
@@ -37,9 +37,17 @@ INT_TOOLS =
 EXT_TOOLS = \
 	nenctool
 
+ifeq ($(OS),linux)
+EXT_TOOLS += \
+	nenctest
+endif
+
 ALL_TOOLS = \
 	$(INT_TOOLS) \
 	$(EXT_TOOLS)
+
+
+
 
 #-------------------------------------------------------------------------------
 # outer targets
@@ -88,7 +96,7 @@ NENCTOOL_OBJ = \
 NENCTOOL_LIB = \
 	-lkapp \
 	-lvfs \
-	-lkurl \
+	-lkns \
 	-lkrypto \
 	-lkfg \
 	-lkfs \
@@ -97,6 +105,7 @@ NENCTOOL_LIB = \
 
 $(BINDIR)/nenctool: $(NENCTOOL_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(NENCTOOL_LIB)
+
 
 #-------------------------------------------------------------------------------
 # nenctest
@@ -112,7 +121,7 @@ NENCTEST_OBJ = \
 NENCTEST_LIB = \
 	-lkapp \
 	-lvfs \
-	-lkurl \
+	-lkns \
 	-lkryptotest \
 	-lkfg \
 	-lkfs \
@@ -121,3 +130,4 @@ NENCTEST_LIB = \
 
 $(BINDIR)/nenctest: $(NENCTEST_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(NENCTEST_LIB)
+

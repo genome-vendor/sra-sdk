@@ -50,8 +50,8 @@ case "$LD" in
 g*)
     source "${0%exe.sh}gcc.sh"
     ;;
-i*)
-    source "${0%exe.sh}icc.sh"
+c*)
+    source "${0%exe.sh}clang.sh"
     ;;
 *)
     echo "$SELF_NAME: unrecognized ld tool - '$LD'"
@@ -319,12 +319,7 @@ fi
 # add in xml
 if [ $HAVE_XML -ne 0 ]
 then
-#    if [ "$NCBI" != "" ] && [ -f "$NCBI/libxml/lib/libxml2-static.a" ]
-#    then
-#        CMD="$CMD -L$NCBI/libxml/lib -lxml2-static"
-#    else
-        CMD="$CMD -lxml2"
-#    fi
+    CMD="$CMD -lxml2"
 fi
 
 # add in math library

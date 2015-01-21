@@ -174,3 +174,88 @@ rc_t AlignmentWhack(Alignment * const self, bool const commit)
     free(self);
     return rc ? rc : rc2;
 }
+
+static size_t LayoutStorage(void *const buffer, unsigned const readlen,
+                            void const **const p_ref_offset,
+                            void const **const p_ref_offset_type,
+                            void const **const p_mismatch,
+                            void const **const p_has_ref_offset,
+                            void const **const p_has_mismatch
+                            )
+{
+    int32_t *const ref_offset = buffer;
+    uint8_t *const ref_offset_type = (uint8_t *)&ref_offset[readlen];
+    char *const mismatch = (char *)&ref_offset_type[readlen];
+    bool *const has_ref_offset = (bool *)&mismatch[readlen];
+    bool *const has_mismatch   = (bool *)&has_ref_offset[readlen];
+    void *const endp = &has_mismatch[readlen];
+
+    if (p_ref_offset     ) *p_ref_offset      = ref_offset;
+    if (p_ref_offset_type) *p_ref_offset_type = ref_offset_type;
+    if (p_mismatch       ) *p_mismatch        = mismatch;
+    if (p_has_ref_offset ) *p_has_ref_offset  = has_ref_offset;
+    if (p_has_mismatch   ) *p_has_mismatch    = has_mismatch;
+    
+    return (char const *)endp - (char const *)buffer;
+}
+
+rc_t AlignmentRecordInit(AlignmentRecord *const self, unsigned const readlen)
+{
+    KDataBuffer buffer = self->buffer;
+
+    buffer.elem_bits = 8;
+    {
+        size_t const need = LayoutStorage(0, readlen, 0, 0, 0, 0, 0);
+        rc_t const rc = KDataBufferResize(&buffer, need);
+        if (rc) return rc;
+    }
+    memset(self, 0, sizeof(*self));
+    self->buffer = buffer;
+    
+    self->data.seq_read_id.buffer = &self->read_id;
+    self->data.seq_read_id.elements = 1;
+    self->data.ref_id.buffer = &self->ref_id;
+    self->data.ref_id.elements = 1;
+    if (G.expectUnsorted) {
+        self->data.ref_start.buffer = &self->ref_start;
+        self->data.ref_start.elements = 1;
+    }
+    else {
+        self->data.global_ref_start.buffer = &self->global_ref_start;
+        self->data.global_ref_start.elements = 1;
+    }
+    self->data.ref_orientation.buffer = &self->ref_orientation;
+    self->data.ref_orientation.elements = 1;
+    self->data.mapq.buffer = &self->mapq;
+    self->data.mapq.elements = 1;
+    self->data.tmp_key_id.buffer = &self->tmp_key_id;
+    self->data.tmp_key_id.elements = 1;
+    
+    self->data.read_start.buffer = &self->read_start;
+    self->data.read_start.elements = 1;
+    self->data.read_len.buffer = &self->read_len;
+    self->data.read_len.elements = 1;
+    
+    self->data.mate_ref_orientation.buffer = &self->mate_ref_orientation;
+    self->data.mate_ref_orientation.elements = 1;
+    self->data.mate_ref_id.buffer = &self->mate_ref_id;
+    self->data.mate_ref_id.elements = 1;
+    self->data.mate_ref_pos.buffer = &self->mate_ref_pos;
+    self->data.mate_ref_pos.elements = 1;
+    self->data.mate_align_id.buffer = &self->mate_align_id;
+    self->data.mate_align_id.elements = 1;
+    self->data.template_len.buffer = &self->template_len;
+    self->data.template_len.elements = 1;
+
+    LayoutStorage(buffer.base, readlen,
+                  &self->data.ref_offset.buffer,
+                  &self->data.ref_offset_type.buffer,
+                  &self->data.mismatch.buffer,
+                  &self->data.has_ref_offset.buffer,
+                  &self->data.has_mismatch.buffer);
+
+    self->data.has_mismatch.elements = readlen;
+    self->data.has_ref_offset.elements = readlen;
+    
+    return 0;
+}

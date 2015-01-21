@@ -774,7 +774,7 @@ rc_t run ( sradump_parms *pb )
         else
         {
             const SRATable *tbl;
-            rc = SRAMgrOpenTableRead ( mgr, & tbl, pb -> src_path );
+            rc = SRAMgrOpenTableRead ( mgr, & tbl, "%s", pb -> src_path );
             if ( rc != 0 )
                 PLOGERR ( klogInt,
                           ( klogInt, rc, "failed to open SRATable '$(spec)'", "spec=%s", pb -> src_path));

@@ -25,12 +25,13 @@
 
 default: std
 
-TOP ?= $(shell ../../build/abspath.sh ../..)
+TOP ?= $(abspath ../..)
 MODULE = tools/sra-dbcc
 
 include $(TOP)/build/Makefile.env
 
 INT_TOOLS = \
+
 
 EXT_TOOLS = \
 	sra-dbcc
@@ -98,3 +99,4 @@ sra-dbcc.vers.h: sra-dbcc.vers
 
 $(BINDIR)/sra-dbcc: $(SRA_DBCC_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(SRA_DBCC_LIB)
+

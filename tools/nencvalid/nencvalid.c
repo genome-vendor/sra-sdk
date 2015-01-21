@@ -279,7 +279,7 @@ rc_t HandleOneFile (VFSManager * mgr, const char * path, bool decrypt_bin_compat
     rc_t rc;
     VPath * vpath;
 
-    rc = VFSManagerMakePath (mgr, &vpath, path);
+    rc = VFSManagerMakePath (mgr, &vpath, "%s", path);
     if (rc)
         PLOGERR (klogErr,
                  (klogErr, rc, "failed to parse path "

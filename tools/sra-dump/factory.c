@@ -376,9 +376,9 @@ rc_t SRASplitterFiler_GetCurrFile(const SRASplitterFile** out_file)
                     if( g_filer->path[i][0] != '\0' ) {
                         char* ndir = NULL;
                         if( (rc = SRASplitterFiler_FixFSName(g_filer->path[i], &ndir)) == 0 ) {
-                            if( (rc = KDirectoryCreateDir(sub, 0775, kcmCreate, ndir)) == 0 ||
-                                (GetRCObject(rc) == rcDirectory && GetRCState(rc) == rcExists) ) {
-                                if( (rc = KDirectoryOpenDirUpdate(sub, &file->dir, true, ndir)) == 0 ) {
+                            if( (rc = KDirectoryCreateDir(sub, 0775, kcmCreate, "%s", ndir)) == 0 ||
+                                (GetRCObject(rc) == ( enum RCObject )rcDirectory && GetRCState(rc) == rcExists) ) {
+                                if( (rc = KDirectoryOpenDirUpdate(sub, &file->dir, true, "%s", ndir)) == 0 ) {
                                     KDirectoryRelease(i == 0 ? NULL : sub);
                                     sub = file->dir;
                                 }
@@ -483,7 +483,7 @@ rc_t SRASplitterFactory_FilerInit(bool to_stdout, bool gzip, bool bzip2, bool ke
                 va_list args;
                 va_start(args, path);
                 if( (rc = KDirectoryVCreateDir(g_filer->dir, 0775, kcmCreate | kcmParents, path, args)) == 0 ||
-                    (GetRCObject(rc) == rcDirectory && GetRCState(rc) == rcExists) ) {
+                    (GetRCObject(rc) == ( enum RCObject )rcDirectory && GetRCState(rc) == rcExists) ) {
                     KDirectory* sub = NULL;
                     va_end(args);
                     va_start(args, path);
@@ -752,6 +752,7 @@ rc_t SRASplitter_AddSpot( const SRASplitter * cself, spotid_t spot, readmask_t *
                         }
                     }
                     /* leave reads only allowed by previous object in chain */
+#ifndef EUGNES_LOOP_FIX
                     for ( j = 0, k = 0; k < nreads_max; k++ )
                     {
                         local_readmask[ k ] &= readmask[ k ];
@@ -761,6 +762,7 @@ rc_t SRASplitter_AddSpot( const SRASplitter * cself, spotid_t spot, readmask_t *
                         }
                     }
                     if ( j > 0 )
+#endif
                     {
                         rc = SRASplitter_FindNextSplitter( self, keys[ i ].key );
                         if ( rc == 0 )
@@ -790,6 +792,7 @@ rc_t SRASplitter_AddSpot( const SRASplitter * cself, spotid_t spot, readmask_t *
             {
                 int32_t j, k;
                 /* leave reads only allowed by previous object in chain */
+#ifndef EUGNES_LOOP_FIX
                 for( j = 0, k = 0; k < nreads_max; k++ )
                 {
                     readmask[ k ] &= new_readmask[ k ];
@@ -799,6 +802,7 @@ rc_t SRASplitter_AddSpot( const SRASplitter * cself, spotid_t spot, readmask_t *
                     }
                 }
                 if ( j > 0 )
+#endif
                 {
                     rc = SRASplitter_FindNextSplitter( self, key );
                     if ( rc == 0 )

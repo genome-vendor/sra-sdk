@@ -160,7 +160,7 @@ rc_t CC Usage ( const Args * args )
         }
 
         if ( rc == 0 )
-            rc = KOutMsg ( "Options:\n" );
+            rc = KOutMsg ( "\n" );
 
         if ( rc == 0 )
         {
@@ -196,15 +196,6 @@ typedef enum tool_main_function
 } tool_main_function;
 
 
-typedef enum repo_select
-{
-    trs_user,
-    trs_site,
-    trs_remote,
-    trs_unknown
-} repo_select;
-
-
 typedef struct tool_options
 {
     uint64_t max_remove;
@@ -214,8 +205,10 @@ typedef struct tool_options
 
     uint32_t path_count;
     tool_main_function main_function;
-    repo_select repo_select;
-    bool detailed, remove_dirs;
+    KRepCategory category;
+
+    bool detailed;
+    bool remove_dirs;
 } tool_options;
 
 
@@ -277,9 +270,9 @@ static bool string_cmp_1( const char * s1, const char * s2 )
 }
 
 
-static repo_select get_repo_select( const Args * args, const char * name )
+static KRepCategory get_repo_select( const Args * args, const char * name )
 {
-    repo_select res = trs_unknown;
+    KRepCategory res = krepBadCategory;
     uint32_t count;
     rc_t rc = ArgsOptionCount( args, name, &count );
     if ( rc != 0 )
@@ -294,11 +287,11 @@ static repo_select get_repo_select( const Args * args, const char * name )
         if ( rc == 0 && s != NULL )
         {
             if ( string_cmp_1 ( s, "user" ) )
-                res = trs_user;
+                res = krepUserCategory;
             else if ( string_cmp_1 ( s, "site" ) )
-                res = trs_site;
+                res = krepSiteCategory;
             else if ( string_cmp_1 ( s, "rem" ) )
-                res = trs_remote;
+                res = krepRemoteCategory;
         }
     }
     return res;
@@ -412,14 +405,14 @@ static rc_t get_tool_options( Args * args, tool_options * options )
         options->main_function = tf_clear;
     else
     {
-        options->repo_select = get_repo_select( args, OPTION_ENABLE );
-        if ( options->repo_select != trs_unknown )
+        options->category = get_repo_select( args, OPTION_ENABLE );
+        if ( options->category != krepBadCategory )
             options->main_function = tf_enable;
 
-        if ( options->repo_select == trs_unknown )
+        if ( options->category == krepBadCategory )
         {
-            options->repo_select = get_repo_select( args, OPTION_DISABLE );
-            if ( options->repo_select != trs_unknown )
+            options->category = get_repo_select( args, OPTION_DISABLE );
+            if ( options->category != krepBadCategory )
                 options->main_function = tf_disable;
         }
     }
@@ -435,6 +428,9 @@ static rc_t get_tool_options( Args * args, tool_options * options )
 typedef struct visit_ctx
 {
     KDirectory * dir;
+    KConfig * cfg;
+    const KRepositoryMgr * repo_mgr;
+
     const tool_options * options;
     const char * path;
     void * data;
@@ -453,7 +449,7 @@ static rc_t foreach_path_obj( visit_ctx * ctx, on_path_t func )
     if ( ctx->path_type == kptDir )
     {
         KNamelist * path_objects;
-        rc = KDirectoryList ( ctx->dir, &path_objects, NULL, NULL, ctx->path );
+        rc = KDirectoryList ( ctx->dir, &path_objects, NULL, NULL, "%s", ctx->path );
         if ( rc != 0 )
         {
             PLOGERR( klogErr, ( klogErr, rc,
@@ -613,7 +609,7 @@ static rc_t on_report_cache_file( visit_ctx * obj )
             }
             else
             {
-                used_size = file_size * ( completeness / 100 );
+                used_size = file_size * (uint64_t)( completeness / 100 );
                 data->used_file_size += used_size;
             }
         }
@@ -715,31 +711,72 @@ static rc_t perform_report( visit_ctx * octx )
 
 
 /***************************************************************************************************************/
-typedef rc_t ( * CC get_repo_cb )( const KRepositoryMgr *self, KRepositoryVector *repos );
+typedef rc_t ( CC * get_repo_cb )( const KRepositoryMgr *self, KRepositoryVector *repos );
+
+const char MAIN_CAT_USER[] = "user";
+const char MAIN_CAT_SITE[] = "site";
+const char MAIN_CAT_REMOTE[] = "remote";
+
+const char SUB_CAT_UNKNOWN[] = "unknown";
+const char SUB_CAT_MAIN[] = "main";
+const char SUB_CAT_AUX[]  = "aux";
+const char SUB_CAT_PROT[] = "protected";
 
 
-static rc_t report_repo( const tool_options * options, const KRepositoryMgr *repo_mgr, get_repo_cb getter, const char * hint )
+static rc_t report_repo( visit_ctx * octx, KRepCategory category )
 {
-    rc_t rc;
+    rc_t rc, rc1;
     KRepositoryVector repos;
+    const char * hint;
+
     VectorInit ( &repos, 0, 5 );
-    rc = getter ( repo_mgr, &repos );
+
+    switch ( category )
+    {
+        case krepUserCategory   : hint = MAIN_CAT_USER;
+                                   rc = KRepositoryMgrUserRepositories( octx->repo_mgr, &repos );
+                                   break;
+
+        case krepSiteCategory   : hint = MAIN_CAT_SITE;
+                                   rc = KRepositoryMgrSiteRepositories( octx->repo_mgr, &repos );
+                                   break;
+
+        case krepRemoteCategory : hint = MAIN_CAT_REMOTE;
+                                   rc = KRepositoryMgrRemoteRepositories( octx->repo_mgr, &repos );
+                                   break;
+    }
+
     if ( rc != 0 )
     {
-        PLOGERR( klogErr, ( klogErr, rc,
-                 "KRepositoryMgr<$(hint)>repositories() failed in $(func)", "hint=%s,func=%s", hint, __func__ ) );
+        if ( rc == SILENT_RC( rcKFG, rcNode, rcOpening, rcPath, rcNotFound ) )
+        {
+            KOutMsg("\n%s:\n", hint);
+            KOutMsg("\tnot found in configuration\n");
+            rc = 0;
+        }
+        else
+        {
+            PLOGERR( klogErr, ( klogErr, rc,
+                 "KRepositoryMgr<$(hint)>repositories() failed in $(func)",
+                 "hint=%s,func=%s", hint, __func__ ) );
+        }
     }
     else
     {
         uint32_t idx;
-        KOutMsg( "\n%s:\n", hint );
+        bool disabled = KRepositoryMgrCategoryDisabled ( octx->repo_mgr, category );
+
+        rc = KOutMsg( "\n%s:\n", hint );
+        if ( rc == 0 && disabled )
+            rc = KOutMsg( "\tglobally disabled\n" );
+
         for ( idx = 0; idx < VectorLength( &repos ) && rc == 0; ++idx )
         {
             const KRepository *repo = VectorGet( &repos, idx );
             if ( repo != NULL )
             {
                 char repo_name[ 1024 ];
-                rc = KRepositoryName ( repo, repo_name, sizeof repo_name, NULL );
+                rc = KRepositoryDisplayName ( repo, repo_name, sizeof repo_name, NULL );
                 if ( rc != 0 )
                 {
                     PLOGERR( klogErr, ( klogErr, rc,
@@ -747,38 +784,50 @@ static rc_t report_repo( const tool_options * options, const KRepositoryMgr *rep
                 }
                 else
                 {
+                    KRepSubCategory sub_cat = KRepositorySubCategory ( repo );
                     bool disabled = KRepositoryDisabled ( repo );
                     bool cache_enabled = KRepositoryCacheEnabled ( repo );
-                    rc = KOutMsg( "\t%s: %s, cache-%s",
-                            repo_name,
+                    const char * sub_cat_ptr = SUB_CAT_UNKNOWN;
+                    switch( sub_cat )
+                    {
+                        case krepMainSubCategory        : sub_cat_ptr = SUB_CAT_MAIN; break;
+                        case krepAuxSubCategory         : sub_cat_ptr = SUB_CAT_AUX; break;
+                        case krepProtectedSubCategory   : sub_cat_ptr = SUB_CAT_PROT; break;
+                        default                         : sub_cat_ptr = SUB_CAT_UNKNOWN; break;
+                    }
+
+                    rc = KOutMsg( "\t%s.%s: %s, cache-%s",
+                            sub_cat_ptr, repo_name,
                             ( disabled ? "disabled" : "enabled" ),
                             ( cache_enabled ? "enabled" : "disabled" ) );
                     if ( rc == 0 )
                     {
-                        if ( options->detailed )
+                        if ( octx->options->detailed )
                         {
-                            char root[ 4096 ];
-                            rc = KRepositoryRoot ( repo, root, sizeof root, NULL );
-                            if ( rc != 0 )
+                            /* it is OK if we cannot find the root of a repository... */
+                            char where[ 4096 ];
+                            rc1 = KRepositoryRoot ( repo, where, sizeof where, NULL );
+                            if ( rc1 == 0 )
+                                rc = KOutMsg( ", at %s", where );
+                            else
                             {
-                                PLOGERR( klogErr, ( klogErr, rc,
-                                         "KRepositoryRoot( $(hint) ) failed in $(func)", "hint=%s,func=%s", repo_name, __func__ ) );
+                                rc1 = KRepositoryResolver ( repo, where, sizeof where, NULL );
+                                if ( rc1 == 0 )
+                                    rc = KOutMsg( ", at %s", where );
                             }
-                            if ( rc == 0 )
-                                rc = KOutMsg( ", at %s\n", root );
                         }
-                        else
-                            rc = KOutMsg( "\n" );
-                    }
+                                            }
+                    if ( rc == 0 )
+                        rc = KOutMsg( "\n" );
                 }
             }
         }
     }
     {
-        rc_t rc2 = KRepositoryVectorWhack ( &repos );
-        if ( rc2 != 0 )
+        rc1 = KRepositoryVectorWhack ( &repos );
+        if ( rc1 != 0 )
         {
-            PLOGERR( klogErr, ( klogErr, rc2,
+            PLOGERR( klogErr, ( klogErr, rc1,
                      "KRepositoryVectorWhack() for $(hint) failed in $(func)", "hint=%s,func=%s", hint, __func__ ) );
         }
     }
@@ -788,53 +837,17 @@ static rc_t report_repo( const tool_options * options, const KRepositoryMgr *rep
 
 static rc_t perform_rreport( visit_ctx * octx )
 {
-    KConfig * cfg;
-    rc_t rc = KConfigMake ( &cfg, NULL );
-    if ( rc != 0 )
-    {
-        PLOGERR( klogErr, ( klogErr, rc,
-                 "KConfigMake() failed in $(func)", "func=%s", __func__ ) );
-    }
-    else
-    {
-        const KRepositoryMgr *repo_mgr;
-        rc = KConfigMakeRepositoryMgrRead ( cfg, &repo_mgr );
-        if ( rc != 0 )
-        {
-            PLOGERR( klogErr, ( klogErr, rc,
-                     "KConfigMakeRepositoryMgrRead() failed in $(func)", "func=%s", __func__ ) );
-        }
-        else
-        {
-            rc = report_repo( octx->options, repo_mgr, KRepositoryMgrUserRepositories, "user" );
+    rc_t rc = report_repo( octx, krepUserCategory );
 
-            if ( rc == 0 )
-                rc = report_repo( octx->options, repo_mgr, KRepositoryMgrSiteRepositories, "site" );
+    if ( rc == 0 )
+        rc = report_repo( octx, krepSiteCategory );
 
-            if ( rc == 0 )
-                rc = report_repo( octx->options, repo_mgr, KRepositoryMgrRemoteRepositories, "remote" );
+    if ( rc == 0 )
+        rc = report_repo( octx, krepRemoteCategory );
 
-            {
-                rc_t rc2 = KRepositoryMgrRelease ( repo_mgr );
-                if ( rc2 != 0 )
-                {
-                    PLOGERR( klogErr, ( klogErr, rc2,
-                             "KRepositoryMgrRelease() failed in $(func)", "func=%s", __func__ ) );
-                }
-            }
+    if ( rc == 0 )
+        rc = KOutMsg( "\n" );
 
-            KOutMsg( "\n\n" );
-        }
-
-        {
-            rc_t rc2 = KConfigRelease ( cfg );
-            if ( rc2 != 0 )
-            {
-                PLOGERR( klogErr, ( klogErr, rc2,
-                         "KConfigRelease() failed in $(func)", "func=%s", __func__ ) );
-            }
-        }
-    }
     return rc;
 }
 
@@ -983,6 +996,7 @@ static rc_t perform_clear( visit_ctx * octx )
 
 /***************************************************************************************************************/
 
+/*
 static rc_t enable_disable_repo( bool disabled, get_repo_cb getter, const char * hint )
 {
     KConfig * cfg;
@@ -1078,37 +1092,33 @@ static rc_t enable_disable_remote_repo( bool disabled )
 {
     return enable_disable_repo( disabled, KRepositoryMgrRemoteRepositories, "remote" );
 }
-
-
-/***************************************************************************************************************/
-
-
-static rc_t perform_enable( visit_ctx * octx )
-{
-    rc_t rc = 0;
-    switch( octx->options->repo_select )
-    {
-    case trs_user    : rc = enable_disable_user_repo( false ); break;
-    case trs_site    : rc = enable_disable_site_repo( false ); break;
-    case trs_remote  : rc = enable_disable_remote_repo( false ); break;
-    case trs_unknown : rc = KOutMsg( "enable unknown\n" ); break;
-    }
-    return rc;
-}
-
+*/
 
 /***************************************************************************************************************/
 
 
-static rc_t perform_disable( visit_ctx * octx )
+static rc_t perform_set_disable( visit_ctx * octx, bool disabled )
 {
-    rc_t rc = 0;
-    switch( octx->options->repo_select )
+    rc_t rc;
+    if ( octx->options->category == krepBadCategory )
+        rc = KOutMsg( "enable unknown category\n" );
+    else
     {
-    case trs_user    : rc = enable_disable_user_repo( true ); break;
-    case trs_site    : rc = enable_disable_site_repo( true ); break;
-    case trs_remote  : rc = enable_disable_remote_repo( true ); break;
-    case trs_unknown : rc = KOutMsg( "disable unknown\n" ); break;
+        rc = KRepositoryMgrCategorySetDisabled ( octx->repo_mgr, octx->options->category, disabled );
+        if ( rc != 0 )
+        {
+            PLOGERR( klogErr, ( klogErr, rc,
+                     "KRepositoryMgrCategorySetDisabled() failed in $(func)", "func=%s", __func__ ) );
+        }
+        else
+        {
+            rc = KConfigCommit ( octx->cfg );
+            if ( rc != 0 )
+            {
+                PLOGERR( klogErr, ( klogErr, rc,
+                         "KConfigCommit() failed in $(func)", "func=%s", __func__ ) );
+            }
+        }
     }
     return rc;
 }
@@ -1120,22 +1130,65 @@ static rc_t perform_disable( visit_ctx * octx )
 static rc_t perform( tool_options * options, Args * args )
 {
     visit_ctx octx;
-    rc_t rc = KDirectoryNativeDir( &octx.dir );
-    if ( rc == 0 )
+    rc_t rc2, rc = KDirectoryNativeDir( &octx.dir );
+    if ( rc != 0 )
     {
-        octx.options = options;
-        octx.data = NULL;
-        switch( options->main_function )
+        PLOGERR( klogErr, ( klogErr, rc,
+                 "KDirectoryNativeDir() failed in $(func)", "func=%s", __func__ ) );
+    }
+    else
+    {
+        rc = KConfigMake ( &octx.cfg, NULL );
+        if ( rc != 0 )
         {
-            case tf_report  : rc = perform_report( &octx ); break;
-            case tf_rreport : rc = perform_rreport( &octx ); break;
-            case tf_unlock  : rc = perform_unlock( &octx ); break;
-            case tf_clear   : rc = perform_clear( &octx ); break;
-            case tf_enable  : rc = perform_enable( &octx ); break;
-            case tf_disable : rc = perform_disable( &octx ); break;
-            case tf_unknown : rc = Usage( args ); break;
+            PLOGERR( klogErr, ( klogErr, rc,
+                     "KConfigMake() failed in $(func)", "func=%s", __func__ ) );
         }
-        KDirectoryRelease( octx.dir );
+        else
+        {
+            rc = KConfigMakeRepositoryMgrRead ( octx.cfg, &octx.repo_mgr );
+            if ( rc != 0 )
+            {
+                PLOGERR( klogErr, ( klogErr, rc,
+                         "KConfigMakeRepositoryMgrRead() failed in $(func)", "func=%s", __func__ ) );
+            }
+            else
+            {
+                octx.options = options;
+                octx.data = NULL;
+                switch( options->main_function )
+                {
+                    case tf_report  : rc = perform_report( &octx ); break;
+                    case tf_rreport : rc = perform_rreport( &octx ); break;
+                    case tf_unlock  : rc = perform_unlock( &octx ); break;
+                    case tf_clear   : rc = perform_clear( &octx ); break;
+                    case tf_enable  : rc = perform_set_disable( &octx, false ); break;
+                    case tf_disable : rc = perform_set_disable( &octx, true ); break;
+                    case tf_unknown : rc = Usage( args ); break;
+                }
+
+                rc2 = KRepositoryMgrRelease ( octx.repo_mgr );
+                if ( rc2 != 0 )
+                {
+                    PLOGERR( klogErr, ( klogErr, rc2,
+                             "KRepositoryMgrRelease() failed in $(func)", "func=%s", __func__ ) );
+                }
+            }
+
+            rc2 = KConfigRelease ( octx.cfg );
+            if ( rc2 != 0 )
+            {
+                PLOGERR( klogErr, ( klogErr, rc2,
+                         "KConfigRelease() failed in $(func)", "func=%s", __func__ ) );
+            }
+        }
+
+        rc2 = KDirectoryRelease( octx.dir );
+        if ( rc2 != 0 )
+        {
+            PLOGERR( klogErr, ( klogErr, rc2,
+                     "KDirectoryRelease() failed in $(func)", "func=%s", __func__ ) );
+        }
     }
     return rc;
 }
@@ -1258,7 +1311,7 @@ static rc_t explain_no_cache_found ( void )
     if ( rc == 0 )
         rc = KOutMsg( "solution A : specify the cache-path at the commandline like 'cache-mgr ~/my_cache -r'\n" );
     if ( rc == 0 )
-        rc = KOutMsg( "solution B : fix your broken configuration-setup ( run the java-gui )\n" );
+        rc = KOutMsg( "solution B : fix your broken configuration-setup ( use vdb-config )\n" );
     return rc;
 }
 

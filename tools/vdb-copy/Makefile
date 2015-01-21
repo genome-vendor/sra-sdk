@@ -25,7 +25,7 @@
 
 default: std
 
-TOP ?= $(shell ../../build/abspath.sh ../..)
+TOP ?= $(abspath ../..)
 MODULE = tools/vdb-copy
 
 include $(TOP)/build/Makefile.env
@@ -90,13 +90,11 @@ $(NCBIDIR)/vdb-copy.kfg: $(SRCDIR)/vdb-copy.kfg
 	cp $^ $@
 
 VDB_COPY_SRC = \
-	num-gen \
 	context \
 	helper \
 	coldefs \
 	get_platform \
 	namelist_tools \
-	progressbar \
 	copy_meta \
 	type_matcher \
 	redactval \
@@ -108,8 +106,7 @@ VDB_COPY_OBJ = \
 
 VDB_COPY_LIB = \
 	-lkapp \
-	-lncbi-wvdb \
-	-lxml2 \
+	-sncbi-wvdb \
 	-lm
 
 $(BINDIR)/vdb-copy: $(VDB_COPY_OBJ)

@@ -1228,7 +1228,7 @@ rc_t Experiment_ReadSegDefault(const ExperimentXML* self, SRASegment* seg)
             spot_len -= len;
             if( spot_len < 0 || len < 0 ) {
                 rc = RC(rcSRA, rcFormatter, rcConstructing, rcData, rcInconsistent);
-                LOGERR(klogErr, rc, "cummulative read lengths and SEQUENCE_LENGTH");
+                LOGERR(klogErr, rc, "cumulative read lengths and SEQUENCE_LENGTH");
                 return rc;
             } else {
                 seg[i].start = spot_len;

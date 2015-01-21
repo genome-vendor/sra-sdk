@@ -25,7 +25,7 @@
 
 # default compiler
 ifeq (,$(COMP))
-	COMP = gcc
+	COMP = clang
 endif
 
 # architecture
@@ -61,7 +61,7 @@ LIBX = a
 SHLX = dylib
 
 # compilation defines
-DEFINES	:= -DMAC -DBSD -DUNIX -D_REENTRANT -D_FILE_OFFSET_BITS=64
+DEFINES	:= -DMAC -DBSD -DUNIX -D_REENTRANT -D_FILE_OFFSET_BITS=64 -DPKGNAME=mac$(BITS)
 
 # Darwin is a Unix variant
 OS_DAD = bsd
@@ -78,4 +78,7 @@ YACC = @ true
 LEX = @ true
 
 # build matrix
-COMPILERS = GCC CLANG
+COMPILERS = CLANG GCC
+
+# copy without following symlinks
+COPY = cp -R
