@@ -1,3 +1,9 @@
+sra-sdk (2.4.3-0ubuntu0tgi1) precise; urgency=low
+
+  * New upstream 2.4.3
+
+ -- Ian Ferguson <iferguso@genome.wustl.edu>  Wed, 21 Jan 2015 15:45:44 -0600
+
 sra-sdk (2.3.4-2-0ubuntu0tgi1) precise; urgency=low
 
   * New upstream 2.3.4-2
