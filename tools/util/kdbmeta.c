@@ -99,6 +99,7 @@ static int indent_lvl;
 static int tabsz = 2;
 static const char *spaces = "                                ";
 static bool as_unsigned = false;
+static bool as_valid_xml = true;
 static const char *table_arg = NULL;
 static bool read_only_arg = true;
 
@@ -176,6 +177,34 @@ void attr_select ( const char *name, const char *value )
 {
     if ( xml_ish )
         OUTMSG (( " %s=\"%s\"", name, value ));
+}
+
+static void value_print(char value) {
+    const char *replacement = NULL;
+
+    switch (value) {
+        case '\"':
+            replacement = "&quot;";
+            break;   
+        case '&':
+            replacement = "&amp;";
+            break;   
+        case '<':
+            replacement = "&lt;";
+            break;   
+        case '>':
+            replacement = "&gt;";
+            break;
+        default:
+            break;
+    }
+
+    if (replacement != NULL && as_valid_xml) {
+        OUTMSG(("%s", replacement));
+    }
+    else {
+        OUTMSG(("%c", value));
+    }
 }
 
 static
@@ -256,10 +285,10 @@ void value_select ( const char *value, size_t vlen, uint32_t num_children, bool 
         /* text */
         else
         {
-            int tab_stop;
+            /* int tab_stop; */
 
             OUTMSG (( "'" ));
-            for ( tab_stop = 0, i = 0; i < vlen; ++ i )
+            for ( /* tab_stop = 0, */ i = 0; i < vlen; ++ i )
             {
                 switch ( value [ i ] )
                 {
@@ -273,10 +302,10 @@ void value_select ( const char *value, size_t vlen, uint32_t num_children, bool 
                     indent ();
                     if ( i + 1 < vlen )
                         OUTMSG (( " " ));
-                    tab_stop = 0;
+                    /* tab_stop = 0; */
                     break;
                 default:
-                    OUTMSG (( "%c", value [ i ] ));
+                    value_print(value[i]);
                 }
             }
             OUTMSG (( "'" ));
@@ -479,7 +508,7 @@ rc_t md_select_expr ( const KMDataNode *node, char *path, size_t psize, int plen
             else
             {
                 const KMDataNode *child;
-                rc = KMDataNodeOpenNodeRead ( node, & child, name );
+                rc = KMDataNodeOpenNodeRead ( node, & child, "%s", name );
                 if ( rc != 0 )
                 {
                     KNamelistRelease ( children );
@@ -654,12 +683,13 @@ bool CC md_select ( void *item, void *data )
                 return true;
             }
 
-            pb -> rc = KMDataNodeOpenNodeUpdate ( root, & node, path );
+            pb -> rc = KMDataNodeOpenNodeUpdate ( root, & node, "%s", path );
             KMDataNodeRelease ( root );
 
             if ( pb -> rc != 0 )
             {
-                PLOGERR ( klogErr,  (klogErr, pb -> rc, "failed to open node '$(node) for '$(path)'",
+                PLOGERR ( klogErr,  (klogErr, pb -> rc,
+                    "failed to open node '$(node)' for '$(path)'",
                                      "node=%s,path=%s", path, pb -> targ ));
             }
             else
@@ -675,12 +705,13 @@ bool CC md_select ( void *item, void *data )
         else
         {
             const KMDataNode *root = node;
-            pb -> rc = KMDataNodeOpenNodeRead ( root, ( const KMDataNode** ) & node, path );
+            pb -> rc = KMDataNodeOpenNodeRead ( root, ( const KMDataNode** ) & node, "%s", path );
             KMDataNodeRelease ( root );
 
             if ( pb -> rc != 0 )
             {
-                PLOGERR ( klogErr,  (klogErr, pb -> rc, "failed to open node '$(node) for '$(path)'",
+                PLOGERR ( klogErr,  (klogErr, pb -> rc,
+                    "failed to open node '$(node)' for '$(path)'",
                                      "node=%s,path=%s", path, pb -> targ ));
             }
             else
@@ -710,13 +741,13 @@ rc_t col_select ( KDBMetaParms * pb)
     if ( ! read_only_arg ) {
         read_only = false;
 
-        rc = KDBManagerOpenColumnUpdate ( pb -> mgr, & col, pb->targ );
+        rc = KDBManagerOpenColumnUpdate ( pb -> mgr, & col, "%s", pb->targ );
         if ( rc != 0 )
             read_only = true;
     }
 #endif
     if ( read_only )
-        rc = KDBManagerOpenColumnRead ( pb -> mgr, ( const KColumn** ) & col, pb->targ );
+        rc = KDBManagerOpenColumnRead ( pb -> mgr, ( const KColumn** ) & col, "%s", pb->targ );
     if ( rc != 0 )
         PLOGERR ( klogErr,  (klogErr, rc, "failed to open column '$(col)'", "col=%s", pb->targ ));
     else
@@ -762,13 +793,13 @@ rc_t tbl_select ( KDBMetaParms * pb)
     if ( ! read_only_arg ) {
         read_only = false;
 
-        rc = KDBManagerOpenTableUpdate ( pb -> mgr, & tbl, pb->targ );
+        rc = KDBManagerOpenTableUpdate ( pb -> mgr, & tbl, "%s", pb->targ );
         if ( rc != 0 )
             read_only = true;
     }
 #endif
     if ( read_only )
-        rc = KDBManagerOpenTableRead ( pb -> mgr, ( const KTable** ) & tbl, pb->targ );
+        rc = KDBManagerOpenTableRead ( pb -> mgr, ( const KTable** ) & tbl, "%s", pb->targ );
     if ( rc != 0 )
         PLOGERR ( klogErr,  (klogErr, rc, "failed to open table '$(tbl)'", "tbl=%s", pb->targ ));
     else
@@ -815,13 +846,13 @@ rc_t db_select (KDBMetaParms * pb)
     if ( ! read_only_arg ) {
         read_only = false;
 
-        rc = KDBManagerOpenDBUpdate ( pb -> mgr, & db, pb->targ );
+        rc = KDBManagerOpenDBUpdate ( pb -> mgr, & db, "%s", pb->targ );
         if ( rc != 0 )
             read_only = true;
     }
 #endif
     if ( read_only )
-        rc = KDBManagerOpenDBRead ( pb -> mgr, ( const KDatabase** ) & db, pb->targ );
+        rc = KDBManagerOpenDBRead ( pb -> mgr, ( const KDatabase** ) & db, "%s", pb->targ );
     if ( rc != 0 ) {
         PLOGERR ( klogErr,  (klogErr, rc, "failed to open db '$(db)'",
             "db=%s", pb->targ ));
@@ -833,13 +864,13 @@ rc_t db_select (KDBMetaParms * pb)
 #if ALLOW_UPDATE
             if ( ! read_only_arg ) {
                 read_only = false;
-                rc = KDatabaseOpenTableUpdate ( db, &tbl, table_arg );
+                rc = KDatabaseOpenTableUpdate ( db, &tbl, "%s", table_arg );
                 if ( rc != 0 )
                     read_only = true;
             }
 #endif
             if ( read_only )
-                rc = KDatabaseOpenTableRead ( db, ( const KTable** ) &tbl, table_arg );
+                rc = KDatabaseOpenTableRead ( db, ( const KTable** ) &tbl, "%s", table_arg );
             if ( rc != 0 ) {
                 PLOGERR ( klogErr,  (klogErr, rc,
                     "failed to open table '$(table)'", "table=%s", table_arg ));
@@ -977,8 +1008,6 @@ static const char *const q5 [] = { "<obj>=VALUE","a simple value assignment wher
                                    "values use hex escape codes", NULL };
 #endif
 
-/* static const char* o1[] = { "try to interpret binary values as unsigned ints", NULL }; */
-
 #define ALIAS_READ_ONLY             "r"
 #define OPTION_READ_ONLY            "read-only"
 static const char* USAGE_READ_ONLY[] = { "operate in read-only mode", NULL };
@@ -992,12 +1021,18 @@ static const char* USAGE_TABLE[] = { "table-name", NULL };
 static const char* USAGE_UNSIGNED[]
                                  = { "print numeric values as unsigned", NULL };
 
+#define OPTION_OUT "output"
+#define ALIAS_OUT  "X"
+static const char* USAGE_OUT[] = { "Output type: one of (xml text): ",
+    "whether to generate well-formed XML. Default: xml (well-formed)", NULL };
+
 const OptDef opt[] = {
   { OPTION_TABLE    , ALIAS_TABLE    , NULL, USAGE_TABLE    , 1, true , false }
  ,{ OPTION_UNSIGNED , ALIAS_UNSIGNED , NULL, USAGE_UNSIGNED , 1, false, false }
 #if ALLOW_UPDATE
  ,{ OPTION_READ_ONLY, ALIAS_READ_ONLY, NULL, USAGE_READ_ONLY, 1, false, false }
 #endif
+ ,{ OPTION_OUT      , ALIAS_OUT      , NULL, USAGE_OUT      , 1, true , false }
 };
 
 static const char * const * target_usage [] = { t1, t2, t3, t4 };
@@ -1048,7 +1083,14 @@ rc_t CC Usage (const Args * args)
              "Options:\n"));
 
     for(idx = 0; idx < sizeof(opt) / sizeof(opt[0]); ++idx) {
-        HelpOptionLine(opt[idx].aliases, opt[idx].name, NULL, opt[idx].help);
+        const char *param = NULL;
+        if (strcmp(opt[idx].aliases, ALIAS_TABLE) == 0) {
+            param = "table";
+        }
+        else if (strcmp(opt[idx].aliases, ALIAS_OUT) == 0) {
+            param = "value";
+        }
+        HelpOptionLine(opt[idx].aliases, opt[idx].name, param, opt[idx].help);
     }
 
     HelpOptionsStandard ();
@@ -1124,6 +1166,24 @@ rc_t CC KMain ( int argc, char *argv [] )
                 }
             }
 
+            rc = ArgsOptionCount (args, OPTION_OUT, &pcount);
+            if (rc) {
+                LOGERR(klogErr, rc, "Failure to get '" OPTION_OUT "' argument");
+                break;
+            }
+            if (pcount) {
+                const char* dummy = NULL;
+                rc = ArgsOptionValue (args, OPTION_OUT, 0, &dummy);
+                if (rc) {
+                    LOGERR(klogErr, rc,
+                        "Failure to get '" OPTION_OUT "' argument");
+                    break;
+                }
+                else if (strcmp(dummy, "t") == 0) {
+                    as_valid_xml = false;
+                }
+            }
+
             rc = ArgsParamCount (args, &pcount);
             if (rc)
                 break;
@@ -1165,11 +1225,9 @@ rc_t CC KMain ( int argc, char *argv [] )
 
                         found = false;
 
-#if ! WINDOWS /* TOOLS_USE_SRAPATH != 0 */
-#warning fix kdbmanagerVPathType to understand accessions
                         {
                             const VFSManager * vfs;
-                            rc = KDBManagerGetVFSManager ( mgr, & vfs );
+                            rc = KDBManagerGetVFSManager ( mgr, ( VFSManager ** )&vfs );
                             if ( rc == 0 )
                             {
                                 VResolver * resolver;
@@ -1207,16 +1265,15 @@ rc_t CC KMain ( int argc, char *argv [] )
 
                         if ( ! found)
                         {
-                            rc = KDirectoryVResolvePath (curwd, true, objpath,
-                                                         sizeof objpath, pc, NULL);
+                            rc = KDirectoryResolvePath (curwd, true, objpath,
+                                                        sizeof objpath, "%s", pc);
 
                             if (rc)
-                                LOGERR (klogFatal, rc, "Unable to resolved target path");
+                                LOGERR (klogFatal, rc,
+                                    "Unable to resolved target path");
                         }
-#endif
 
-
-                        type = KDBManagerVPathType (mgr, objpath, NULL);
+                        type = KDBManagerPathType (mgr, "%s", objpath);
                             
                         switch (type)
                         {

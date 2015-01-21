@@ -36,7 +36,7 @@ extern "C" {
 
 #include <kapp/args.h>
 #include <klib/vector.h>
-#include "vdb-dump-num-gen.h"
+#include <klib/num-gen.h>
 #include "vdb-dump-redir.h"
 
 #define OPTION_ROW_ID_ON         "row_id_on"
@@ -62,20 +62,24 @@ extern "C" {
 #define OPTION_EXCLUDED_COLUMNS  "exclude"
 #define OPTION_BOOLEAN           "boolean"
 #define OPTION_OBJVER            "obj_version"
+#define OPTION_OBJTS             "obj_timestamp"
 #define OPTION_OBJTYPE           "obj_type"
 #define OPTION_NUMELEM           "numelem"
 #define OPTION_NUMELEMSUM        "numelemsum"
 #define OPTION_SHOW_BLOBBING     "blobbing"
 #define OPTION_ENUM_PHYS         "phys"
-#define OPTION_CHECK_CURL        "check-curl"
+#define OPTION_ENUM_READABLE     "readable"
 #define OPTION_IDX_ENUM          "idx-report"
 #define OPTION_IDX_RANGE         "idx-range"
 #define OPTION_CUR_CACHE         "cur-cache"
 #define OPTION_OUT_FILE          "output-file"
+#define OPTION_OUT_PATH          "output-path"
+#define OPTION_PHASE             "phase"
 #define OPTION_GZIP              "gzip"
 #define OPTION_BZIP2             "bzip2"
 #define OPTION_OUT_BUF_SIZE      "output-buffer-size"
 #define OPTION_NO_MULTITHREAD    "disable-multithreading"
+#define OPTION_INFO              "info"
 
 #define ALIAS_ROW_ID_ON         "I"
 #define ALIAS_LINE_FEED         "l"
@@ -115,9 +119,12 @@ typedef enum dump_format_t
     df_xml,
     df_json,
     df_piped,
+    df_sra_dump,
     df_tab,
     df_fastq,
-    df_fasta
+    df_fasta,
+    df_bin,
+    df_sql
 } dump_format_t;
 
 /********************************************************************
@@ -132,12 +139,15 @@ typedef struct dump_context
     const char *excluded_columns;
     const char *filter;
 	const char *idx_range;
+    const char *row_range;
     const char *output_file;
-    num_gen *row_generator;
+    const char *output_path;
+    struct num_gen * rows;
     bool print_row_id;
     uint16_t lf_after_row;
     uint16_t max_line_len;
     uint16_t indented_line_len;
+    uint16_t phase;
     uint32_t generic_idx;
     size_t cur_cache_size;
     size_t output_buffer_size;
@@ -159,15 +169,17 @@ typedef struct dump_context
     bool without_sra_types;
     bool dont_check_accession;
     bool objver_requested;
+    bool objts_requested;
     bool objtype_requested;
     bool print_num_elem;
     bool sum_num_elem;
     bool show_blobbing;
     bool enum_phys;
-    bool check_curl;
+    bool enum_readable;
 	bool idx_enum_requested;
 	bool idx_range_requested;
     bool disable_multithreading;
+    bool print_info;
 } dump_context;
 typedef dump_context* p_dump_context;
 

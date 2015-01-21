@@ -195,7 +195,7 @@ VSchema *map_schema_types ( TypeParams *type, const ctx_t *ctx, const VSchema *s
             ERROR ( rc, "VDBManagerMakeSchema failed" );
         else
         {
-            rc = VSchemaParseFile ( dst_schema, schema_src );
+            rc = VSchemaParseFile ( dst_schema, "%s", schema_src );
             if ( rc != 0 )
                 ERROR ( rc, "VSchemaParseFile failed adding file '%s' for destination", src_schema );
             else
@@ -208,7 +208,7 @@ VSchema *map_schema_types ( TypeParams *type, const ctx_t *ctx, const VSchema *s
                         return dst_schema;
                     }
 
-                    rc = VSchemaParseFile ( dst_schema, schema_src );
+                    rc = VSchemaParseFile ( dst_schema, "%s", schema_src );
                     if ( rc == 0 )
                         return dst_schema;
 
@@ -269,7 +269,7 @@ void open_db ( const ctx_t *ctx, const VDatabase **srcp )
                     {
                         src_schema = dst_schema;
                         VDatabaseRelease ( src );
-                        rc = VDBManagerOpenDBRead ( ctx -> caps -> vdb, srcp, src_schema, tp -> src_path );
+                        rc = VDBManagerOpenDBRead ( ctx -> caps -> vdb, srcp, src_schema, "%s", tp -> src_path );
                         if ( rc != 0 )
                             ERROR ( rc, "VDBManagerOpenDBRead failed reopening db '%s'", tp -> src_path );
                         src = *srcp;
@@ -280,7 +280,7 @@ void open_db ( const ctx_t *ctx, const VDatabase **srcp )
                 {
                     VDatabase *dst;
                     rc = VDBManagerCreateDB ( ctx -> caps -> vdb, & dst, dst_schema,
-                        type . dst_type, tp -> db . cmode, tp -> dst_path );
+                                              type . dst_type, tp -> db . cmode, "%s", tp -> dst_path );
                     if ( rc != 0 )
                         ERROR ( rc, "VDBManagerCreateDB failed to create '%s' with type '%s'", tp -> dst_path, type . dst_type );
                     else
@@ -348,7 +348,7 @@ void run ( const ctx_t *ctx )
     const Tool *tp = ctx -> caps -> tool;
 
     const VDatabase *db;
-    rc_t rc = VDBManagerOpenDBRead ( mgr, & db, NULL, tp -> src_path );
+    rc_t rc = VDBManagerOpenDBRead ( mgr, & db, NULL, "%s", tp -> src_path );
     if ( rc == 0 )
     {
         open_db ( ctx, & db );
@@ -357,7 +357,7 @@ void run ( const ctx_t *ctx )
     else
     {
         const VTable *tbl;
-        rc_t rc2 = VDBManagerOpenTableRead ( mgr, & tbl, NULL, tp -> src_path );
+        rc_t rc2 = VDBManagerOpenTableRead ( mgr, & tbl, NULL, "%s", tp -> src_path );
         if ( rc2 == 0 )
         {
             rc = 0;
@@ -370,7 +370,7 @@ void run ( const ctx_t *ctx )
             rc2 = VDBManagerMakeSRASchema ( mgr, & sra_dflt );
             if ( rc2 == 0 )
             {
-                rc2 = VDBManagerOpenTableRead ( mgr, & tbl, sra_dflt, tp -> src_path );
+                rc2 = VDBManagerOpenTableRead ( mgr, & tbl, sra_dflt, "%s", tp -> src_path );
                 if ( rc2 == 0 )
                 {
                     rc = 0;

@@ -24,7 +24,7 @@
 *
 */
 
-#include "test-sra-priv.h" /* PrintOS */
+#include "../test-sra-priv.h" /* PrintOS */
 
 #include <klib/out.h> /* OUTMSG */
 

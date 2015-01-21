@@ -34,8 +34,7 @@ include $(TOP)/build/Makefile.shell
 # default
 #
 SUBDIRS = \
-	libs \
-	tools
+	tools \
 
 # common targets for non-leaf Makefiles; must follow a definition of SUBDIRS
 include $(TOP)/build/Makefile.targets
@@ -60,25 +59,60 @@ $(SUBDIRS_ALL):
 $(SUBDIRS_STD):
 
 #-------------------------------------------------------------------------------
+# install
+#
+install: std
+	$(MAKE) -s TOP=$(CURDIR) -f build/Makefile.install install
+
+.PHONY: install
+
+#-------------------------------------------------------------------------------
 # clean
 #
 clean: clean_test
 
 clean_test:
+	@ $(MAKE) -s -C test clean
+
+#-------------------------------------------------------------------------------
+# runtests
+#
+runtests: runtests_test
+
+runtests_test:
+	@ $(MAKE) -s -C test runtests
+
+#	@ $(MAKE) -s -C ngs runtests
+
+#-------------------------------------------------------------------------------
+# slowtests
+#
+slowtests: slowtests_test
+
+slowtests_test:
+	@ $(MAKE) -s -C test slowtests
 
 #-------------------------------------------------------------------------------
 # pass-through targets
 #
-COMPILERS = GCC VC++ CLANG
+COMPILERS = GCC ICC VC++ CLANG
 ARCHITECTURES = i386 x86_64 sparc32 sparc64
-CONFIG = debug profile release static dynamic
+CONFIG = debug profile release
 PUBLISH = scm pubtools
 REPORTS = bindir targdir osdir config compilers architecture architectures
 PASSTHRUS = \
 	out \
 	CC $(COMPILERS) \
 	$(ARCHITECTURES) \
-	$(CONFIG) $(PUBLISH)
+	$(CONFIG) $(PUBLISH) \
+	purify purecov \
+	local static dynamic
+
+$(RHOSTS):
+	@ $(MAKE) -s TOP=$(CURDIR) -f build/Makefile.env local
+	@ $(MAKE) -s TOP=$(CURDIR) -f build/Makefile.env require-proxy-exec
+	@ $(MAKE) -s TOP=$(CURDIR) -f build/Makefile.env $@
+	@ $(MAKE) -s TOP=$(CURDIR) -f build/Makefile.env rebuild-dirlinks config
 
 $(PASSTHRUS):
 	@ $(MAKE) -s TOP=$(CURDIR) -f build/Makefile.env $@
@@ -87,14 +121,14 @@ $(PASSTHRUS):
 $(REPORTS):
 	@ $(MAKE) -s TOP=$(CURDIR) -f build/Makefile.env $@
 
-.PHONY: $(PASSTHRUS) $(REPORTS)
+.PHONY: $(PASSTHRUS) $(RHOSTS) $(REPORTS)
 
 
 #-------------------------------------------------------------------------------
 # configuration help
 #
 help configure:
-	@ echo "Before initial build, run 'make OUTDIR=<dir> out' from"
+	@ echo "Before initial build, run './configure --build-prefix=<out>' from"
 	@ echo "the project root to set the output directory of your builds."
 	@ echo
 	@ echo "To select a compiler, run 'make <comp>' where"
@@ -105,6 +139,9 @@ help configure:
 	@ echo
 	@ echo "To set a build configuration, run 'make <config>' where"
 	@ echo "config = { "$(CONFIG)" }."
+	@ echo
+	@ echo "To select a remote build configuration, run 'make <rhost>' where"
+	@ echo "rhost = { "$(RHOSTS)" }."
 	@ echo
 
 .PHONY: help configure

@@ -27,7 +27,6 @@
 #   all
 #   std
 #   clean
-#   buildtests
 #   runtests
 #   slowtests
 #
@@ -38,14 +37,17 @@
 #   SUBDIRS_CLEAN = $(addsuffix _clean, du4r1 dir2 dir3)
 #
 
-default: $(SUBDIRS) 
+default: $(SUBDIRS) $(DFLT_EXTRA)
+
+ALL_EXTRA ?= $(DFLT_EXTRA)
+STD_EXTRA ?= $(DFLT_EXTRA)
 
 #-------------------------------------------------------------------------------
 # all
 #
 SUBDIRS_ALL ?= $(addsuffix _all,$(SUBDIRS))
 
-all: $(SUBDIRS_ALL)
+all: $(SUBDIRS_ALL) $(ALL_EXTRA)
 
 $(SUBDIRS_ALL):
 	@ $(MAKE) -C $(subst _all,,$@) all
@@ -57,7 +59,7 @@ $(SUBDIRS_ALL):
 #
 SUBDIRS_STD = $(addsuffix _std,$(SUBDIRS))
 
-std: $(SUBDIRS_STD)
+std: $(SUBDIRS_STD) $(STD_EXTRA)
 
 $(SUBDIRS_STD): 
 	@ $(MAKE) -C $(subst _std,,$@) std
@@ -87,18 +89,6 @@ $(SUBDIRS_RUNTESTS):
 	@ $(MAKE) -s -C $(subst _runtests,,$@) runtests
 
 .PHONY: runtests $(SUBDIRS_RUNTESTS)
-
-#-------------------------------------------------------------------------------
-# buildtests
-#
-SUBDIRS_BUILDTESTS ?= $(addsuffix _buildtests, $(SUBDIRS))
-
-buildtests: std $(SUBDIRS_BUILDTESTS)
-
-$(SUBDIRS_BUILDTESTS):
-	@ $(MAKE) -C $(subst _buildtests,,$@) buildtests
-
-.PHONY: buildtests $(SUBDIRS_BUILDTESTS)
 
 #-------------------------------------------------------------------------------
 # slowtests

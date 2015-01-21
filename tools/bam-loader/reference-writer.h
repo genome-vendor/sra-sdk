@@ -54,7 +54,7 @@ typedef struct s_reference {
 } Reference;
 
 rc_t ReferenceInit(Reference *self, const VDBManager *mgr, VDatabase *db);
-rc_t ReferenceSetFile(Reference *self, const char *id, uint64_t length, uint8_t const md5[16]);
+rc_t ReferenceSetFile(Reference *self, const char *id, uint64_t length, uint8_t const md5[16], bool *shouldUnmap);
 rc_t ReferenceVerify(Reference const *self, char const id[], uint64_t length, uint8_t const md5[16]);
 rc_t ReferenceGet1stRow(Reference const *self, int64_t *refID, char const refName[]);
 rc_t ReferenceAddAlignId(Reference *self,
@@ -63,7 +63,8 @@ rc_t ReferenceAddAlignId(Reference *self,
                          );
 rc_t ReferenceRead(Reference *self, AlignmentRecord *data, uint64_t pos,
                    uint32_t const rawCigar[], uint32_t cigCount,
-                   char const seqDNA[], uint32_t seqLen, uint32_t *matches);
+                   char const seqDNA[], uint32_t seqLen,
+                   uint8_t rna_orient, uint32_t *matches);
 rc_t ReferenceWhack(Reference *self, bool commit);
 
 #endif

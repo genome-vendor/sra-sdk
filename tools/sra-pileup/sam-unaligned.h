@@ -37,7 +37,8 @@ extern "C" {
 #include "inputfiles.h"
 #include "matecache.h"
 
-rc_t print_unaligned_spots( const samdump_opts * const opts, const input_files * const ifs,
-                            const matecache * const mc, uint64_t * const rows_so_far );
+rc_t print_unaligned_spots( const samdump_opts * const opts,
+                            const input_files * const ifs,
+                            const matecache * const mc );
 
 #endif

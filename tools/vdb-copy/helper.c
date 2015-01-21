@@ -156,7 +156,7 @@ rc_t helper_parse_schema( const VDBManager *my_manager,
                 const char *s;
                 if ( KNamelistGet( schema_list, idx, &s ) == 0 )
                 {
-                    rc = VSchemaParseFile( *new_schema, s );
+                    rc = VSchemaParseFile( *new_schema, "%s", s );
                     DISP_RC( rc, "VSchemaParseFile() failed" );
                 }
             }
@@ -421,7 +421,7 @@ rc_t helper_read_cfg_str( const KConfig *cfg, const char * key,
         return RC( rcExe, rcNoTarg, rcConstructing, rcParam, rcNull );
  
     *value = NULL;
-    rc = KConfigOpenNodeRead ( cfg, &node, key );
+    rc = KConfigOpenNodeRead ( cfg, &node, "%s", key );
     /* it is OK if we do not find it, so no DISP_RC here */
     if ( rc == 0 )
     {
@@ -664,7 +664,7 @@ rc_t helper_make_config_mgr( KConfig **config_mgr, const char * path )
 
     rc_t rc = KDirectoryNativeDir( &directory );
     if ( rc != 0 ) return rc;
-    rc = KDirectoryOpenDirRead ( directory, &config_sub_dir, false, path );
+    rc = KDirectoryOpenDirRead ( directory, &config_sub_dir, false, "%s", path );
     if ( rc == 0 )
     {
         rc = KConfigMake ( config_mgr, config_sub_dir );
@@ -722,7 +722,7 @@ rc_t helper_remove_path( KDirectory * directory, const char * path )
     rc_t rc;
 
     PLOGMSG( klogInfo, ( klogInfo, "removing '$(path)'", "path=%s", path ));
-    rc = KDirectoryRemove ( directory, true, path );
+    rc = KDirectoryRemove ( directory, true, "%s", path );
     DISP_RC( rc, "vdb_copy_remove_table:KDirectoryRemove() failed" );
     return rc;
 }

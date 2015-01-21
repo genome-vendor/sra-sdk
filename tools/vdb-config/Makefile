@@ -25,7 +25,7 @@
 
 default: std
 
-TOP ?= $(shell ../../build/abspath.sh ../..)
+TOP ?= $(abspath ../..)
 MODULE = tools/vdb-config
 
 include $(TOP)/build/Makefile.env
@@ -76,17 +76,21 @@ clean: stdclean
 # vdb-config
 #
 VDB_CONFIG_SRC = \
-	vdb-config
+	configure \
+	util \
+	vdb-config \
+	interactive \
+	vdb-config-model \
 
 VDB_CONFIG_OBJ = \
 	$(addsuffix .$(OBJX),$(VDB_CONFIG_SRC))
 
 VDB_CONFIG_LIB = \
-	-lkapp \
-	-lncbi-vdb \
-	-lxml2 \
-	-lm
+	-stui_cpp    \
+	-stui        \
+	-skapp       \
+	-sncbi-vdb   \
+	-sm
 
 $(BINDIR)/vdb-config: $(VDB_CONFIG_OBJ)
-	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(VDB_CONFIG_LIB)
-
+	$(LP) --exe --vers $(SRCDIR) -o $@ $^ $(VDB_CONFIG_LIB)

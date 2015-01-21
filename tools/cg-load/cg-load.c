@@ -91,6 +91,7 @@ typedef struct SParam_struct
     uint32_t min_mapq;
     uint32_t single_mate;
     uint32_t cluster_size;
+    uint32_t load_other_evidence;
 } SParam;
 
 typedef struct DB_Handle_struct {
@@ -121,7 +122,7 @@ rc_t DB_Init(const SParam* p, DB_Handle* h)
         LOGERR(klogErr, rc, "failed to create schema");
 
     }
-    else if( (rc = VSchemaParseFile(h->schema, p->schema)) != 0 ) {
+    else if( (rc = VSchemaParseFile(h->schema, "%s", p->schema)) != 0 ) {
         PLOGERR(klogErr, (klogErr, rc, "failed to parse schema file '$(schema)'", PLOG_S(schema), p->schema));
 
     }
@@ -222,7 +223,7 @@ rc_t DB_Fini(const SParam* p, DB_Handle* h, bool drop)
         VSchemaRelease(h->schema);
         h->schema = NULL;
         if( drop || rc != 0 ) {
-            rc2 = VDBManagerDrop(h->mgr, kptDatabase, p->out);
+            rc2 = VDBManagerDrop(h->mgr, kptDatabase, "%s", p->out);
             if( GetRCState(rc2) == rcNotFound ) {
                 /* WHAT WOULD BE THE POINT OF RESETTING "rc" TO ZERO? */
                 rc = 0;
@@ -512,25 +513,40 @@ rc_t CC DirVisitor(const KDirectory *dir, uint32_t type, const char *name, void 
             strcmp(&name[strlen(name) - 8], ".tsv.bz2") == 0 ||
             strcmp(&name[strlen(name) - 7], ".tsv.gz") == 0)
         {
-            char buf[4096];
+            char buf[4096] = "";
             const CGLoaderFile* file = NULL;
             FGroupKey key;
-            if( (rc = KDirectoryResolvePath(dir, true, buf, sizeof(buf), name)) == 0 &&
+            if( (rc = KDirectoryResolvePath(dir, true, buf, sizeof(buf), "%s", name)) == 0 &&
                 (rc = CGLoaderFile_Make(&file, d->dir, buf, NULL, !d->param->no_read_ahead)) == 0 &&
                 (rc = FGroupKey_Make(&key, file, d->param)) == 0 ) {
 
                 FGroupMAP* found = (FGroupMAP*)BSTreeFind(d->tree, &key, FGroupMAP_Cmp);
-                DEBUG_MSG(5, ("file %s recognized\n", name));
-                if( found != NULL ) {
-                    rc = FGroupMAP_Set(found, file);
-                } else {
-                    FGroupMAP* x = calloc(1, sizeof(*x));
-                    if( x == NULL ) {
-                        rc = RC(rcExe, rcFile, rcInserting, rcMemory, rcExhausted);
-                    } else {
-                        memcpy(&x->key, &key, sizeof(key));
-                        if( (rc = FGroupMAP_Set(x, file)) == 0 ) {
-                            rc = BSTreeInsertUnique(d->tree, &x->dad, NULL, FGroupMAP_Sort);
+                if (d->param != NULL && ! d->param->load_other_evidence &&
+                    strstr(buf, "/EVIDENCE") != NULL &&
+                    strstr(buf, "/EVIDENCE/") == NULL)
+                {
+                    DEBUG_MSG(5, ("file %s recognized as %s: ignored\n",
+                        name, buf));
+                    rc = CGLoaderFile_Release(file, true);
+                    file = NULL;
+                }
+                else {
+                    DEBUG_MSG(5, ("file %s recognized as %s\n", name, buf));
+                    if (found != NULL) {
+                        rc = FGroupMAP_Set(found, file);
+                    }
+                    else {
+                        FGroupMAP* x = calloc(1, sizeof(*x));
+                        if (x == NULL) {
+                            rc = RC(rcExe,
+                                rcFile, rcInserting, rcMemory, rcExhausted);
+                        }
+                        else {
+                            memcpy(&x->key, &key, sizeof(key));
+                            if ((rc = FGroupMAP_Set(x, file)) == 0) {
+                                rc = BSTreeInsertUnique(d->tree,
+                                    &x->dad, NULL, FGroupMAP_Sort);
+                            }
                         }
                     }
                 }
@@ -573,7 +589,7 @@ static bool _FGroupMAPDone(FGroupMAP *self, TCtx ctx, FGroupMAP_LoadData* d) {
     bool eofMapping = true;
     assert(self && d);
     if (d->rc == 0 ||
-        GetRCState(d->rc) != rcDone || GetRCObject(d->rc) != rcData)
+        GetRCState(d->rc) != rcDone || GetRCObject(d->rc) != (enum RCObject)rcData)
     {
         return false;
     }
@@ -705,7 +721,7 @@ bool CC FGroupMAP_LoadEvidence( BSTNode *node, void *data )
                 d->rc = CGWriterEvdDnbs_Write(d->db.wev_dnb, d->db.ev_int, evint_rowid);
             }
         }
-        if( GetRCState(d->rc) == rcDone && GetRCObject(d->rc) == rcData ) {
+        if( GetRCState(d->rc) == rcDone && GetRCObject(d->rc) == (enum RCObject)rcData ) {
             bool eof = false;
             d->rc = 0;
             if( n->align == NULL || ((d->rc = CGLoaderFile_IsEof(n->align, &eof)) == 0 && eof) ) {
@@ -755,10 +771,10 @@ static rc_t copy_library( const KDirectory * src_dir, KDirectory * dst_dir,
 static rc_t open_dir_or_tar( const KDirectory *dir, const KDirectory **sub, const char * name )
 {
     rc_t rc1, rc2;
-    rc1 = KDirectoryOpenDirRead( dir, sub, true, name );
+    rc1 = KDirectoryOpenDirRead( dir, sub, true, "%s", name );
     if ( rc1 != 0 )
     {
-        rc2 = KDirectoryOpenTarArchiveRead( dir, sub, true, name );
+        rc2 = KDirectoryOpenTarArchiveRead( dir, sub, true, "%s", name );
         if ( rc2 == 0 )
             rc1 = rc2;
     }
@@ -889,6 +905,8 @@ ver_t CC KAppVersion( void )
 
 const char* map_usage[] = {"MAP input directory path containing files", NULL};
 const char* asm_usage[] = {"ASM input directory path containing files", NULL};
+const char* load_extra_evidence_usage[]
+    = { "load extra evidence files", NULL};
 const char* schema_usage[] = {"database schema file name", NULL};
 const char* output_usage[] = {"output database path", NULL};
 const char* force_usage[] = {"force output overwrite", NULL};
@@ -911,6 +929,7 @@ const char* library_usage[] = {"copy extra file/directory into output", NULL};
 enum OptDefIndex {
     eopt_MapInput = 0,
     eopt_AsmInput,
+    eopt_LoadExtraEvidence,
     eopt_Schema,
     eopt_RefSeqConfig,
     eopt_RefSeqPath,
@@ -935,6 +954,8 @@ OptDef MainArgs[] =
     /* if you change order in this array, rearrange enum above accordingly! */
     { "map",              "m",  NULL, map_usage,            1, true,  true  },
     { "asm",              "a",  NULL, asm_usage,            1, true,  false },
+    { "load-extra-evidence", NULL, NULL,
+                                 load_extra_evidence_usage, 1, false, false },
     { "schema",           "s",  NULL, schema_usage,         1, true,  false },
     { "refseq-config",    "k",  NULL, refseqcfg_usage,      1, true,  false },
     { "refseq-path",      "i",  NULL, refseqpath_usage,     1, true,  false },
@@ -1044,7 +1065,15 @@ rc_t CC KMain( int argc, char* argv[] )
         } else if( count > 0 && (rc = ArgsOptionValue(args, MainArgs[eopt_AsmInput].name, 0, &params.asm_path)) != 0 ) {
             errmsg = MainArgs[eopt_AsmInput].name;
 
-        } else if( (rc = ArgsOptionCount(args, MainArgs[eopt_RefSeqConfig].name, &count)) != 0 || count > 1 ) {
+        }
+        else if ((rc = ArgsOptionCount(args,
+            MainArgs[eopt_LoadExtraEvidence].name,
+            &params.load_other_evidence)) != 0 )
+        {
+            errmsg = MainArgs[eopt_LoadExtraEvidence].name;
+
+        }
+        else if( (rc = ArgsOptionCount(args, MainArgs[eopt_RefSeqConfig].name, &count)) != 0 || count > 1 ) {
             rc = rc ? rc : RC(rcExe, rcArgv, rcParsing, rcParam, rcExcessive);
             errmsg = MainArgs[eopt_RefSeqConfig].name;
         } else if( count > 0 && (rc = ArgsOptionValue(args, MainArgs[eopt_RefSeqConfig].name, 0, &params.refseqcfg)) != 0 ) {

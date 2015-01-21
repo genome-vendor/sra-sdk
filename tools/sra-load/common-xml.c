@@ -337,12 +337,12 @@ rc_t parse_BASECALL(const KXMLNode* node, ReadSpecXML_read_BASECALL_TABLE* table
         return rc;
     }
     rc = KXMLNodeReadAttrCStr(node, "read_group_tag", &bc.read_group_tag, NULL);
-    if( rc != 0 && !(GetRCObject(rc) == rcAttr && GetRCState(rc) == rcNotFound) ) {
+    if( rc != 0 && !(GetRCObject(rc) == (enum RCObject)rcAttr && GetRCState(rc) == rcNotFound) ) {
         LOGERR(klogErr, rc, "BASECALL @read_group_tag");
         return rc;
     }
     rc = KXMLNodeReadAttrAsU32(node, "min_match", &bc.min_match);
-    if( rc != 0 && !(GetRCObject(rc) == rcAttr && GetRCState(rc) == rcNotFound) ) {
+    if( rc != 0 && !(GetRCObject(rc) == (enum RCObject)rcAttr && GetRCState(rc) == rcNotFound) ) {
         LOGERR(klogErr, rc, "BASECALL @min_match");
         return rc;
     } else if(bc.min_match > strlen(bc.basecall)) {
@@ -353,7 +353,7 @@ rc_t parse_BASECALL(const KXMLNode* node, ReadSpecXML_read_BASECALL_TABLE* table
         bc.min_match = strlen(bc.basecall);
     }
     rc = KXMLNodeReadAttrAsU32(node, "max_mismatch", &bc.max_mismatch);
-    if( rc != 0 && !(GetRCObject(rc) == rcAttr && GetRCState(rc) == rcNotFound) ) {
+    if( rc != 0 && !(GetRCObject(rc) == (enum RCObject)rcAttr && GetRCState(rc) == rcNotFound) ) {
         LOGERR(klogErr, rc, "BASECALL @max_mismatch");
         return rc;
     } else if(bc.max_mismatch >= strlen(bc.basecall)) {
@@ -368,7 +368,7 @@ rc_t parse_BASECALL(const KXMLNode* node, ReadSpecXML_read_BASECALL_TABLE* table
         bc.min_match = strlen(bc.basecall) - bc.max_mismatch;
     }
     rc = KXMLNodeReadAttrCStr(node, "match_edge", &match_edge, NULL);
-    if( rc != 0 && !(GetRCObject(rc) == rcAttr && GetRCState(rc) == rcNotFound) ) {
+    if( rc != 0 && !(GetRCObject(rc) == (enum RCObject)rcAttr && GetRCState(rc) == rcNotFound) ) {
         LOGERR(klogErr, rc, "BASECALL @match_edge");
     } else if( match_edge == NULL || strcmp(match_edge, "full") == 0 ) {
         bc.match_edge = match_edge_Full;

@@ -22,37 +22,53 @@
 #
 # ===========================================================================
 
+by_default: default
 
-TOP ?= $(shell ../build/abspath.sh ..)
+TOP ?= $(abspath ..)
 MODULE = tools
 
 include $(TOP)/build/Makefile.shell
 
+include $(TOP)/build/Makefile.config
 
 #-------------------------------------------------------------------------------
 # default
 #
-SUBDIRS = \
-	util \
-	kar \
-	vdb-dump \
-	sra-dump \
-	sra-load \
-	sra-pileup \
-	bam-loader \
-	fastq-loader \
-	srapath \
-	sra-stat \
-	vdb-copy \
-	vdb-config \
-	align-info \
-	prefetch \
-	nenctool \
-	nencvalid \
-	vdb-decrypt \
-	vdb-validate \
-	sra-sort \
-    cache-mgr
+SUBDIRS =             \
+	util              \
+	align-cache       \
+	kar               \
+	kqsh              \
+	vdb-dump          \
+	sra-dump          \
+	sra-pileup        \
+	bam-loader        \
+	fastq-loader      \
+	srapath           \
+	sra-stat          \
+	vdb-copy          \
+	rd-filter-redact  \
+	vdb-config        \
+	align-info        \
+	qual-recalib-stat \
+	prefetch          \
+	vdb-decrypt       \
+	vdb-validate      \
+	sra-sort          \
+	cache-mgr         \
+	vcf-loader        \
+	copycat           \
+	sra-load          \
+	ccextract         \
+	pacbio-load       \
+	fuse              \
+    vdb-diff          \
+
+ifneq (win,$(BUILD_OS))
+ifneq (rwin,$(BUILD_OS))
+	SUBDIRS += cg-load
+endif
+endif
 
 # common targets for non-leaf Makefiles; must follow a definition of SUBDIRS
 include $(TOP)/build/Makefile.targets

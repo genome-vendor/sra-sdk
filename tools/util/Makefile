@@ -25,18 +25,26 @@
 
 default: std
 
-TOP ?= $(shell ../../build/abspath.sh ../..)
+TOP ?= $(abspath ../..)
 MODULE = tools/util
 
 include $(TOP)/build/Makefile.env
 
 INT_TOOLS = \
+	testld \
+	txt2kdb \
+	rowwritetest \
+	sortreadtest \
+	pacbio-correct \
+	crc32sum \
 
 EXT_TOOLS = \
 	rcexplain \
 	kdbmeta \
+	md5cp \
 	vdb-lock \
 	vdb-unlock \
+	schema-replace \
 	test-sra \
 	vdb-passwd
 
@@ -96,7 +104,7 @@ RCEXPLAIN_OBJ = \
 
 RCEXPLAIN_LIB = \
 	-skapp \
-	-lncbi-vdb \
+	-sncbi-vdb \
 
 $(BINDIR)/rcexplain: $(RCEXPLAIN_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(RCEXPLAIN_LIB)
@@ -113,8 +121,7 @@ KDBMETA_OBJ = \
 
 KDBMETA_LIB = \
 	-skapp \
-	-lncbi-wvdb \
-	-lxml2 \
+	-sncbi-wvdb \
 	-lm
 
 $(BINDIR)/kdbmeta: $(KDBMETA_OBJ)
@@ -133,8 +140,7 @@ VDB_LOCK_OBJ = \
 
 VDB_LOCK_LIB = \
 	-skapp \
-	-lncbi-wvdb \
-	-lxml2 \
+	-sncbi-wvdb \
 	-lm
 
 $(BINDIR)/vdb-lock: $(VDB_LOCK_OBJ)
@@ -153,12 +159,30 @@ VDB_UNLOCK_OBJ = \
 
 VDB_UNLOCK_LIB = \
 	-skapp \
-	-lncbi-wvdb \
-	-lxml2 \
+	-sncbi-wvdb \
 	-lm
 
 $(BINDIR)/vdb-unlock: $(VDB_UNLOCK_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(VDB_UNLOCK_LIB)
+
+
+#-------------------------------------------------------------------------------
+# testld - test dynamic load of libraries
+#
+TESTLD_SRC = \
+	testld
+
+TESTLD_OBJ = \
+	$(addsuffix .$(OBJX),$(TESTLD_SRC))
+
+TESTLD_LIB = \
+	-skapp \
+	-sncbi-vdb \
+
+
+$(BINDIR)/testld: $(TESTLD_OBJ)
+	$(LD) --exe -o $@ $^ $(TESTLD_LIB)
+
 
 #-------------------------------------------------------------------------------
 # test-sra: print config, resolve sra, check dependencies
@@ -173,12 +197,101 @@ T_OBJ = \
 
 T_LIB = \
 	-lkapp \
-	-lncbi-vdb \
-	-lxml2 \
+	-sncbi-vdb \
 	-lm
 
 $(BINDIR)/test-sra: $(T_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(T_LIB)
+
+#-------------------------------------------------------------------------------
+# txt2kdb - test dynamic load of libraries
+#
+TXT2KDB_SRC = \
+	txt2kdb
+
+TXT2KDB_OBJ = \
+	$(addsuffix .$(OBJX),$(TXT2KDB_SRC))
+
+TXT2KDB_LIB = \
+	-skapp \
+	-sncbi-wvdb \
+
+
+$(BINDIR)/txt2kdb: $(TXT2KDB_OBJ)
+	$(LD) --exe -o $@ $^ $(TXT2KDB_LIB)
+
+#----------------------------------------------------------------
+# md5cp
+#
+MD5CP_SRC = \
+	md5cp
+
+MD5CP_OBJ = \
+	$(addsuffix .$(OBJX),$(MD5CP_SRC))
+
+MD5CP_LIB = \
+	-skapp \
+	-sncbi-vdb \
+
+
+$(BINDIR)/md5cp: $(MD5CP_OBJ)
+	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(MD5CP_LIB)
+
+
+#----------------------------------------------------------------
+# rowwritetest
+#
+ROWWRITETEST_SRC = \
+	rowwritetest
+
+ROWWRITETEST_OBJ = \
+	$(addsuffix .$(OBJX),$(ROWWRITETEST_SRC))
+
+ROWWRITETEST_LIB = \
+	-skapp \
+	-sncbi-wvdb \
+
+
+$(BINDIR)/rowwritetest: $(ROWWRITETEST_OBJ)
+	$(LD) --exe -o $@ $^ $(ROWWRITETEST_LIB)
+
+
+#-------------------------------------------------------------------------------
+# crc32sum 
+#  behaves a lot like md5sum
+#
+CRC32SUM_SRC = \
+	crc32sum
+
+CRC32SUM_OBJ = \
+	$(addsuffix .$(OBJX),$(CRC32SUM_SRC))
+
+CRC32SUM_LIB = \
+	-lkapp \
+	-sncbi-vdb \
+
+
+$(BINDIR)/crc32sum: $(CRC32SUM_OBJ)
+	$(LD) --exe -o $@ $^ $(CRC32SUM_LIB)
+
+
+#----------------------------------------------------------------
+# sortreadtest
+#
+SORTREADTEST_SRC = \
+	sortreadtest
+
+SORTREADTEST_OBJ = \
+	$(addsuffix .$(OBJX),$(SORTREADTEST_SRC))
+
+SORTREADTEST_LIB = \
+	-skapp \
+	-sncbi-wvdb \
+
+
+$(BINDIR)/sortreadtest: $(SORTREADTEST_OBJ)
+	$(LD) --exe -o $@ $^ $(SORTREADTEST_LIB)
+
 
 #----------------------------------------------------------------
 # vdb-passwd
@@ -192,8 +305,43 @@ VDB_PASSWD_OBJ = \
 
 VDB_PASSWD_LIB = \
 	-skapp \
-	-lncbi-vdb \
+	-sncbi-vdb \
 
 
 $(BINDIR)/vdb-passwd: $(VDB_PASSWD_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(VDB_PASSWD_LIB)
+
+
+#----------------------------------------------------------------
+# schema-replace
+#
+SCHEMA_REPLACE_SRC = \
+	schema-replace
+
+SCHEMA_REPLACE_OBJ = \
+	$(addsuffix .$(OBJX),$(SCHEMA_REPLACE_SRC))
+
+SCHEMA_REPLACE_LIB = \
+	-lkapp \
+	-sncbi-wvdb \
+	-lm
+
+$(BINDIR)/schema-replace: $(SCHEMA_REPLACE_OBJ)
+	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(SCHEMA_REPLACE_LIB)
+
+#-------------------------------------------------------------------------------
+# pacbio-correct-tool
+#
+PACBIO_CORRECT_SRC = \
+	pacbio-correct
+
+PACBIO_CORRECT_OBJ = \
+	$(addsuffix .$(OBJX),$(PACBIO_CORRECT_SRC))
+
+PACBIO_CORRECT_LIB = \
+	-lkapp \
+	-sncbi-wvdb \
+
+
+$(BINDIR)/pacbio-correct: $(PACBIO_CORRECT_OBJ)
+	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(PACBIO_CORRECT_LIB)

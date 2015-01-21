@@ -36,7 +36,7 @@
 /* KDataBuffer is used as byte buffer-only here! */
 #define IF_BUF(expr, buf, writ) \
     while( (rc = (expr)) != 0 && \
-           (GetRCObject(rc) == rcMemory || GetRCObject(rc) == rcBuffer) && \
+           (GetRCObject(rc) == rcMemory || GetRCObject(rc) == ( enum RCObject )rcBuffer) && \
            (GetRCState(rc) == rcInsufficient || GetRCState(rc) == rcExhausted) ) { \
         SRA_DUMP_DBG(10, ("\n%s grow buffer from %u to %u\n", __func__, buf->elem_count, writ + DATABUFFER_INC_SZ)); \
         if( (rc = KDataBufferResize(buf, writ + DATABUFFER_INC_SZ)) != 0 ) { \

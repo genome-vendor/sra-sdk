@@ -38,15 +38,17 @@
       know about them.  */
    enum yytokentype {
      fqENDOFTEXT = 0,
-     fqNUMBER = 258,
-     fqALPHANUM = 259,
-     fqWS = 260,
-     fqENDLINE = 261,
-     fqBASESEQ = 262,
-     fqCOLORSEQ = 263,
-     fqTOKEN = 264,
-     fqASCQUAL = 265,
-     fqUNRECOGNIZED = 266
+     fqRUNDOTSPOT = 258,
+     fqNUMBER = 259,
+     fqALPHANUM = 260,
+     fqWS = 261,
+     fqENDLINE = 262,
+     fqBASESEQ = 263,
+     fqCOLORSEQ = 264,
+     fqTOKEN = 265,
+     fqASCQUAL = 266,
+     fqCOORDS = 267,
+     fqUNRECOGNIZED = 268
    };
 #endif
 

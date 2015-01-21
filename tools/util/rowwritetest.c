@@ -165,7 +165,7 @@ rc_t run (const char * table_path, uint64_t N )
         char col[3];
         sprintf(col, "C%d", i + 1);
         STSMSG(2,("Adding column %s to cursor", col));
-        rc = VCursorAddColumn(cursor, &idx[i], col);
+        rc = VCursorAddColumn(cursor, &idx[i], "%s", col);
         if (rc != 0)
             PLOGERR(klogInt, (klogInt, rc,
                               "failed to add $(c) to cursor", "c=%s", col));
@@ -291,7 +291,7 @@ rc_t run (const char * table_path, uint64_t N )
 
                 sprintf(name, "C%d", i);
                 STSMSG (1, STATUS("checking "));
-                rc = KDirectoryFileSize(dir, &size, FORMAT, tablePath, name);
+                rc = KDirectoryFileSize(dir, &size, FORMAT, tablePath, "%s", name);
                 if (rc != 0) {
                     if (GetRCState(rc) == rcNotFound) {
                         STSMSG (2, STATUS("not found "));

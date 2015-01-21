@@ -32,6 +32,7 @@
 #include <vdb/table.h>
 #include <align/writer-alignment.h>
 #include <align/dna-reverse-cmpl.h>
+#include <align/align.h>
 
 #include "debug.h"
 #include "defs.h"
@@ -55,6 +56,7 @@ typedef struct CGWriterEvdDnb_match_struct {
     INSDC_coord_len read_len;
     bool has_ref_offset[CG_EVDNC_ALLELE_LEN];
     int32_t ref_offset[CG_EVDNC_ALLELE_LEN];
+    uint8_t ref_offset_type[CG_EVDNC_ALLELE_LEN];
     int64_t ref_id;
     INSDC_coord_zero ref_start;
     bool has_mismatch[CG_EVDNC_ALLELE_LEN];
@@ -101,6 +103,7 @@ rc_t CGWriterEvdDnbs_Make(const CGWriterEvdDnbs** cself, TEvidenceDnbsData** dat
             self->algn.read_len.buffer = &self->match.read_len;
             self->algn.has_ref_offset.buffer = self->match.has_ref_offset;
             self->algn.ref_offset.buffer = self->match.ref_offset;
+            self->algn.ref_offset_type.buffer = self->match.ref_offset_type;
             self->algn.ref_id.buffer = &self->match.ref_id;
             self->algn.ref_id.elements = 1;
             self->algn.ref_start.buffer = &self->match.ref_start;
@@ -204,7 +207,7 @@ rc_t CGWriterEvdDnbs_Write(const CGWriterEvdDnbs* cself, const TEvidenceInterval
                                             ref->allele[ai], ref->allele_length[ai],
 					    cself->data.dnbs[i].offset_in_allele,
                                             ref->allele_alignment[ai], ref->allele_alignment_length[ai],
-                                            &self->algn)) == 0 ) {
+                                            NCBI_align_ro_complete_genomics, &self->algn)) == 0 ) {
                 self->match.mapq = cself->data.dnbs[i].mapping_quality - 33;
                 /* pointer to SEQUENCE table spot and read */
                 self->match.seq_spot_id = cself->data.dnbs[i].seq_spot_id;

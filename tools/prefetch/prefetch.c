@@ -45,7 +45,9 @@
 #include <vfs/resolver.h> /* VResolver */
 
 #include <kns/ascp.h> /* ascp_locate */
-#include <kns/curl-file.h> /* KCurlFileMake */
+#include <kns/manager.h>
+#include <kns/kns-mgr-priv.h>
+#include <kns/http.h>
 
 #include <kfs/file.h> /* KFile */
 #include <kfs/gzip.h> /* KFileMakeGzipForRead */
@@ -87,7 +89,7 @@
 #define STS_DBG 2
 #define STS_FIN 3
 
-#define USE_CURL 1
+#define USE_CURL 0
 
 #define rcResolver   rcTree
 static bool NotFoundByResolver(rc_t rc) {
@@ -171,6 +173,7 @@ typedef struct {
     const KRepositoryMgr *repoMgr;
     const VDBManager *mgr;
     VFSManager *vfsMgr;
+    KNSManager *kns;
 
     VResolver *resolver;
 
@@ -262,17 +265,15 @@ bool _StringIsFasp(const String *self, const char **withoutScheme)
 }
 
 /********** KFile extension **********/
-static rc_t _KFileOpenRemote(const KFile **self, const char *path) {
+static
+rc_t _KFileOpenRemote(const KFile **self, KNSManager *kns, const char *path)
+{
     rc_t rc = 0;
     assert(self);
     if (*self != NULL) {
         return 0;
     }
-#if USE_CURL
-    rc = KCurlFileMake(self, path, false);
-#else
-    rc = KNSManagerMakeHttpFile(kns, &file, NULL, 0x01010000, "%S", s);
-#endif
+    rc = KNSManagerMakeReliableHttpFile(kns, self, NULL, 0x01010000, path);
     return rc;
 }
 
@@ -321,7 +322,7 @@ static rc_t _KDirectoryMkTmpName(const KDirectory *self,
                 "s=%s", prefix->addr));
             return rc;
         }
-        if (KDirectoryPathType(self, out) == kptNotFound) {
+        if (KDirectoryPathType(self, "%s", out) == kptNotFound) {
             break;
         }
         if (++i > 999) {
@@ -373,9 +374,9 @@ rc_t _KDirectoryCleanCache(KDirectory *self, const String *local)
         DISP_RC2(rc, "string_printf(.cache)", local->addr);
     }
 
-    if (rc == 0 && KDirectoryPathType(self, cache) != kptNotFound) {
+    if (rc == 0 && KDirectoryPathType(self, "%s", cache) != kptNotFound) {
         STSMSG(STS_DBG, ("removing %s", cache));
-        rc = KDirectoryRemove(self, false, cache);
+        rc = KDirectoryRemove(self, false, "%s", cache);
     }
 
     return rc;
@@ -417,19 +418,19 @@ static rc_t _KDirectoryClean(KDirectory *self, const String *cache,
         tmpPfxLen = strlen(tmpPfx);
     }
 
-    if (tmp != NULL && KDirectoryPathType(self, tmp) != kptNotFound) {
+    if (tmp != NULL && KDirectoryPathType(self, "%s", tmp) != kptNotFound) {
         rc_t rc3 = 0;
         STSMSG(STS_DBG, ("removing %s", tmp));
-        rc3 = KDirectoryRemove(self, false, tmp);
+        rc3 = KDirectoryRemove(self, false, "%s", tmp);
         if (rc2 == 0 && rc3 != 0) {
             rc2 = rc3;
         }
     }
 
-    if (rmSelf && KDirectoryPathType(self, cache->addr) != kptNotFound) {
+    if (rmSelf && KDirectoryPathType(self, "%s", cache->addr) != kptNotFound) {
         rc_t rc3 = 0;
         STSMSG(STS_DBG, ("removing %s", cache->addr));
-        rc3 = KDirectoryRemove(self, false, cache->addr);
+        rc3 = KDirectoryRemove(self, false, "%s", cache->addr);
         if (rc2 == 0 && rc3 != 0) {
             rc2 = rc3;
         }
@@ -440,7 +441,7 @@ static rc_t _KDirectoryClean(KDirectory *self, const String *cache,
         uint32_t i = 0;
         KNamelist *list = NULL;
         STSMSG(STS_DBG, ("listing %s for old temporary files", dir));
-        rc = KDirectoryList(self, &list, NULL, NULL, dir);
+        rc = KDirectoryList(self, &list, NULL, NULL, "%s", dir);
         DISP_RC2(rc, "KDirectoryList", dir);
 
         if (rc == 0) {
@@ -470,10 +471,10 @@ static rc_t _KDirectoryClean(KDirectory *self, const String *cache,
         RELEASE(KNamelist, list);
     }
 
-    if (lock != NULL && KDirectoryPathType(self, lock) != kptNotFound) {
+    if (lock != NULL && KDirectoryPathType(self, "%s", lock) != kptNotFound) {
         rc_t rc3 = 0;
         STSMSG(STS_DBG, ("removing %s", lock));
-        rc3 = KDirectoryRemove(self, false, lock);
+        rc3 = KDirectoryRemove(self, false, "%s", lock);
         if (rc2 == 0 && rc3 != 0) {
             rc2 = rc3;
         }
@@ -538,7 +539,7 @@ static rc_t _VResolverRemote(VResolver *self, VRemoteProtocols protocols,
         if (vcache == NULL) {
             rc = RC(rcExe, rcResolver, rcResolving, rcPath, rcNotFound);
             PLOGERR(klogInt, (klogInt, rc, "cannot get cache location "
-                "for $(acc). Try to cd out of protected repository.",
+                "for $(acc).", /* Try to cd out of protected repository.", */
                 "acc=%s" , name));
         }
         if (rc == 0) {
@@ -797,7 +798,7 @@ static rc_t ResolvedLocal(const Resolved *self,
     rc = VPathReadPath(self->local.path, path, sizeof path, NULL);
     DISP_RC(rc, "VPathReadPath");
 
-    if (rc == 0 && KDirectoryPathType(dir, path) != kptFile) {
+    if (rc == 0 && KDirectoryPathType(dir, "%s", path) != kptFile) {
         if (force == eForceNo) {
             STSMSG(STS_TOP,
                 ("%s (not a file) is found locally: consider it complete",
@@ -823,7 +824,7 @@ static rc_t ResolvedLocal(const Resolved *self,
     }
 
     if (rc == 0) {
-        rc = KDirectoryOpenFileRead(dir, &local, path);
+        rc = KDirectoryOpenFileRead(dir, &local, "%s", path);
         DISP_RC2(rc, "KDirectoryOpenFileRead", path);
     }
 
@@ -934,24 +935,25 @@ static rc_t MainDownloadFile(Resolved *self,
 {
     rc_t rc = 0;
     KFile *out = NULL;
-    uint64_t pos = 0;
     size_t num_read = 0;
     uint64_t opos = 0;
     size_t num_writ = 0;
+    uint64_t pos = 0;
+    uint64_t prevPos = 0;
 
     assert(self && main);
 
     if (rc == 0) {
         STSMSG(STS_DBG, ("creating %s", to));
         rc = KDirectoryCreateFile(main->dir, &out,
-            false, 0664, kcmInit | kcmParents, to);
+                                  false, 0664, kcmInit | kcmParents, "%s", to);
         DISP_RC2(rc, "Cannot OpenFileWrite", to);
     }
 
     assert(self->remote);
 
     if (self->file == NULL) {
-        rc = _KFileOpenRemote(&self->file, self->remote->addr);
+        rc = _KFileOpenRemote(&self->file, main->kns, self->remote->addr);
         if (rc != 0) {
             PLOGERR(klogInt, (klogInt, rc, "failed to open file for $(path)",
                 "path=%s", self->remote->addr));
@@ -960,20 +962,25 @@ static rc_t MainDownloadFile(Resolved *self,
 
     STSMSG(STS_INFO, ("%s -> %s", self->remote->addr, to));
     do {
+        bool print = pos - prevPos > 200000000;
         rc = Quitting();
 
         if (rc == 0) {
-            STSMSG(STS_FIN,
-                ("> Reading %lu bytes from pos. %lu", main->bsize, pos));
+            if (print) {
+                STSMSG(STS_FIN,
+                    ("Reading %lu bytes from pos. %lu", main->bsize, pos));
+            }
             rc = KFileRead(self->file,
                 pos, main->buffer, main->bsize, &num_read);
             if (rc != 0) {
                 DISP_RC2(rc, "Cannot KFileRead", self->remote->addr);
             }
             else {
-                STSMSG(STS_FIN,
-                    ("< Read %lu bytes from pos. %lu", num_read, pos));
                 pos += num_read;
+            }
+
+            if (print) {
+                prevPos = pos;
             }
         }
 
@@ -1042,10 +1049,10 @@ static rc_t MainDownload(Resolved *self, Main *main) {
         rc = _KDirectoryMkTmpName(main->dir, self->cache, tmp, sizeof tmp);
     }
 
-    if (KDirectoryPathType(main->dir, lock) != kptNotFound) {
+    if (KDirectoryPathType(main->dir, "%s", lock) != kptNotFound) {
         if (main->force != eForceYES) {
             KTime_t date = 0;
-            rc = KDirectoryDate(main->dir, &date, lock);
+            rc = KDirectoryDate(main->dir, &date, "%s", lock);
             if (rc == 0) {
                 time_t t = time(NULL) - date;
                 if (t < 60 * 60 * 24) { /* 24 hours */
@@ -1079,7 +1086,7 @@ static rc_t MainDownload(Resolved *self, Main *main) {
     if (rc == 0) {
         STSMSG(STS_DBG, ("creating %s", lock));
         rc = KDirectoryCreateFile(main->dir, &flock,
-            false, 0664, kcmInit | kcmParents, lock);
+            false, 0664, kcmInit | kcmParents, "%s", lock);
         DISP_RC2(rc, "Cannot OpenFileWrite", lock);
     }
 
@@ -1168,11 +1175,11 @@ static rc_t MainDependenciesList(const Main *self,
 
     assert(self && path && deps);
 
-    if ((VDBManagerPathType(self->mgr, path) & ~kptAlias) != kptDatabase) {
+    if ((VDBManagerPathType(self->mgr, "%s", path) & ~kptAlias) != kptDatabase) {
         return 0;
     }
 
-    rc = VDBManagerOpenDBRead(self->mgr, &db, NULL, path);
+    rc = VDBManagerOpenDBRead(self->mgr, &db, NULL, "%s", path);
     if (rc != 0) {
         if (rc == SILENT_RC(rcDB, rcMgr, rcOpening, rcDatabase, rcIncorrect)) {
             isDb = false;
@@ -1259,7 +1266,7 @@ static rc_t _ItemSetResolverAndAssessionInResolved(Item *item,
     resolved = &item->resolved;
 
     if (item->desc != NULL) {
-        rc = VFSManagerMakePath(vfs, &resolved->accession, item->desc);
+        rc = VFSManagerMakePath(vfs, &resolved->accession, "%s", item->desc);
         DISP_RC2(rc, "VFSManagerMakePath", item->desc);
         if (rc == 0) {
             rc = VResolverAddRef(resolver);
@@ -1315,7 +1322,7 @@ static rc_t _ItemSetResolverAndAssessionInResolved(Item *item,
 /* resolve locations */
 static rc_t _ItemResolveResolved(VResolver *resolver,
     VRemoteProtocols protocols, Item *item, const KRepositoryMgr *repoMgr,
-    const KConfig *cfg, const VFSManager *vfs, size_t minSize, size_t maxSize)
+    const KConfig *cfg, const VFSManager *vfs, KNSManager *kns, size_t minSize, size_t maxSize)
 {
     Resolved *resolved = NULL;
     rc_t rc = 0;
@@ -1367,7 +1374,7 @@ static rc_t _ItemResolveResolved(VResolver *resolver,
                 rc_t rc3 = 0;
                 if (resolved->file == NULL) {
                     rc3 = _KFileOpenRemote(&resolved->file,
-                        resolved->remote->addr);
+                                           kns, resolved->remote->addr);
                     DISP_RC2(rc3,
                         "cannot open remote file", resolved->remote->addr);
                 }
@@ -1405,7 +1412,7 @@ static rc_t _ItemResolveResolved(VResolver *resolver,
                 assert(resolved->remote);
                 if (!_StringIsFasp(resolved->remote, NULL)) {
                     rc2 = _KFileOpenRemote(
-                        &resolved->file, resolved->remote->addr);
+                        &resolved->file, kns, resolved->remote->addr);
                 }
             }
             if (rc2 == 0 && resolved->file != NULL && resolved->remoteSz == 0) {
@@ -1422,7 +1429,7 @@ static rc_t _ItemResolveResolved(VResolver *resolver,
 /* Resolved: resolve locations */
 static rc_t ItemInitResolved(Item *self, VResolver *resolver,
     KDirectory *dir, bool ascp, const KRepositoryMgr *repoMgr,
-    const KConfig *cfg, const VFSManager *vfs, size_t minSize, size_t maxSize)
+    const KConfig *cfg, const VFSManager *vfs, KNSManager *kns, size_t minSize, size_t maxSize)
 {
     Resolved *resolved = NULL;
     rc_t rc = 0;
@@ -1436,14 +1443,14 @@ static rc_t ItemInitResolved(Item *self, VResolver *resolver,
     
     assert(resolved->type != eRunTypeUnknown);
 
-    type = KDirectoryPathType(dir, self->desc) & ~kptAlias;
+    type = KDirectoryPathType(dir, "%s", self->desc) & ~kptAlias;
     if (type == kptFile || type == kptDir) {
         resolved->path = self->desc;
         resolved->existing = true;
         if (resolved->type != eRunTypeDownload) {
             uint64_t s = -1;
             const KFile *f = NULL;
-            rc = KDirectoryOpenFileRead(dir, &f, self->desc);
+            rc = KDirectoryOpenFileRead(dir, &f, "%s", self->desc);
             if (rc == 0) {
                 rc = KFileSize(f, &s);
             }
@@ -1463,7 +1470,7 @@ static rc_t ItemInitResolved(Item *self, VResolver *resolver,
     }
 
     rc = _ItemResolveResolved(resolver, protocols, self,
-        repoMgr, cfg, vfs, minSize, maxSize);
+        repoMgr, cfg, vfs, kns, minSize, maxSize);
 
     STSMSG(STS_DBG, ("Resolve(%s) = %R:", resolved->name, rc));
     STSMSG(STS_DBG, ("local(%s)",
@@ -1523,7 +1530,7 @@ static rc_t ItemResolve(Item *item, int32_t row) {
 
     rc = ItemInitResolved(item, item->main->resolver, item->main->dir, ascp,
         item->main->repoMgr, item->main->cfg, item->main->vfsMgr,
-        item->main->minSize, item->main->maxSize);
+        item->main->kns, item->main->minSize, item->main->maxSize);
 
     return rc;
 }
@@ -1540,6 +1547,8 @@ static rc_t ItemDownload(Item *item) {
     assert(self->type);
 
     if (rc == 0) {
+        bool skip = false;
+
         if (self->existing) {
             self->path = item->desc;
             return rc;
@@ -1549,17 +1558,23 @@ static rc_t ItemDownload(Item *item) {
             STSMSG(STS_TOP,
                ("%d) '%s' (%,zu KB) is smaller than minimum allowed: skipped\n",
                 n, self->name, self->remoteSz / 1024));
-            return rc;
+            skip = true;
         }
-
-        if (self->oversized) {
+        else if (self->oversized) {
             STSMSG(STS_TOP,
                 ("%d) '%s' (%,zu KB) is larger than maximum allowed: skipped\n",
                 n, self->name, self->remoteSz / 1024));
-            return rc;
+            skip = true;
         }
 
-        rc = ResolvedLocal(self, item->main->dir, &isLocal, item->main->force);
+        rc = ResolvedLocal(self, item->main->dir, &isLocal,
+            skip ? eForceNo : item->main->force);
+
+        if (rc == 0) {
+            if (skip && !isLocal) {
+                return rc;
+            }
+        }
     }
 
     if (rc == 0) {
@@ -1569,7 +1584,9 @@ static rc_t ItemDownload(Item *item) {
                 self->path = self->local.str->addr;
             }
         }
-        else if (!_StringIsFasp(self->remote, NULL) && item->main->noHttp) {
+        else if (!_StringIsFasp(self->remote, NULL)
+            && item->main->noHttp)
+        {
             rc = RC(rcExe, rcFile, rcCopying, rcFile, rcNotFound);
             PLOGERR(klogErr, (klogErr, rc,
                 "cannot download '$(name)' using requested transport",
@@ -1585,8 +1602,8 @@ static rc_t ItemDownload(Item *item) {
                     self->path = self->cache->addr;
                 }
             }
-            else if (rc !=
-                SILENT_RC(rcExe, rcProcess, rcExecuting, rcProcess, rcCanceled))
+            else if (rc != SILENT_RC(rcExe,
+                rcProcess, rcExecuting, rcProcess, rcCanceled))
             {
                 STSMSG(STS_TOP, ("%d) failed to download %s", n, self->name));
             }
@@ -1672,13 +1689,13 @@ static rc_t ItemPostDownload(Item *item, int32_t row) {
         }
         else if (resolved->oversized) {
             item->main->oversized = true;
-            return rc;
         }
         else if (resolved->undersized) {
             item->main->undersized = true;
-            return rc;
         }
-        rc = MainDependenciesList(item->main, resolved->path, &deps);
+        if (resolved->path != NULL) {
+            rc = MainDependenciesList(item->main, resolved->path, &deps);
+        }
     }
 
     /* resolve dependencies (refseqs) */
@@ -1787,7 +1804,7 @@ rc_t IteratorInit(Iterator *self, const char *obj, const Main *main)
 
 #ifdef _DEBUGGING
     if (obj == NULL && main->textkart) {
-        type = KDirectoryPathType(main->dir, main->textkart);
+        type = KDirectoryPathType(main->dir, "%s", main->textkart);
         if ((type & ~kptAlias) != kptFile) {
             rc = RC(rcExe, rcFile, rcOpening, rcFile, rcNotFound);
             DISP_RC(rc, main->textkart);
@@ -1809,9 +1826,9 @@ rc_t IteratorInit(Iterator *self, const char *obj, const Main *main)
 #endif
 
     assert(obj);
-    type = KDirectoryPathType(main->dir, obj);
+    type = KDirectoryPathType(main->dir, "%s", obj);
     if ((type & ~kptAlias) == kptFile) {
-        type = VDBManagerPathType(main->mgr, obj);
+        type = VDBManagerPathType(main->mgr, "%s", obj);
         if ((type & ~kptAlias) == kptFile) {
             rc = KartMake(main->dir, obj, &self->kart, &self->isKart);
             if (!self->isKart) {
@@ -2457,6 +2474,7 @@ static rc_t MainFini(Main *self) {
     RELEASE(VDBManager, self->mgr);
     RELEASE(KDirectory, self->dir);
     RELEASE(KRepositoryMgr, self->repoMgr);
+    RELEASE(KNSManager, self->kns);
     RELEASE(VFSManager, self->vfsMgr);
     RELEASE(Args, self->args);
 
@@ -2500,6 +2518,12 @@ static rc_t MainInit(int argc, char *argv[], Main *self) {
     if (rc == 0) {
         rc = VFSManagerMake(&self->vfsMgr);
         DISP_RC(rc, "VFSManagerMake");
+    }
+
+    if ( rc == 0 )
+    {
+        rc = VFSManagerGetKNSMgr (self->vfsMgr, & self->kns);
+        DISP_RC(rc, "VFSManagerGetKNSMgr");
     }
 
     if (rc == 0) {
@@ -2628,15 +2652,22 @@ static rc_t MainRun(Main *self, const char *arg, const char *realArg) {
             }
                 
             for (n = 1; ; ++n) {
+                rc_t rc2 = 0;
                 rc_t rc3 = 0;
                 bool done = false;
                 Item *item = NULL;
-                rc = Quitting();
-                if (rc != 0) {
+                rc_t rcq = Quitting();
+                if (rcq != 0) {
+                    if (rc == 0) {
+                        rc = rcq;
+                    }
                     break;
                 }
-                rc = IteratorNext(&it, &item, &done);
-                if (rc != 0 || done) {
+                rc2 = IteratorNext(&it, &item, &done);
+                if (rc2 != 0 || done) {
+                    if (rc == 0 && rc2 != 0) {
+                        rc = rc2;
+                    }
                     break;
                 }
                 done = ! NumIteratorNext(&nit, n);
@@ -2661,7 +2692,9 @@ static rc_t MainRun(Main *self, const char *arg, const char *realArg) {
                ("%d) '%s' (%,zu KB) is smaller than minimum allowed: skipped\n",
                 n, item->resolved.name, item->resolved.remoteSz / 1024));
                         }
-                        else if (item->resolved.oversized) {
+                        else if (item->resolved.oversized &&
+                             type == eRunTypeGetSize)
+                        {
                             STSMSG(STS_TOP,
                 ("%d) '%s' (%,zu KB) is larger than maximum allowed: skipped\n",
                 n, item->resolved.name, item->resolved.remoteSz / 1024));
@@ -2761,7 +2794,10 @@ rc_t CC KMain(int argc, char *argv[]) {
             rc_t rc2 = ArgsParamValue(pars.args, i, &obj);
             DISP_RC(rc2, "ArgsParamValue");
             if (rc2 == 0) {
-                rc = MainRun(&pars, obj, obj);
+                rc2 = MainRun(&pars, obj, obj);
+                if (rc2 != 0 && rc == 0) {
+                    rc = rc2;
+                }
             }
         }
 

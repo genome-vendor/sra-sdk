@@ -25,7 +25,7 @@
 
 default: std
 
-TOP ?= $(shell ../../build/abspath.sh ../..)
+TOP ?= $(abspath ../..)
 MODULE = tools/sra-pileup
 
 include $(TOP)/build/Makefile.env
@@ -35,6 +35,7 @@ INT_TOOLS = \
 EXT_TOOLS = \
 	sra-pileup \
 	sam-dump
+#	sam-dump2
 
 ALL_TOOLS = \
 	$(INT_TOOLS) \
@@ -85,10 +86,22 @@ clean: stdclean
 # sra-pileup
 #
 TOOL_SRC = \
+	dyn_string \
 	cmdline_cmn \
+	perf_log \
 	reref \
+	cg_tools \
+	report_deletes \
 	ref_regions \
+	4na_ascii \
+	ref_walker_0 \
 	ref_walker \
+	walk_debug \
+	pileup_counters \
+	pileup_index \
+	pileup_varcount \
+	pileup_stat \
+	pileup_v2 \
 	sra-pileup
 
 TOOL_OBJ = \
@@ -96,18 +109,42 @@ TOOL_OBJ = \
 
 TOOL_LIB = \
 	-lkapp \
-	-lncbi-vdb \
-	-lxml2 \
+	-sncbi-vdb \
 	-lm
 
 $(BINDIR)/sra-pileup: $(TOOL_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(TOOL_LIB)
 
 #-------------------------------------------------------------------------------
+# sam-dump2
+#
+SAMDUMP2_SRC = \
+	cmdline_cmn \
+	writer \
+	sam-dump
+
+SAMDUMP2_OBJ = \
+	$(addsuffix .$(OBJX),$(SAMDUMP2_SRC))
+
+SAMDUMP2_LIB = \
+	-lkapp \
+	-sncbi-vdb \
+	-lm
+
+ifdef NCBI
+CFLAGS += -DNCBI
+endif
+
+$(BINDIR)/sam-dump2: $(SAMDUMP2_OBJ)
+	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(SAMDUMP2_LIB)
+
+#-------------------------------------------------------------------------------
 # sam-dump
 #
 SAMDUMP3_SRC = \
 	inputfiles \
+	perf_log \
+	rna_splice_log \
 	sam-dump-opts \
 	out_redir \
 	sam-hdr \
@@ -124,9 +161,13 @@ SAMDUMP3_OBJ = \
 
 SAMDUMP3_LIB = \
 	-lkapp \
-	-lncbi-vdb \
-	-lxml2 \
+	-sncbi-vdb \
 	-lm
+
+ifdef NCBI
+CFLAGS += -DNCBI
+endif
 
 $(BINDIR)/sam-dump: $(SAMDUMP3_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(SAMDUMP3_LIB)
+

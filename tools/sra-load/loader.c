@@ -498,7 +498,7 @@ static rc_t s_KXMLDocMake(const KXMLDoc **doc, const char *path)
         return RC(rcExe, rcXmlDoc, rcConstructing, rcParam, rcNull);
     }
     if (rc == 0) {
-        rc = KDirectoryOpenFileRead(s_Directory, &file, path);
+        rc = KDirectoryOpenFileRead(s_Directory, &file, "%s", path);
         if (rc != 0) {
             PLOGERR(klogErr, (klogErr, rc, "Cannot open file $(file)", "file=%s", path));
         }
@@ -706,7 +706,7 @@ rc_t SInputOpen_TarVisit(const KDirectory *dir, uint32_t type, const char *name,
         }
         if( rc == 0 ) {
             char buf[1024];
-            if( (rc = KDirectoryResolvePath(dir, true, buf, sizeof(buf), name)) == 0 ) { 
+            if( (rc = KDirectoryResolvePath(dir, true, buf, sizeof(buf), "%s", name)) == 0 ) { 
                 d->files[d->count++] = strdup(buf);
                 if( d->files[d->count - 1] == NULL ) {
                     rc = RC(rcExe, rcStorage, rcAllocating, rcMemory, rcExhausted);
@@ -770,7 +770,7 @@ rc_t SInputOpen(const SInput **cself, TArgs *args)
                                     int r = snprintf(base_path, sizeof base_path, "%s/", b->files[j].cc_xml);
                                     if (r >= sizeof base_path) {
                                         rc = RC(rcExe, rcStorage, rcAllocating, rcFile, rcTooLong);
-                                    } else if ((rc = KDirectoryOpenXTocDirRead(args->_input_dir, &ccdirs[ccdirs_qty].xdir, false, kf, base_path)) == 0 ) {
+                                    } else if ((rc = KDirectoryOpenXTocDirRead(args->_input_dir, &ccdirs[ccdirs_qty].xdir, false, kf, "%s", base_path)) == 0 ) {
                                         cd = ccdirs_qty++;
                                         ccdirs[cd].uid = b->files[j].cc_xml;
                                         KFileRelease(kf);
@@ -1053,7 +1053,7 @@ rc_t KMain(int argc, char *argv[])
                 }
                 if (rc == 0) {
                     rc = SRATableCommit(table);
-                    if( GetRCObject(rc) == rcCursor && GetRCState(rc) == rcNotOpen ) {
+                    if( GetRCObject(rc) == (enum RCObject)rcCursor && GetRCState(rc) == rcNotOpen ) {
                         rc = 0;
                     }
                 }

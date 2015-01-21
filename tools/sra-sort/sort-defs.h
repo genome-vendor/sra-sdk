@@ -27,6 +27,33 @@
 #ifndef _h_sra_sort_defs_
 #define _h_sra_sort_defs_
 
+#ifndef _h_kfc_callconv_
+#include <kfc/callconv.h>
+#endif
+
+#include <stdint.h>
+#include <stddef.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <assert.h>
+
+/* prevent inclusion of <kfc/defs.h> */
+#define _h_kfc_defs_ 1
+
+
+/*--------------------------------------------------------------------------
+ * NAME_VERS
+ *  synthesize versioned type and message names
+ */
+#define NAME_VERS( name, maj_vers ) \
+    MAKE_NAME_VERS1 ( name, maj_vers )
+#define MAKE_NAME_VERS1( name, maj_vers ) \
+    MAKE_NAME_VERS2 ( name, maj_vers )
+#define MAKE_NAME_VERS2( name, maj_vers ) \
+    name ## _v ## maj_vers
+
+typedef uint32_t rc_t, ver_t;
+
 #ifndef _h_klib_defs_
 #include <klib/defs.h>
 #endif

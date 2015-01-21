@@ -96,7 +96,7 @@ rc_t SRF_parse_prepdata(SRF_context* ctx, uint64_t bsize, const uint8_t** data, 
     /* prepare bsize bytes in buffer */
     rc = SRALoaderFileRead(ctx->file, *skipover, bsize, (const void**)&ctx->file_buf, &ctx->file_buf_sz);
     if( rc != 0 || ctx->file_buf == NULL || ctx->file_buf_sz == 0 || ctx->file_buf_sz > bsize ) {
-        if( GetRCObject(rc) != rcBuffer || GetRCState(rc) != rcInsufficient ) {
+        if( GetRCObject(rc) != (enum RCObject)rcBuffer || GetRCState(rc) != rcInsufficient ) {
             rc = rc ? rc : RC(rcSRA, rcFormatter, rcParsing, rcData, ctx->file_buf_sz > bsize ? rcExcessive : rcInsufficient);
             SRALoaderFile_LOG(ctx->file, klogErr, rc, "expected $(expected) bytes chunk", PLOG_U64(expected), bsize);
             return rc;
@@ -129,7 +129,7 @@ rc_t SRF_parse_prepdata(SRF_context* ctx, uint64_t bsize, const uint8_t** data, 
             inbuf += x;
             rc = SRALoaderFileRead(ctx->file, x, to_read, (const void**)&ctx->file_buf, &ctx->file_buf_sz);
             if( rc != 0 || ((ctx->file_buf == NULL || ctx->file_buf_sz == 0) && to_read > 0) ) {
-                if( GetRCObject(rc) != rcBuffer || GetRCState(rc) != rcInsufficient ) {
+                if( GetRCObject(rc) != (enum RCObject)rcBuffer || GetRCState(rc) != rcInsufficient ) {
                     rc = rc ? rc : RC(rcSRA, rcFormatter, rcParsing, rcData, rcInsufficient);
                     SRALoaderFile_LOG(ctx->file, klogErr, rc, "expected $(expected) bytes of $(chunk) chunk",
                                       PLOG_2(PLOG_U64(expected),PLOG_U64(chunk)), to_read, bsize);

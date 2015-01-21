@@ -1,0 +1,15 @@
+*.d
+*.db
+*.o
+/bin64
+/build/BUILD.*
+/build/COMP.mac
+/centos
+/ilib64
+/lib64
+/mac
+/Makefile.config.*
+/reconfigure
+/schema
+/test-bin64
+/win

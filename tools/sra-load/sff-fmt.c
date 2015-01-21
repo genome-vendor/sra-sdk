@@ -355,7 +355,7 @@ rc_t SFFLoaderFmtWriteDataFile(SFFLoaderFmt* self, const SRALoaderFile* file)
                 DEBUG_MSG (5, ("%s: Common header ok: %u reads\n", self->file_name, self->header.number_of_reads));
                 DEBUG_MSG (8, ("%s: flow_chars: [%hu] %s\n", self->file_name, self->header.num_flows_per_read, self->flow_chars.data));
                 DEBUG_MSG (8, ("%s: key_seq: [%hu] %s\n", self->file_name, self->header.key_length, self->key_seq.data));
-            } else if( GetRCObject(rc) == rcData && GetRCState(rc) == rcIgnored ) {
+            } else if( GetRCObject(rc) == (enum RCObject)rcData && GetRCState(rc) == rcIgnored ) {
                 rc = 0;
                 break;
             }

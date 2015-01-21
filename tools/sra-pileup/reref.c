@@ -438,10 +438,14 @@ static rc_t report_references( const VDBManager *vdb_mgr, VFSManager * vfs_mgr, 
                         case kptDatabase : rc = report_ref_database( vdb_mgr, vfs_mgr, buffer, extended );
                                            break;
 
-                        case kptTable    : rc = KOutMsg( "cannot report references on a table-object\n" );
+                        case kptTable    : KOutMsg( "cannot report references on a table-object\n" );
+                                            rc = RC ( rcApp, rcNoTarg, rcAccessing, rcParam, rcInvalid );
+                                            (void)LOGERR( klogErr, rc, "cannot report references on a table-object" );
                                            break;
 
-                        default          : rc = KOutMsg( "the given object is not a vdb-database\n" );
+                        default          : KOutMsg( "the given object is not a vdb-database\n" );
+                                            rc = RC ( rcApp, rcNoTarg, rcAccessing, rcParam, rcInvalid );
+                                            (void)LOGERR( klogErr, rc, "the given object is not a vdb-database" );
                                            break;
                     }
                 }
@@ -500,8 +504,7 @@ rc_t report_on_reference( Args * args, bool extended )
                         }
                         else
                         {
-                            /* rc value not used, because it can be something that has no references */
-                            report_references( vdb_mgr, vfs_mgr, param, extended );
+                            rc = report_references( vdb_mgr, vfs_mgr, param, extended );
                         }
                     }
                     VFSManagerRelease ( vfs_mgr );

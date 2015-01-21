@@ -43,6 +43,8 @@ extern "C" {
 #include <klib/namelist.h>
 
 #include <kapp/args.h>
+#include "perf_log.h"
+#include "rna_splice_log.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -60,6 +62,7 @@ extern "C" {
 #define OPT_CG_MAPP     "CG-mappings"
 #define OPT_REGION      "aligned-region"
 #define OPT_RECAL_HDR   "header"
+#define OPT_HDR_FILE    "header-file"
 #define OPT_NO_HDR      "no-header"
 #define OPT_USE_SEQID   "seqid"
 #define OPT_HIDE_IDENT  "hide-identical"
@@ -69,7 +72,6 @@ extern "C" {
 #define OPT_REVERSE     "reverse"
 #define OPT_SPOTGRP     "spot-group"
 #define OPT_MATE_GAP    "mate-cache-row-gap"
-#define OPT_TEST_ROWS   "test-rows"
 #define OPT_XI_DEBUG    "XI"
 #define OPT_Q_QUANT     "qual-quant"
 #define OPT_GZIP        "gzip"
@@ -92,7 +94,10 @@ extern "C" {
 #define OPT_LEGACY      "legacy"
 #define OPT_NEW         "new"
 #define OPT_RNA_SPLICE  "rna-splicing"
+#define OPT_RNA_SPLICEL "rna-splice-level"
+#define OPT_RNA_SPLICE_LOG "rna-splice-log"
 #define OPT_NO_MT       "disable-multithreading"
+#define OPT_TIMING      "timing"
 
 typedef struct range
 {
@@ -113,7 +118,8 @@ enum header_mode
 {
     hm_none = 0,    /* do not dump the headers at all */
     hm_recalc,      /* recalculate the headers */
-    hm_dump         /* dump the header found in metadata */
+    hm_dump,        /* dump the header found in metadata */
+    hm_file         /* take the complete header part from a file */
 };
 
 enum output_format
@@ -169,11 +175,27 @@ typedef struct samdump_opts
     /* optional outputfile */
     const char * outputfile;
 
+    /* optional header-file */
+    const char * header_file;
+
     /* cigar-test >>> not advertized! */
     const char * cigar_test;
 
+    /* timing-file >>> not advertized! */
+    const char * timing_file;
+
+    /* log file for rna-splicing-events */
+    const char * rna_splice_log_file;
+
+    /* timing-performane-log, created if timing_file given */
+    struct perf_log * perf_log;
+
+    /* logging of rna-splicing on reqest */
+    struct rna_splice_log * rna_splice_log;
+
     uint32_t region_count;
     uint32_t input_file_count;
+    uint32_t rna_splice_level;  /* can be 0 || 1 || 2 */
 
     int32_t min_mapq;
 
@@ -182,10 +204,6 @@ typedef struct samdump_opts
 
     /* mate's farther apart than this are not cached */
     uint32_t mape_gap_cache_limit;
-
-    /* limit the output of each table to max. this number of rows, if set to a vaue greater than zero */
-    uint64_t test_rows;
-    uint64_t rows_so_far;
 
     size_t cursor_cache_size;
 
@@ -272,10 +290,9 @@ bool filter_by_matepair_dist( const samdump_opts * opts, int32_t tlen );
 bool is_this_alignment_requested( const samdump_opts * opts, const char *refname, uint32_t refname_len,
                                   uint64_t start, uint64_t len );
 
-bool test_limit_reached( const samdump_opts * opts, uint64_t rows_so_far );
-
 rc_t dump_name( const samdump_opts * opts, int64_t seq_spot_id,
                 const char * spot_group, uint32_t spot_group_len );
+
 rc_t dump_name_legacy( const samdump_opts * opts, const char * name, size_t name_len,
                        const char * spot_group, uint32_t spot_group_len );
 

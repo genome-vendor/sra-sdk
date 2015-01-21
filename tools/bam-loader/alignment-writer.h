@@ -27,7 +27,7 @@
 #ifndef BAM_LOAD_ALIGNMENT_WRITER_H_
 #define BAM_LOAD_ALIGNMENT_WRITER_H_ 1
 
-#include <klib/text.h>
+#include <klib/data-buffer.h>
 #include <vdb/database.h>
 #include <vdb/table.h>
 #include <vdb/cursor.h>
@@ -40,6 +40,7 @@ typedef struct s_alignment Alignment;
 typedef struct AlignmentRecord AlignmentRecord;
 
 struct AlignmentRecord {
+    KDataBuffer buffer;
     TableWriterAlgnData data;
     int64_t alignId;
     bool isPrimary;
@@ -79,6 +80,7 @@ struct AlignmentRecord {
 
 #define AR_NUM_OFFSET(X) ((X).data.ref_offset.elements)
 #define AR_OFFSET(X) ((INSDC_coord_zero *)((X).data.ref_offset.buffer))
+#define AR_OFFSET_TYPE(X) ((uint8_t *)((X).data.ref_offset_type.buffer))
 
 Alignment *AlignmentMake(VDatabase *db);
 
@@ -91,5 +93,7 @@ rc_t AlignmentGetSpotKey(Alignment *self, uint64_t *keyId);
 rc_t AlignmentWriteSpotId(Alignment *self, int64_t spotId);
 
 rc_t AlignmentWhack(Alignment *self, bool commit);
+
+rc_t AlignmentRecordInit(AlignmentRecord *self, unsigned readlen);
 
 #endif

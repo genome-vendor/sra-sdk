@@ -31,6 +31,7 @@
 #include <klib/log.h>
 #include <klib/status.h>
 #include <klib/text.h>
+#include <klib/num-gen.h>
 #include <kapp/args.h>
 #include <os-native.h>
 #include <sysalloc.h>
@@ -72,7 +73,7 @@ static rc_t vdco_set_str( char **dst, const char *src )
     {
         return RC( rcVDB, rcNoTarg, rcWriting, rcMemory, rcExhausted );
     }
-    string_copy( *dst, len+1, src, len );
+    string_copy( *dst, len + 1, src, len );
     return 0;
 }
 
@@ -85,6 +86,8 @@ static void vdco_init_values( p_dump_context ctx )
     ctx->filter = NULL;
 	ctx->idx_range = NULL;
 	ctx->output_file = NULL;
+	ctx->output_path = NULL;
+    ctx->rows = NULL;
 
     ctx->print_row_id = true;
     ctx->print_in_hex = false;
@@ -93,6 +96,7 @@ static void vdco_init_values( p_dump_context ctx )
     ctx->print_dna_bases = false;
     ctx->max_line_len = 0;
     ctx->indented_line_len = 0;
+    ctx->phase = 0;
 
     ctx->help_requested = false;
     ctx->usage_requested = false;
@@ -106,8 +110,8 @@ static void vdco_init_values( p_dump_context ctx )
     ctx->dont_check_accession = false;
     ctx->print_num_elem = false;
     ctx->objver_requested = false;
+    ctx->objts_requested = false;
     ctx->objtype_requested = false;
-    ctx->check_curl = false;
 	ctx->idx_enum_requested = false;
 	ctx->idx_range_requested = false;
     ctx->disable_multithreading = false;
@@ -131,8 +135,6 @@ rc_t vdco_init( dump_context **ctx )
         {
             VectorInit( &((*ctx)->schema_list), 0, 5 );
             vdco_init_values( *ctx );
-            rc = vdn_make( &((*ctx)->row_generator) );
-            DISP_RC( rc, "num_gen_make() failed" );
         }
     }
     return rc;
@@ -154,26 +156,49 @@ rc_t vdco_destroy( p_dump_context ctx )
     {
         VectorWhack( &(ctx->schema_list),
                      vdco_schema_list_entry_whack, NULL );
+
         if ( ctx->table != NULL )
         {
             free( (void*)ctx->table );
             ctx->table = NULL;
         }
+
         if ( ctx->columns != NULL )
         {
             free( (void*)ctx->columns );
             ctx->columns = NULL;
         }
+
         if ( ctx->excluded_columns != NULL )
         {
             free( (void*)ctx->excluded_columns );
             ctx->excluded_columns = NULL;
         }
 
-        free( (void*)ctx->output_file );
-        ctx->output_file = NULL;
+        if ( ctx->row_range != NULL )
+        {
+            free( (void*)ctx->row_range );
+            ctx->row_range = NULL;
+        }
 
-        vdn_destroy( ctx->row_generator );
+
+        if ( ctx->output_path != NULL )
+        {
+            free( (void*)ctx->output_path );
+            ctx->output_path = NULL;
+        }
+
+        if ( ctx->output_file != NULL )
+        {
+            free( (void*)ctx->output_file );
+            ctx->output_file = NULL;
+        }
+
+        if ( ctx->rows != NULL )
+        {
+            num_gen_destroy( ctx->rows );
+            ctx->rows = NULL;
+        }
         free( ctx );
     }
     return rc;
@@ -215,7 +240,7 @@ static rc_t vdco_set_filter( p_dump_context ctx, const char *src )
     if ( rc == 0 )
     {
         rc = vdco_set_str( (char**)&(ctx->filter), src );
-        DISP_RC( rc, "dump_context_set_str() failed" );
+        DISP_RC( rc, "vdco_set_str() failed" );
     }
     return rc;
 }
@@ -231,7 +256,7 @@ rc_t vdco_set_table( p_dump_context ctx, const char *src )
     if ( rc == 0 )
     {
         rc = vdco_set_str( (char**)&(ctx->table), src );
-        DISP_RC( rc, "dump_context_set_str() failed" );
+        DISP_RC( rc, "vdco_set_str() failed" );
     }
     return rc;
 }
@@ -246,7 +271,7 @@ static rc_t vdco_set_columns( p_dump_context ctx, const char *src )
     if ( rc == 0 )
     {
         rc = vdco_set_str( (char**)&(ctx->columns), src );
-        DISP_RC( rc, "dump_context_set_str() failed" );
+        DISP_RC( rc, "vdco_set_str() failed" );
     }
     return rc;
 }
@@ -261,7 +286,7 @@ static rc_t vdco_set_excluded_columns( p_dump_context ctx, const char *src )
     if ( rc == 0 )
     {
         rc = vdco_set_str( (char**)&(ctx->excluded_columns), src );
-        DISP_RC( rc, "dump_context_set_str() failed" );
+        DISP_RC( rc, "vdco_set_str() failed" );
     }
     return rc;
 }
@@ -275,7 +300,18 @@ static rc_t vdco_set_row_range( p_dump_context ctx, const char *src )
     }
     if ( rc == 0 )
     {
-        vdn_parse( ctx->row_generator, src );
+        rc = vdco_set_str( (char**)&(ctx->row_range), src );
+        DISP_RC( rc, "vdco_set_str() failed" );
+        if ( rc == 0 )
+        {
+            if ( ctx->rows != NULL )
+            {
+                num_gen_destroy( ctx->rows );
+                ctx->rows = NULL;
+            }
+            rc = num_gen_make_from_str( &ctx->rows, src );
+            DISP_RC( rc, "num_gen_make_from_str() failed" );
+        }
     }
     return rc;
 }
@@ -291,7 +327,7 @@ static rc_t vdco_set_idx_range( p_dump_context ctx, const char *src )
     if ( rc == 0 )
     {
         rc = vdco_set_str( (char**)&(ctx->idx_range), src );
-        DISP_RC( rc, "dump_context_set_str() failed" );
+        DISP_RC( rc, "vdco_set_str() failed" );
     }
     return rc;
 }
@@ -307,7 +343,23 @@ static rc_t vdco_set_output_file( p_dump_context ctx, const char *src )
     if ( rc == 0 )
     {
         rc = vdco_set_str( (char**)&(ctx->output_file), src );
-        DISP_RC( rc, "dump_context_set_str() failed" );
+        DISP_RC( rc, "vdco_set_str() failed" );
+    }
+    return rc;
+}
+
+
+static rc_t vdco_set_output_path( p_dump_context ctx, const char *src )
+{
+    rc_t rc = 0;
+    if ( ( ctx == NULL )||( src == NULL ) )
+    {
+        rc = RC( rcVDB, rcNoTarg, rcWriting, rcParam, rcNull );
+    }
+    if ( rc == 0 )
+    {
+        rc = vdco_set_str( (char**)&(ctx->output_path), src );
+        DISP_RC( rc, "vdco_set_str() failed" );
     }
     return rc;
 }
@@ -325,12 +377,18 @@ static bool vdco_set_format( p_dump_context ctx, const char *src )
         ctx->format = df_json;
     else if ( strcmp( src, "piped" ) == 0 )
         ctx->format = df_piped;
+    else if ( strcmp( src, "sra-dump" ) == 0 )
+        ctx->format = df_sra_dump;
     else if ( strcmp( src, "tab" ) == 0 )
         ctx->format = df_tab;
     else if ( strcmp( src, "fastq" ) == 0 )
         ctx->format = df_fastq;
     else if ( strcmp( src, "fasta" ) == 0 )
         ctx->format = df_fasta;
+    else if ( strcmp( src, "bin" ) == 0 )
+        ctx->format = df_bin;
+    else if ( strcmp( src, "sql" ) == 0 )
+        ctx->format = df_sql;
     else ctx->format = df_default;
     return true;
 }
@@ -470,6 +528,7 @@ static void vdco_evaluate_options( const Args *my_args,
     ctx->help_requested = vdco_get_bool_option( my_args, OPTION_HELP, false );
     ctx->print_row_id = vdco_get_bool_option( my_args, OPTION_ROW_ID_ON, false );
     ctx->lf_after_row = vdco_get_uint16_option( my_args, OPTION_LINE_FEED, 1 );
+    ctx->phase = vdco_get_uint16_option( my_args, OPTION_PHASE, 0 );
     ctx->print_column_names = vdco_get_bool_neg_option( my_args, OPTION_COLNAME_OFF, true );
     ctx->print_in_hex = vdco_get_bool_option( my_args, OPTION_IN_HEX, false );
     ctx->schema_dump_requested = vdco_get_bool_option( my_args, OPTION_SCHEMA_DUMP, false );
@@ -479,6 +538,7 @@ static void vdco_evaluate_options( const Args *my_args,
     ctx->column_enum_short = vdco_get_bool_option( my_args, OPTION_COLUMN_SHORT, false );
     ctx->print_dna_bases = vdco_get_bool_option( my_args, OPTION_DNA_BASES, false );
     ctx->objver_requested = vdco_get_bool_option( my_args, OPTION_OBJVER, false );
+    ctx->objts_requested = vdco_get_bool_option( my_args, OPTION_OBJTS, false );
     ctx->objtype_requested = vdco_get_bool_option( my_args, OPTION_OBJTYPE, false );
     ctx->max_line_len = vdco_get_uint16_option( my_args, OPTION_MAX_LINE_LEN, 0 );
     ctx->indented_line_len = vdco_get_uint16_option( my_args, OPTION_LINE_INDENT, 0 );
@@ -490,10 +550,11 @@ static void vdco_evaluate_options( const Args *my_args,
     ctx->sum_num_elem = vdco_get_bool_option( my_args, OPTION_NUMELEMSUM, false );
     ctx->show_blobbing = vdco_get_bool_option( my_args, OPTION_SHOW_BLOBBING, false );
     ctx->enum_phys = vdco_get_bool_option( my_args, OPTION_ENUM_PHYS, false );
-    ctx->check_curl = vdco_get_bool_option( my_args, OPTION_CHECK_CURL, false );
+    ctx->enum_readable = vdco_get_bool_option( my_args, OPTION_ENUM_READABLE, false );
     ctx->idx_enum_requested = vdco_get_bool_option( my_args, OPTION_IDX_ENUM, false );
     ctx->disable_multithreading = vdco_get_bool_option( my_args, OPTION_NO_MULTITHREAD, false );
-    
+    ctx->print_info = vdco_get_bool_option( my_args, OPTION_INFO, false );
+
     ctx->cur_cache_size = vdco_get_size_t_option( my_args, OPTION_CUR_CACHE, CURSOR_CACHE_SIZE );
     ctx->output_buffer_size = vdco_get_size_t_option( my_args, OPTION_OUT_BUF_SIZE, DEF_OPTION_OUT_BUF_SIZE );
     
@@ -510,11 +571,15 @@ static void vdco_evaluate_options( const Args *my_args,
     vdco_set_row_range( ctx, vdco_get_str_option( my_args, OPTION_ROWS ) );
 	vdco_set_idx_range( ctx, vdco_get_str_option( my_args, OPTION_IDX_RANGE ) );
     vdco_set_output_file( ctx, vdco_get_str_option( my_args, OPTION_OUT_FILE ) );
+    vdco_set_output_path( ctx, vdco_get_str_option( my_args, OPTION_OUT_PATH ) );
 
 	ctx->idx_range_requested = ( ctx->idx_range != NULL );
     vdco_set_schemas( my_args, ctx );
     vdco_set_filter( ctx, vdco_get_str_option( my_args, OPTION_FILTER ) );
     vdco_set_boolean_char( ctx, vdco_get_str_option( my_args, OPTION_BOOLEAN ) );
+
+    if ( ctx->format == df_sra_dump )
+        ctx->without_sra_types = true;
 }
 
 rc_t vdco_capture_arguments_and_options( const Args * args, dump_context *ctx)

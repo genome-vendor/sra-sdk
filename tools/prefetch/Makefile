@@ -25,7 +25,7 @@
 
 default: std
 
-TOP ?= $(shell ../../build/abspath.sh ../..)
+TOP ?= $(abspath ../..)
 MODULE = tools/prefetch
 
 include $(TOP)/build/Makefile.env
@@ -33,7 +33,8 @@ include $(TOP)/build/Makefile.env
 INT_TOOLS = \
 
 EXT_TOOLS = \
-	prefetch
+	prefetch \
+#	aget
 
 ALL_TOOLS = \
 	$(INT_TOOLS) \
@@ -91,10 +92,23 @@ PREFETCH_OBJ = \
 
 PREFETCH_LIB = \
 	-lkapp \
-	-lncbi-vdb \
-	-lxml2 \
+	-sncbi-vdb \
 	-lm
 
 
 $(BINDIR)/prefetch: $(PREFETCH_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(PREFETCH_LIB)
+
+#-------------------------------------------------------------------------------
+# aget
+#
+GET_SRC = \
+	aget \
+	getAscp
+
+GET_OBJ = \
+	$(addsuffix .$(OBJX),$(GET_SRC))
+
+$(BINDIR)/aget: $(GET_OBJ)
+	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(PREFETCH_LIB)
+

@@ -659,7 +659,7 @@ static void Cache_Unpack( uint64_t val, int64_t mate_id, SCurs const *curs, SCol
 #if 0
 static rc_t OpenVTable( VDatabase const *db, STable* tbl, char const *name, bool optional )
 {
-    rc_t rc = VDatabaseOpenTableRead( db, &tbl->vtbl, name );
+    rc_t rc = VDatabaseOpenTableRead( db, &tbl->vtbl, "%s", name );
     if ( GetRCState( rc ) == rcNotFound && optional )
     {
         rc = 0;
@@ -711,7 +711,7 @@ static rc_t Cursor_Open( STable const *const tbl, SCurs *const curs, SCol cols[]
     {
         if ( cols[ i ].name[ 0 ] == 0 )
             continue;
-        rc = VCursorAddColumn( curs->vcurs, &cols[ i ].idx, cols[ i ].name );
+        rc = VCursorAddColumn( curs->vcurs, &cols[ i ].idx, "%s", cols[ i ].name );
         if ( GetRCObject( rc ) == rcColumn )
         {
             switch ( GetRCState( rc ) )
@@ -3443,7 +3443,7 @@ static rc_t ProcessTable( VDBManager const *mgr, char const fullPath[],
                           char const accession[], char const readGroup[] )
 {
     VTable const *tbl;
-    rc_t rc = VDBManagerOpenTableRead( mgr, &tbl, 0, fullPath );
+    rc_t rc = VDBManagerOpenTableRead( mgr, &tbl, 0, "%s", fullPath );
     
     if ( rc != 0 )
     {
@@ -3452,7 +3452,7 @@ static rc_t ProcessTable( VDBManager const *mgr, char const fullPath[],
         rc = VDBManagerMakeSRASchema( mgr, &schema );
         if ( rc == 0 )
         {
-            rc = VDBManagerOpenTableRead( mgr, &tbl, schema, fullPath );
+            rc = VDBManagerOpenTableRead( mgr, &tbl, schema, "%s", fullPath );
             VSchemaRelease( schema );
         }
     }
@@ -3599,7 +3599,7 @@ static rc_t ProcessDB( VDatabase const *db, char const fullPath[],
     
     if ( ctx.seq.tbl.name )
     {
-        rc = VDatabaseOpenTableRead( db, &ctx.seq.tbl.vtbl, ctx.seq.tbl.name );
+        rc = VDatabaseOpenTableRead( db, &ctx.seq.tbl.vtbl, "%s", ctx.seq.tbl.name );
         if ( rc == 0 )
         {
             ctx.seq.cols = seq_cols;
@@ -3618,13 +3618,13 @@ static rc_t ProcessDB( VDatabase const *db, char const fullPath[],
     SetupColumns( &ctx.eva, edstt_EvidenceAlignment );
     
     if ( ctx.pri.tbl.name )
-        VDatabaseOpenTableRead( db, &ctx.pri.tbl.vtbl, ctx.pri.tbl.name );
+        VDatabaseOpenTableRead( db, &ctx.pri.tbl.vtbl, "%s", ctx.pri.tbl.name );
     if ( ctx.sec.tbl.name )
-        VDatabaseOpenTableRead( db, &ctx.sec.tbl.vtbl, ctx.sec.tbl.name );
+        VDatabaseOpenTableRead( db, &ctx.sec.tbl.vtbl, "%s", ctx.sec.tbl.name );
     if ( ctx.evi.tbl.name )
-        VDatabaseOpenTableRead( db, &ctx.evi.tbl.vtbl, ctx.evi.tbl.name );
+        VDatabaseOpenTableRead( db, &ctx.evi.tbl.vtbl, "%s", ctx.evi.tbl.name );
     if ( ctx.eva.tbl.name )
-        VDatabaseOpenTableRead( db, &ctx.eva.tbl.vtbl, ctx.eva.tbl.name );
+        VDatabaseOpenTableRead( db, &ctx.eva.tbl.vtbl, "%s", ctx.eva.tbl.name );
     
     if (   ctx.pri.tbl.vtbl == NULL
         && ctx.sec.tbl.vtbl == NULL
@@ -3635,7 +3635,7 @@ static rc_t ProcessDB( VDatabase const *db, char const fullPath[],
         if ( ctx.seq.tbl.name == NULL )
         {
             ctx.seq.tbl.name = "SEQUENCE";
-            rc = VDatabaseOpenTableRead( db, &ctx.seq.tbl.vtbl, ctx.seq.tbl.name );
+            rc = VDatabaseOpenTableRead( db, &ctx.seq.tbl.vtbl, "%s", ctx.seq.tbl.name );
         }
         if ( rc == 0 )
         {
@@ -3656,7 +3656,7 @@ static rc_t ProcessDB( VDatabase const *db, char const fullPath[],
     
     if ( ctx.ref.tbl.name )
     {
-        rc = VDatabaseOpenTableRead( db, &ctx.ref.tbl.vtbl, ctx.ref.tbl.name );
+        rc = VDatabaseOpenTableRead( db, &ctx.ref.tbl.vtbl, "%s", ctx.ref.tbl.name );
         ctx.ref.type = edstt_Reference;
     }
     if ( rc == 0 )
@@ -3808,7 +3808,7 @@ static rc_t ProcessPath( VDBManager const *mgr, char const Path[] )
                     break;
                 }
             }
-            rc = VDBManagerOpenDBRead( mgr, &db, NULL, fullPath );
+            rc = VDBManagerOpenDBRead( mgr, &db, NULL, "%s", fullPath );
             if ( rc == 0 )
             {
                 rc = ProcessDB( db, fullPath, accession, readGroup );
@@ -3895,7 +3895,7 @@ static rc_t ProcessPath( VDBManager const *mgr, char const Path[] )
                     break;
                 }
             }
-            rc = VDBManagerOpenDBRead( mgr, &db, NULL, path );
+            rc = VDBManagerOpenDBRead( mgr, &db, NULL, "%s", path );
             if ( rc == 0 )
             {
                 rc = ProcessDB( db, path, accession, readGroup );
@@ -4013,7 +4013,7 @@ static rc_t ProcessPath( VDBManager const *mgr, char const Path[] )
                     {
                         VDatabase const *db;
 
-                        rc = VDBManagerOpenDBRead( mgr, &db, NULL, Path );
+                        rc = VDBManagerOpenDBRead( mgr, &db, NULL, "%s", Path );
                         if ( rc == 0 )
                         {
                             rc = ProcessDB( db, Path, basename, readgroup );

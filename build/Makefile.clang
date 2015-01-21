@@ -26,22 +26,24 @@
 # compilers
 CC = @ $(TOP)/build/cc.sh $(OS) 'clang -c' \
 	 $(CHECKSUM) --objx $(OBJX) --cflags "$(CFLAGS)" -MD
-CP = @ $(TOP)/build/cc.sh $(OS) 'clang -xc++ -c' \
+CP = @ $(TOP)/build/cc.sh $(OS) 'clang++ -c' \
 	 $(CHECKSUM) --objx $(OBJX) --cflags "$(CPFLAGS)" -MD
 
 # C preprocessor
 PP = gcc -E $(CFLAGS)
 
 # linkers
-LD = @ $(TOP)/build/ld.sh $(OS) $(ARCH) gcc \
+LD = @ $(TOP)/build/ld.sh $(OS) $(ARCH) clang \
 	--build $(BUILD) --ldflags "$(LDFLAGS)" $(STATIC) \
 	$(STATICSYSLIBS) $(CHECKSUM) --objx $(OBJX) --shlx $(SHLX) --libx $(LIBX) \
-	-MD --srcdir $(SRCDIR) --bindir $(BINDIR) -L$(LIBDIR):$(ILIBDIR)
+	-MD --srcdir $(SRCDIR) --bindir $(BINDIR) -L$(LIBDIR):$(ILIBDIR):$(NGS_LIBDIR):$(VDB_LIBDIR):$(VDB_ILIBDIR)
 
-LP = @ $(TOP)/build/ld.sh $(OS) $(ARCH) g++ \
-	--build $(BUILD) --ldflags "$(LDFLAGS)" $(STATIC) \
+LPFLAGS = $(LDFLAGS)
+
+LP = @ $(TOP)/build/ld.sh $(OS) $(ARCH) clang++ \
+	--build $(BUILD) --ldflags "$(LPFLAGS)" $(STATIC) \
 	$(STATICSYSLIBS) $(CHECKSUM) --objx $(OBJX) --shlx $(SHLX) --libx $(LIBX) \
-	-MD --srcdir $(SRCDIR) --bindir $(BINDIR) -L$(LIBDIR):$(ILIBDIR)
+	-MD --srcdir $(SRCDIR) --bindir $(BINDIR) -L$(LIBDIR):$(ILIBDIR):$(NGS_LIBDIR):$(VDB_LIBDIR):$(VDB_ILIBDIR)
 
 # tool options
 WARN = -Wall -Wno-variadic-macros -Wno-long-long # -Wconversion
@@ -63,10 +65,7 @@ ifeq (dbg, $(BUILD))
 	DBG = -g
 	OPT = $(WARN)
 	NOPT = $(WARN)
-	# GCC seems unable to use c99 without ansi, which
-	# basically clobbers features back to c89. the options
-	# must be specified in the order shown.
-	PED = -std=c99 -ansi -pedantic # -fdiagnostics-show-option
+	PED = -std=c99 -pedantic # -fdiagnostics-show-option
 else
 
 ifeq (x86_64, $(ARCH))

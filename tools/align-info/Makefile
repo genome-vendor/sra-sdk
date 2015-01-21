@@ -25,7 +25,7 @@
 
 default: std
 
-TOP ?= $(shell ../../build/abspath.sh ../..)
+TOP ?= $(abspath ../..)
 MODULE = tools/align-info
 
 include $(TOP)/build/Makefile.env
@@ -83,8 +83,7 @@ ALIGN_INFO_OBJ = \
 
 ALIGN_INFO_LIB = \
 	-lkapp \
-	-lncbi-vdb \
-	-lxml2 \
+	-sncbi-vdb \
 	-lm
 
 $(BINDIR)/align-info: $(ALIGN_INFO_OBJ)

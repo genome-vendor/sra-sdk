@@ -25,7 +25,7 @@
 
 default: std
 
-TOP ?= $(shell ../../build/abspath.sh ../..)
+TOP ?= $(abspath ../..)
 MODULE = tools/kar
 
 include $(TOP)/build/Makefile.env
@@ -85,7 +85,7 @@ KAR_OBJ = \
 
 KAR_LIB = \
 	-lkapp \
-	-lncbi-vdb \
+	-sncbi-vdb \
 
 
 $(BINDIR)/kar: $(KAR_OBJ)
@@ -104,7 +104,7 @@ SRA_KAR_OBJ = \
 
 SRA_KAR_LIB = \
 	-skapp \
-	-lncbi-vdb \
+	-sncbi-vdb \
 
 $(BINDIR)/sra-kar: $(SRA_KAR_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(SRA_KAR_LIB)

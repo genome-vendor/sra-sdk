@@ -25,7 +25,7 @@
 
 default: std
 
-TOP ?= $(shell ../../build/abspath.sh ../..)
+TOP ?= $(abspath ../..)
 MODULE = tools/cg-load
 
 include $(TOP)/build/Makefile.env
@@ -84,6 +84,7 @@ CGLOAD_SRC = \
 	factory-tag-lfr \
 	f1_3 \
 	f1_5 \
+	f1_7 \
 	f2_0 \
 	f2_2 \
 	file \
@@ -99,9 +100,9 @@ CGLOAD_OBJ = \
 CGLOAD_LIB = \
 	-lkapp \
 	-lload \
-	-lncbi-wvdb \
-	-lxml2 \
+	-sncbi-wvdb \
 	-lm
 
 $(BINDIR)/cg-load: $(CGLOAD_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(CGLOAD_LIB)
+

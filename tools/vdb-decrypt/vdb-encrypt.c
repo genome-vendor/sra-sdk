@@ -66,9 +66,7 @@ OptDef Options[] =
     { OPTION_FORCE,   ALIAS_FORCE,   NULL, ForceUsage,   0, false, false }
 };
 
-
-static 
-bool DecryptSraFlag = false;
+/* static bool DecryptSraFlag = false; */
 
 const bool Decrypting = false;
 

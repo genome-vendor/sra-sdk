@@ -49,8 +49,8 @@ case "$LD" in
 g*)
     source "${0%dlib.sh}gcc.sh"
     ;;
-i*)
-    source "${0%dlib.sh}icc.sh"
+c*)
+    source "${0%dlib.sh}clang.sh"
     ;;
  *)
     echo "$SELF_NAME: unrecognized ld tool - '$LD'"

@@ -36,8 +36,12 @@ extern "C" {
 #endif
 
 #include <klib/out.h>
-
 #include <klib/rc.h>
+
+#include <vfs/manager.h>
+#include <vfs/path.h>
+#include <vfs/resolver.h>
+
 #include <vdb/manager.h>
 #include <vdb/table.h>
 #include <vdb/cursor.h>
@@ -76,6 +80,8 @@ bool vdh_take_this_table_from_db( dump_context *ctx, const VDatabase *my_databas
 rc_t vdh_print_col_info( dump_context *ctx,
                          const p_col_def col_def,
                          const VSchema *my_schema );
+
+rc_t resolve_accession( const char * accession, char * dst, size_t dst_size, bool remotely );
 
 #ifdef __cplusplus
 }

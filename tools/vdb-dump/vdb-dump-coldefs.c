@@ -166,7 +166,7 @@ const char *vdcd_get_read_filter_txt( const uint32_t id )
 static bool vdcd_type_cmp( const VSchema *my_schema, VTypedecl * typedecl, const char * to_check )
 {
     VTypedecl type_to_check;
-    rc_t rc = VSchemaResolveTypedecl ( my_schema, &type_to_check, to_check );
+    rc_t rc = VSchemaResolveTypedecl ( my_schema, &type_to_check, "%s", to_check );
     if ( rc == 0 )
     {
         return VTypedeclToTypedecl ( typedecl, my_schema, &type_to_check, NULL, NULL );
@@ -356,9 +356,9 @@ static p_col_def vdcd_append_col( col_defs* defs, const char* name )
 }
 
 
-bool vdcd_parse_string( col_defs* defs, const char* src, const VTable *my_table )
+uint32_t vdcd_parse_string( col_defs* defs, const char* src, const VTable *my_table )
 {
-    uint32_t count = 0;
+    uint32_t count, found = 0;
     char colname[MAX_COL_NAME_LEN+1];
     size_t i_dest = 0;
     if ( defs == NULL ) return false;
@@ -385,7 +385,7 @@ bool vdcd_parse_string( col_defs* defs, const char* src, const VTable *my_table 
         colname[i_dest]=0;
         vdcd_append_col( defs, colname );
     }
-    count = VectorLength( &(defs->cols) ) > 0;
+    count = VectorLength( &defs->cols );
     if ( count > 0 && my_table != NULL )
     {
         const VCursor *my_cursor;
@@ -393,14 +393,13 @@ bool vdcd_parse_string( col_defs* defs, const char* src, const VTable *my_table 
         DISP_RC( rc, "VTableCreateCursorRead() failed" );
         if ( rc == 0 )
         {
-            uint32_t found = 0;
             uint32_t idx;
-            for ( idx = 0; idx < count && rc == 0; ++idx )
+            for ( idx = 0; idx < count; ++idx )
             {
                 col_def *col = ( col_def * )VectorGet( &(defs->cols), idx );
                 if ( col != NULL )
                 {
-                    rc = VCursorAddColumn( my_cursor, &(col->idx), col->name );
+                    rc = VCursorAddColumn( my_cursor, &(col->idx), "%s", col->name );
                     DISP_RC( rc, "VCursorAddColumn() failed" );
                     if ( rc == 0 )
                     {
@@ -412,18 +411,17 @@ bool vdcd_parse_string( col_defs* defs, const char* src, const VTable *my_table 
                     }
                 }
             }
-            count = found;
             rc = VCursorRelease( my_cursor );
             DISP_RC( rc, "VCursorRelease() failed" );
         }
     }
-    return ( count > 0 );
+    return found;
 }
 
 
-bool vdcd_extract_from_table( col_defs* defs, const VTable *my_table )
+uint32_t vdcd_extract_from_table( col_defs* defs, const VTable *my_table )
 {
-    bool col_defs_found = false;
+    uint32_t found = 0;
     KNamelist *names;
     rc_t rc = VTableListCol( my_table, &names );
     DISP_RC( rc, "VTableListCol() failed" );
@@ -435,7 +433,6 @@ bool vdcd_extract_from_table( col_defs* defs, const VTable *my_table )
         if ( rc == 0 )
         {
             uint32_t n;
-            uint32_t found = 0;
             rc = KNamelistCount( names, &n );
             DISP_RC( rc, "KNamelistCount() failed" );
             if ( rc == 0 )
@@ -449,7 +446,7 @@ bool vdcd_extract_from_table( col_defs* defs, const VTable *my_table )
                     if ( rc == 0 )
                     {
                         p_col_def def = vdcd_append_col( defs, col_name );
-                        rc = VCursorAddColumn( my_cursor, &(def->idx), def->name );
+                        rc = VCursorAddColumn( my_cursor, &(def->idx), "%s", def->name );
                         DISP_RC( rc, "VCursorAddColumn() failed" );
                         if ( rc == 0 )
                         {
@@ -463,7 +460,6 @@ bool vdcd_extract_from_table( col_defs* defs, const VTable *my_table )
                         }
                     }
                 }
-                col_defs_found = ( found > 0 );
             }
             rc = VCursorRelease( my_cursor );
             DISP_RC( rc, "VCursorRelease() failed" );
@@ -471,7 +467,7 @@ bool vdcd_extract_from_table( col_defs* defs, const VTable *my_table )
         rc = KNamelistRelease( names );
         DISP_RC( rc, "KNamelistRelease() failed" );
     }
-    return col_defs_found;
+    return found;
 }
 
 
@@ -516,6 +512,7 @@ typedef struct add_2_cur_context
 } add_2_cur_context;
 typedef add_2_cur_context* p_add_2_cur_context;
 
+
 static void CC vdcd_add_1_to_cursor( void *item, void *data )
 {
     rc_t rc;
@@ -525,7 +522,7 @@ static void CC vdcd_add_1_to_cursor( void *item, void *data )
     if ( my_col_def == NULL ) return;
     if ( ctx == NULL ) return;
     if ( ctx->my_cursor == NULL ) return;
-    rc = VCursorAddColumn( ctx->my_cursor, &(my_col_def->idx), my_col_def->name );
+    rc = VCursorAddColumn( ctx->my_cursor, &(my_col_def->idx), "%s", my_col_def->name );
     DISP_RC( rc, "VCursorAddColumn() failed" );
 
     /***************************************************************************
@@ -544,14 +541,16 @@ static void CC vdcd_add_1_to_cursor( void *item, void *data )
     }
 }
 
-bool vdcd_add_to_cursor( col_defs* defs, const VCursor *my_cursor )
+
+uint32_t vdcd_add_to_cursor( col_defs* defs, const VCursor *my_cursor )
 {
     add_2_cur_context ctx;
     ctx.count = 0;
     ctx.my_cursor = my_cursor;
     VectorForEach( &(defs->cols), false, vdcd_add_1_to_cursor, &ctx );
-    return ( ctx.count > 0 );
+    return ctx.count;
 }
+
 
 static void CC vdcd_reset_1_content( void *item, void *data )
 {
@@ -607,6 +606,7 @@ void vdcd_exclude_this_column( col_defs* defs, const char* column_name )
     VectorForEach( &(defs->cols), false, vdcd_exclude_column_cb, (void*)column_name );
 }
 
+
 void vdcd_exclude_these_columns( col_defs* defs, const char* column_names )
 {
     char colname[MAX_COL_NAME_LEN+1];
@@ -634,4 +634,37 @@ void vdcd_exclude_these_columns( col_defs* defs, const char* column_names )
         colname[i_dest]=0;
         vdcd_exclude_this_column( defs, colname );
     }
+}
+
+
+bool vdcd_get_first_none_static_column_idx( col_defs* defs, const VCursor * cur, uint32_t * idx )
+{
+    bool res = false;
+    if ( defs != NULL && cur !=NULL && idx != NULL )
+    {
+        uint32_t len = VectorLength( &(defs->cols) );
+        if ( len > 0 )
+        {
+            uint32_t start = VectorStart( &(defs->cols) );
+            uint32_t run_idx = start;
+            while ( ( run_idx < ( start + len ) ) && !res )
+            {
+                col_def * cd = VectorGet( &(defs->cols), run_idx );
+                if ( cd != NULL )
+                {
+                    int64_t  first;
+                    uint64_t count;
+
+                    rc_t rc = VCursorIdRange( cur, cd->idx, &first, &count );
+                    if ( rc == 0 && count > 0 )
+                    {
+                        *idx = cd->idx;
+                        res = true;
+                    }
+                }
+                run_idx++;
+            }
+        }
+    }
+    return res;
 }

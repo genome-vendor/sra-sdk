@@ -46,13 +46,14 @@
 #include <ctype.h>
 
 #define SORTED_OPEN_TABLE_LIMIT (2)
-#define SORTED_CACHE_SIZE ((2 * 1024 * 1024)/(SORTED_OPEN_TABLE_LIMIT))
+/*#define SORTED_CACHE_SIZE ((2 * 1024 * 1024)/(SORTED_OPEN_TABLE_LIMIT)) TODO: use line below until switch to unsorted is fixed */
+#define SORTED_CACHE_SIZE (350 * 1024 * 1024)
 
 #ifdef __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__
 #define UNSORTED_OPEN_TABLE_LIMIT (8)
 #define UNSORTED_CACHE_SIZE ((1024 * 1024 * 1024)/(UNSORTED_OPEN_TABLE_LIMIT))
 #else
-#define UNSORTED_OPEN_TABLE_LIMIT (64)
+#define UNSORTED_OPEN_TABLE_LIMIT (255)
 #define UNSORTED_CACHE_SIZE (350 * 1024 * 1024)
 #endif
 
@@ -102,10 +103,19 @@ rc_t ReferenceInit(Reference *self, const VDBManager *mgr, VDatabase *db)
 }
 
 static
-void Unsorted(Reference *self) {
+rc_t Unsorted(Reference *self) {
+    if (G.requireSorted) {
+        rc_t const rc = RC(rcApp, rcFile, rcReading, rcConstraint, rcViolated);
+        (void)LOGERR(klogWarn, rc, "Alignments are unsorted");
+        return rc;
+    }
+    /* do not ever change this message */
     (void)LOGMSG(klogWarn, "Alignments are unsorted");
+
     self->out_of_order = true;
+    
     ReferenceMgr_SetCache(self->mgr, UNSORTED_CACHE_SIZE, UNSORTED_OPEN_TABLE_LIMIT);
+    
     KDataBufferWhack(&self->sec_align);
     KDataBufferWhack(&self->pri_align);
     KDataBufferWhack(&self->mismatches);
@@ -113,14 +123,16 @@ void Unsorted(Reference *self) {
     KDataBufferWhack(&self->coverage);
     KDataBufferWhack(&self->pri_overlap);
     KDataBufferWhack(&self->sec_overlap);
+
+    return 0;
 }
 
 #define BAIL_ON_FAIL(STMT) do { rc_t const rc__ = (STMT); if (rc__) return rc__; } while(0)
 
-static rc_t FlushBuffers(Reference *self, uint64_t upto, bool full, bool final)
+static rc_t FlushBuffers(Reference *self, unsigned upto, bool full, bool final)
 {
     if (!self->out_of_order && upto > 0) {
-        size_t offset = 0;
+        unsigned offset = 0;
         unsigned *const miss = (unsigned *)self->mismatches.base;
         unsigned *const indel = (unsigned *)self->indels.base;
         unsigned *const cov = (unsigned *)self->coverage.base;
@@ -130,7 +142,7 @@ static rc_t FlushBuffers(Reference *self, uint64_t upto, bool full, bool final)
         
         while ((self->curPos + offset + (full ? 0 : G.maxSeqLen)) <= upto) {
             ReferenceSeqCoverage data;
-            uint64_t const curPos = self->curPos + offset;
+            unsigned const curPos = self->curPos + offset;
             unsigned const n = self->endPos > (curPos + G.maxSeqLen) ?
                                G.maxSeqLen : (self->endPos - curPos);
             unsigned const m = curPos + n > upto ? upto - curPos : n;
@@ -173,8 +185,7 @@ static rc_t FlushBuffers(Reference *self, uint64_t upto, bool full, bool final)
                 rc_t rc = ReferenceSeq_AddCoverage(self->rseq, curPos, &data);
                 
                 if (rc) {
-                    Unsorted(self);
-                    return 0;
+                    return Unsorted(self);
                 }
             }
             
@@ -184,7 +195,7 @@ static rc_t FlushBuffers(Reference *self, uint64_t upto, bool full, bool final)
             ++chunk;
         }
         if (!final && offset > 0) {
-            unsigned const newChunkCount = self->pri_overlap.elem_count - chunk;
+            unsigned const newChunkCount = (unsigned)self->pri_overlap.elem_count - chunk;
             unsigned const newBaseCount = self->endPos - self->curPos - offset;
             
             memmove(self->pri_overlap.base, pri_overlap + chunk, newChunkCount * sizeof(pri_overlap[0]));
@@ -203,9 +214,10 @@ static rc_t FlushBuffers(Reference *self, uint64_t upto, bool full, bool final)
 }
 
 rc_t ReferenceSetFile(Reference *self, const char id[],
-                      uint64_t length, uint8_t const md5[16])
+                      uint64_t length, uint8_t const md5[16],
+                      bool *shouldUnmap)
 {
-    const ReferenceSeq *rseq;
+    ReferenceSeq const *rseq;
     unsigned n;
     
     for (n = 0; ; ++n) {
@@ -220,7 +232,7 @@ rc_t ReferenceSetFile(Reference *self, const char id[],
         return RC(rcApp, rcTable, rcAccessing, rcParam, rcTooLong);
     
     BAIL_ON_FAIL(FlushBuffers(self, self->length, true, true));
-    BAIL_ON_FAIL(ReferenceMgr_GetSeq(self->mgr, &rseq, id));
+    BAIL_ON_FAIL(ReferenceMgr_GetSeq(self->mgr, &rseq, id, shouldUnmap));
 
     if (self->rseq)
         ReferenceSeq_Release(self->rseq);
@@ -228,7 +240,7 @@ rc_t ReferenceSetFile(Reference *self, const char id[],
     
     memcpy(self->last_id, id, n + 1);
     self->curPos = self->endPos = 0;
-    self->length = length;
+    self->length = (unsigned)length;
     self->lastOffset = 0;
     KDataBufferResize(&self->pri_overlap, 0);
     KDataBufferResize(&self->sec_overlap, 0);
@@ -240,13 +252,15 @@ rc_t ReferenceSetFile(Reference *self, const char id[],
 
 rc_t ReferenceVerify(Reference const *self, char const id[], uint64_t length, uint8_t const md5[16])
 {
-    return ReferenceMgr_Verify(self->mgr, id, length, md5);
+    return ReferenceMgr_Verify(self->mgr, id, (unsigned)length, md5);
 }
 
 rc_t ReferenceGet1stRow(Reference const *self, int64_t *refID, char const refName[])
 {
-    const ReferenceSeq* rseq;
-    rc_t rc = ReferenceMgr_GetSeq(self->mgr, &rseq, refName);
+    ReferenceSeq const *rseq;
+    bool shouldUnmap = false;
+    rc_t rc = ReferenceMgr_GetSeq(self->mgr, &rseq, refName, &shouldUnmap);
+
     if( rc == 0 ) {
         rc = ReferenceSeq_Get1stRow(rseq, refID);
         ReferenceSeq_Release(rseq);
@@ -283,7 +297,7 @@ rc_t ReferenceAddCoverage(Reference *const self,
     }
     if ((refEnd - self->curPos) / G.maxSeqLen >= self->pri_overlap.elem_count) {
         unsigned const chunks = (refEnd - self->curPos) / G.maxSeqLen + 1;
-        unsigned const end = self->pri_overlap.elem_count;
+        unsigned const end = (unsigned)self->pri_overlap.elem_count;
         
         BAIL_ON_FAIL(KDataBufferResize(&self->pri_overlap, chunks));
         BAIL_ON_FAIL(KDataBufferResize(&self->sec_overlap, chunks));
@@ -326,58 +340,67 @@ static void GetCounts(AlignmentRecord const *data, unsigned const seqLen,
                       unsigned *const nMiss,
                       unsigned *const nIndels)
 {
-    bool const *has_mismatch = data->data.has_mismatch.buffer;
-    bool const *has_offset = data->data.has_ref_offset.buffer;
-    int32_t const *ref_offset = data->data.ref_offset.buffer;
-    unsigned const n = data->data.ref_offset.elements;
-    unsigned const left_clip = (n != 0 && has_offset[0] && ref_offset[0] < 0) ? -ref_offset[0] : 0;
-    int right_edge;
-    unsigned nmis;
-    unsigned nmatch;
+    bool const *const has_mismatch = data->data.has_mismatch.buffer;
+    bool const *const has_offset = data->data.has_ref_offset.buffer;
+    int32_t const *const ref_offset = data->data.ref_offset.buffer;
+    uint8_t const *const ref_offset_type = data->data.ref_offset_type.buffer;
+    unsigned misses = 0;
+    unsigned matchs = 0;
+    unsigned insert = 0;
+    unsigned delete = 0;
+    unsigned j = 0;
     unsigned i;
-    unsigned j;
     
-    for (right_edge = data->data.ref_len, i = 0; i != n; ++i)
-        right_edge -= ref_offset[i];
-    if (right_edge > seqLen)
-        right_edge = seqLen;
-    for (j = left_clip ? 1 : 0, i = left_clip, nmatch = nmis = 0; i < right_edge; ) {
+    for (i = 0; i < seqLen; ) {
         if (has_offset[i]) {
-            int const offs = ref_offset[j++];
+            int const offs = ref_offset[j];
+            int const type = ref_offset_type[j];
             
+            ++j;
+            if (type == 0) {
+                if (offs < 0)
+                    ++insert;
+                else
+                    ++delete;
+            }
             if (offs < 0) {
                 i += (unsigned)(-offs);
                 continue;
             }
         }
         if (has_mismatch[i])
-            ++nmis;
+            ++misses;
         else
-            ++nmatch;
+            ++matchs;
         ++i;
     }
-    *nMatch = nmatch;
-    *nMiss = nmis;
-    *nIndels = n - (left_clip ? 1 : 0);
+    *nMatch = matchs;
+    *nMiss  = misses;
+    *nIndels = insert + delete;
 }
 
 rc_t ReferenceRead(Reference *self, AlignmentRecord *data, uint64_t const pos,
                    uint32_t const rawCigar[], uint32_t const cigCount,
-                   char const seqDNA[], uint32_t const seqLen, uint32_t *matches)
+                   char const seqDNA[], uint32_t const seqLen,
+                   uint8_t rna_orient, uint32_t *matches)
 {
     *matches = 0;
-    BAIL_ON_FAIL(ReferenceSeq_Compress(self->rseq, (G.acceptHardClip ? ewrefmgr_co_AcceptHardClip : 0) + ewrefmgr_cmp_Binary, pos,
-        seqDNA, seqLen, rawCigar, cigCount, 0, NULL, 0, 0, NULL, 0, &data->data));
+    BAIL_ON_FAIL(ReferenceSeq_Compress(self->rseq,
+                                       (G.acceptHardClip ? ewrefmgr_co_AcceptHardClip : 0) + ewrefmgr_cmp_Binary,
+                                       (INSDC_coord_len)pos,
+                                       seqDNA, seqLen,
+                                       rawCigar, cigCount,
+                                       0, NULL, 0, 0, NULL, 0,
+                                       rna_orient,
+                                       &data->data));
 
     if (!G.acceptNoMatch && data->data.ref_len == 0)
         return RC(rcApp, rcFile, rcReading, rcConstraint, rcViolated);
     
     if (!self->out_of_order && pos < self->lastOffset) {
-        Unsorted(self);
+        return Unsorted(self);
     }
-    if (self->out_of_order)
-        return 0;
-    else {
+    if (!self->out_of_order) {
         unsigned nmis;
         unsigned nmatch;
         unsigned indels;
@@ -393,6 +416,7 @@ rc_t ReferenceRead(Reference *self, AlignmentRecord *data, uint64_t const pos,
         else
             return RC(rcApp, rcFile, rcReading, rcConstraint, rcViolated);
     }
+    return 0;
 }
 
 static rc_t IdVecAppend(KDataBuffer *vec, uint64_t id)

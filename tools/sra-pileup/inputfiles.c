@@ -189,6 +189,7 @@ static rc_t contains_ref_and_alignments( const VDatabase * db, const char * path
             }
             *res = ( has_ref && has_alignment );
         }
+        KNamelistRelease( tables );
     }
     return rc;
 }
@@ -299,7 +300,7 @@ static rc_t split_input_files( input_files *self, const VDBManager *mgr,
             rc = VNameListGet( src, src_idx, &path );
             if ( rc == 0 && path != NULL )
             {
-                int path_type = VDBManagerPathType ( mgr, path );
+                int path_type = VDBManagerPathType ( mgr, "%s", path );
                 if ( rc == 0 )
                 {
                     switch( path_type )

@@ -25,7 +25,7 @@
 
 default: std
 
-TOP ?= $(shell ../../build/abspath.sh ../..)
+TOP ?= $(abspath ../..)
 MODULE = tools/nencvalid
 
 include $(TOP)/build/Makefile.env
@@ -86,7 +86,7 @@ NENCVALID_OBJ = \
 NENCVALID_LIB = \
 	-lkapp \
 	-lvfs \
-	-lkurl \
+	-lkns \
 	-lkrypto \
 	-lkfg \
 	-lkfs \

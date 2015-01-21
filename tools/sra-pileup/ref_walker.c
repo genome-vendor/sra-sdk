@@ -107,18 +107,13 @@ struct ref_walker
     const AlignMgr * amgr;
     VFSManager * vfs_mgr;
     PlacementRecordExtendFuncs cb_block;
+    struct skiplist * skiplist;
     
     /* options for the Reference-Iterator */
     int32_t min_mapq;
-    bool omit_quality;
+    uint32_t interest;
+    uint64_t merge_diff;
     bool prepared;
-    bool read_tlen;
-    bool process_dups;
-    bool use_seq_name;
-    bool no_skip;
-    bool primary_alignments;
-    bool secondary_alignments;
-    bool evidence_alignments;
     char * spot_group;
 
     /* manages the sources and regions requested */
@@ -158,6 +153,7 @@ static void ref_walker_release( struct ref_walker * self )
     VNamelistRelease ( self->sources );
     free_ref_regions( &self->regions );
     free( ( void * )self->spot_group );
+    if ( self->skiplist != NULL ) skiplist_release( self->skiplist );
 }
 
 
@@ -214,7 +210,7 @@ static rc_t CC populate_data( void *obj, const PlacementRecord *placement,
     rc_t rc = 0;
 
     rec->quality = NULL;
-    if ( !walker->process_dups )
+    if ( !( walker->interest & RW_INTEREST_DUPS ) )
     {
         const uint8_t * read_filter;
         uint32_t read_filter_len;
@@ -239,7 +235,7 @@ static rc_t CC populate_data( void *obj, const PlacementRecord *placement,
             rec->reverse = *orientation;
     }
 
-    if ( rc == 0 && !walker->omit_quality )
+    if ( rc == 0 && ( walker->interest & RW_INTEREST_QUAL ) )
     {
         const uint8_t * quality;
         uint32_t quality_len;
@@ -254,7 +250,7 @@ static rc_t CC populate_data( void *obj, const PlacementRecord *placement,
         }
     }
 
-    if ( rc == 0 && walker->read_tlen )
+    if ( rc == 0 && ( walker->interest & RW_INTEREST_TLEN ) )
     {
         const int32_t * tlen;
         uint32_t tlen_len;
@@ -282,7 +278,7 @@ static rc_t CC alloc_size( struct VCursor const *curs, int64_t row_id, size_t * 
     walker_col_ids * col_ids = placement_ctx;
     *size = ( sizeof *rec );
 
-    if ( !walker->omit_quality )
+    if ( walker->interest & RW_INTEREST_QUAL )
     {
         uint32_t q_len;
         rc = read_base_and_len( curs, col_ids->idx_quality, row_id, NULL, &q_len );
@@ -317,7 +313,9 @@ static rc_t ref_walker_init( struct ref_walker * self )
     self->cb_block.fixed_size = 0;
 
     BSTreeInit( &self->regions );
-    self->primary_alignments = true;
+    self->interest = RW_INTEREST_PRIM;
+    self->skiplist = 0;
+    self->merge_diff = 0;
     
     if ( rc != 0 )
         ref_walker_release( self );
@@ -360,80 +358,8 @@ rc_t ref_walker_create( struct ref_walker ** self )
 rc_t ref_walker_set_min_mapq( struct ref_walker * self, int32_t min_mapq )
 {
     if ( self == NULL )
-        return RC( rcApp, rcNoTarg, rcConstructing, rcParam, rcNull );
+        return RC( rcApp, rcNoTarg, rcAccessing, rcSelf, rcNull );
     self->min_mapq = min_mapq;
-    return 0;
-}
-
-
-rc_t ref_walker_set_omit_quality( struct ref_walker * self, bool omit_quality )
-{
-    if ( self == NULL )
-        return RC( rcApp, rcNoTarg, rcConstructing, rcParam, rcNull );
-    self->omit_quality = omit_quality;
-    return 0;
-}
-
-
-rc_t ref_walker_set_read_tlen( struct ref_walker * self, bool read_tlen )
-{
-    if ( self == NULL )
-        return RC( rcApp, rcNoTarg, rcConstructing, rcParam, rcNull );
-    self->read_tlen = read_tlen;
-    return 0;
-}
-
-
-rc_t ref_walker_set_process_dups( struct ref_walker * self, bool process_dups )
-{
-    if ( self == NULL )
-        return RC( rcApp, rcNoTarg, rcConstructing, rcParam, rcNull );
-    self->process_dups = process_dups;
-    return 0;
-}
-
-
-rc_t ref_walker_set_use_seq_name( struct ref_walker * self, bool use_seq_name )
-{
-    if ( self == NULL )
-        return RC( rcApp, rcNoTarg, rcConstructing, rcParam, rcNull );
-    self->use_seq_name = use_seq_name;
-    return 0;
-}
-
-
-rc_t ref_walker_set_no_skip( struct ref_walker * self, bool no_skip )
-{
-    if ( self == NULL )
-        return RC( rcApp, rcNoTarg, rcConstructing, rcParam, rcNull );
-    self->no_skip = no_skip;
-    return 0;
-}
-
-
-rc_t ref_walker_set_primary_alignments( struct ref_walker * self, bool enabled )
-{
-    if ( self == NULL )
-        return RC( rcApp, rcNoTarg, rcConstructing, rcParam, rcNull );
-    self->primary_alignments = enabled;
-    return 0;
-}
-
-
-rc_t ref_walker_set_secondary_alignments( struct ref_walker * self, bool enabled )
-{
-    if ( self == NULL )
-        return RC( rcApp, rcNoTarg, rcConstructing, rcParam, rcNull );
-    self->secondary_alignments = enabled;
-    return 0;
-}
-
-
-rc_t ref_walker_set_evidence_alignments( struct ref_walker * self, bool enabled )
-{
-    if ( self == NULL )
-        return RC( rcApp, rcNoTarg, rcConstructing, rcParam, rcNull );
-    self->evidence_alignments = enabled;
     return 0;
 }
 
@@ -441,11 +367,38 @@ rc_t ref_walker_set_evidence_alignments( struct ref_walker * self, bool enabled 
 rc_t ref_walker_set_spot_group( struct ref_walker * self, const char * spot_group )
 {
     if ( self == NULL )
-        return RC( rcApp, rcNoTarg, rcConstructing, rcParam, rcNull );
+        return RC( rcApp, rcNoTarg, rcAccessing, rcSelf, rcNull );
     self->spot_group = string_dup ( spot_group, string_size( spot_group ) );
     return 0;
 }
     
+
+rc_t ref_walker_set_merge_diff( struct ref_walker * self, uint64_t merge_diff )
+{
+    if ( self == NULL )
+        return RC( rcApp, rcNoTarg, rcAccessing, rcSelf, rcNull );
+    self->merge_diff = merge_diff;
+    return 0;
+}
+
+rc_t ref_walker_set_interest( struct ref_walker * self, uint32_t interest )
+{
+    if ( self == NULL )
+        return RC( rcApp, rcNoTarg, rcAccessing, rcSelf, rcNull );
+    self->interest = interest;
+    return 0;
+}
+
+
+rc_t ref_walker_get_interest( struct ref_walker * self, uint32_t * interest )
+{
+    if ( self == NULL )
+        return RC( rcApp, rcNoTarg, rcAccessing, rcSelf, rcNull );
+    if ( interest == NULL )
+        return RC( rcApp, rcNoTarg, rcAccessing, rcParam, rcNull );
+    *interest = self->interest;
+    return 0;
+}
 
 /* ================================================================================================ */
 
@@ -453,9 +406,9 @@ rc_t ref_walker_set_spot_group( struct ref_walker * self, const char * spot_grou
 rc_t ref_walker_set_callbacks( struct ref_walker * self, ref_walker_callbacks * callbacks )
 {
     if ( self == NULL )
-        return RC( rcApp, rcNoTarg, rcConstructing, rcSelf, rcNull );
+        return RC( rcApp, rcNoTarg, rcAccessing, rcSelf, rcNull );
     if ( callbacks == NULL )
-        return RC( rcApp, rcNoTarg, rcConstructing, rcParam, rcNull );
+        return RC( rcApp, rcNoTarg, rcAccessing, rcParam, rcNull );
 
     self->on_enter_ref = callbacks->on_enter_ref;
     self->on_exit_ref = callbacks->on_exit_ref;
@@ -478,7 +431,7 @@ rc_t ref_walker_add_source( struct ref_walker * self, const char * src )
 {
     rc_t rc = 0;
     if ( self == NULL )
-        rc = RC( rcApp, rcNoTarg, rcConstructing, rcParam, rcNull );
+        rc = RC( rcApp, rcNoTarg, rcConstructing, rcSelf, rcNull );
     else
         rc = VNamelistAppend ( self->sources, src );
     return rc;
@@ -489,7 +442,7 @@ rc_t ref_walker_parse_and_add_range( struct ref_walker * self, const char * rang
 {
     rc_t rc = 0;
     if ( self == NULL )
-        rc = RC( rcApp, rcNoTarg, rcConstructing, rcParam, rcNull );
+        rc = RC( rcApp, rcNoTarg, rcConstructing, rcSelf, rcNull );
     else
         rc = parse_and_add_region( &self->regions, range );
     return rc;
@@ -500,7 +453,7 @@ rc_t ref_walker_add_range( struct ref_walker * self, const char * name, const ui
 {
     rc_t rc = 0;
     if ( self == NULL )
-        rc = RC( rcApp, rcNoTarg, rcConstructing, rcParam, rcNull );
+        rc = RC( rcApp, rcNoTarg, rcConstructing, rcSelf, rcNull );
     else
         rc = add_region( &self->regions, name, start, end );
     return rc;
@@ -615,7 +568,9 @@ static rc_t ref_walker_prepare( struct ref_walker * self )
                 }
             }
         }
-        check_ref_regions( &self->regions );
+        check_ref_regions( &self->regions, self->merge_diff );
+        if ( self->merge_diff > 0 )
+            self->skiplist = skiplist_make( &self->regions );
         self->prepared = ( rc == 0 );
     }
     return rc;
@@ -626,13 +581,13 @@ static uint32_t ref_walker_make_reflist_options( struct ref_walker * self )
 {
     uint32_t res = ereferencelist_4na;
 
-    if ( self->primary_alignments )
+    if ( self->interest & RW_INTEREST_PRIM )
         res |= ereferencelist_usePrimaryIds;
 
-    if ( self->secondary_alignments )
+    if ( self->interest & RW_INTEREST_SEC )
         res |= ereferencelist_useSecondaryIds;
 
-    if ( self->evidence_alignments )
+    if ( self->interest & RW_INTEREST_EV )
         res |= ereferencelist_useEvidenceIds;
 
     return res;
@@ -670,7 +625,7 @@ static rc_t add_required_columns( struct ref_walker * self, const VTable *tbl, c
         LOGERR( klogInt, rc, "VTableCreateCursorRead() failed" );
     }
 
-    if ( rc == 0 && !self->omit_quality )
+    if ( rc == 0 && ( self->interest & RW_INTEREST_QUAL ) )
     {
         rc = VCursorAddColumn ( *cursor, &cursor_ids->idx_quality, COL_QUALITY );
         if ( rc != 0 )
@@ -697,7 +652,7 @@ static rc_t add_required_columns( struct ref_walker * self, const VTable *tbl, c
         }
     }
 
-    if ( rc == 0 && self->read_tlen )
+    if ( rc == 0 && ( self->interest & RW_INTEREST_TLEN ) )
     {
         rc = VCursorAddColumn ( *cursor, &cursor_ids->idx_template_len, COL_TEMPLATE_LEN );
         if ( rc != 0 )
@@ -719,7 +674,7 @@ static rc_t ref_walker_add_iterator( struct ref_walker * self, const char * ref_
     if ( rc == 0 )
     {
         const VTable *tbl;
-        rc_t rc = VDatabaseOpenTableRead ( db, &tbl, table_name );
+        rc_t rc = VDatabaseOpenTableRead ( db, &tbl, "%s", table_name );
         if ( rc == 0 )
         {
             const VCursor *cursor;
@@ -756,22 +711,75 @@ static rc_t ref_walker_walk_alignment( struct ref_walker * self,
                                        const PlacementRecord * rec,
                                        ref_walker_data * rwd )
 {
+    rc_t rc;
+
+    /* cast the generic record comming from the iterator into the tool-specific one */
     walker_rec * xrec = PlacementRecordCast ( rec, placementRecordExtension1 );
+
+    /* get all the state of the ref_iter out */
     rwd->state = ReferenceIteratorState ( ref_iter, &rwd->seq_pos );
     rwd->valid = ( ( rwd->state & align_iter_invalid ) == 0 );
-    rwd->reverse = xrec->reverse;
+
     rwd->first = ( ( rwd->state & align_iter_first ) == align_iter_first );
     rwd->last  = ( ( rwd->state & align_iter_last ) == align_iter_last );
-    rwd->skip = ( ( rwd->state & align_iter_skip ) == align_iter_skip );
+
     rwd->match = ( ( rwd->state & align_iter_match ) == align_iter_match );
-    rwd->bin_alignment_base = ( rwd->state & 0x0F );
-    rwd->ascii_alignment_base = _4na_to_ascii( rwd->state, rwd->reverse );
-    if ( !self->omit_quality )
-        rwd->quality = xrec->quality[ rwd->seq_pos ];
+    rwd->skip  = ( ( rwd->state & align_iter_skip ) == align_iter_skip );
+
+    rwd->reverse = xrec->reverse;
+
+    if ( self->interest & RW_INTEREST_BASE )
+    {
+        rwd->bin_alignment_base = ( rwd->state & 0x0F );
+        if ( !rwd->match )
+            rwd->ascii_alignment_base = _4na_to_ascii( rwd->state, rwd->reverse );
+        else
+            rwd->ascii_alignment_base = rwd->ascii_ref_base;
+    }
+
+    if ( self->interest & RW_INTEREST_QUAL )
+    {
+        if ( rwd->skip )
+            rwd->quality = ( xrec->quality[ rwd->seq_pos + 1 ] + 33 );
+        else
+            rwd->quality = ( xrec->quality[ rwd->seq_pos ] + 33 );
+    }
+
     rwd->mapq = rec->mapq;
-    return self->on_alignment( rwd );
+
+    if ( self->interest & RW_INTEREST_INDEL )
+    {
+        rwd->ins   = ( ( rwd->state & align_iter_insert ) == align_iter_insert );
+        rwd->del   = ( ( rwd->state & align_iter_delete ) == align_iter_delete );
+
+        if ( rwd->ins )
+            rwd->ins_bases_count = ReferenceIteratorBasesInserted ( ref_iter, &rwd->ins_bases );
+        if ( rwd->del )
+            rwd->del_bases_count = ReferenceIteratorBasesDeleted ( ref_iter, &rwd->del_ref_pos, &rwd->del_bases );
+    }
+
+    if ( self->interest & RW_INTEREST_DEBUG )
+    {
+        rwd->alignment_id = rec->id;
+        rwd->alignment_start_pos = rec->pos;
+        rwd->alignment_len = rec->len;
+    }
+
+    rc = self->on_alignment( rwd );
+
+    if ( self->interest & RW_INTEREST_INDEL && rwd->del && ( rwd->del_bases_count > 0 ) )
+        free( ( void * )rwd->del_bases );
+
+    return rc;
 }
 
+
+/* free all cursor-ids-blocks created in parallel with the alignment-cursor */
+static void CC cur_id_vector_entry_whack( void *item, void *data )
+{
+    walker_col_ids * ids = item;
+    free( ids );
+}
 
 static rc_t ref_walker_walk_ref_range( struct ref_walker * self, ref_walker_data * rwd )
 {
@@ -814,15 +822,15 @@ static rc_t ref_walker_walk_ref_range( struct ref_walker * self, ref_walker_data
                                 if ( ( rwd->ref_end == 0 )||( rwd->ref_end > len + 1 ) )
                                     rwd->ref_end = ( len - rwd->ref_start ) + 1;
 
-                                if ( self->primary_alignments )
+                                if ( self->interest & RW_INTEREST_PRIM )
                                     rc = ref_walker_add_iterator( self, rwd->ref_name, rwd->ref_start, rwd->ref_end, src_name, 
                                             &cur_id_vector, db, ref_obj, ref_iter, TBL_PRIM, primary_align_ids );
 
-                                if ( rc == 0 && self->secondary_alignments )
+                                if ( rc == 0 && ( self->interest & RW_INTEREST_SEC ) )
                                     rc = ref_walker_add_iterator( self, rwd->ref_name, rwd->ref_start, rwd->ref_end, src_name, 
                                             &cur_id_vector, db, ref_obj, ref_iter, TBL_SEC, secondary_align_ids );
 
-                                if ( rc == 0 && self->evidence_alignments )
+                                if ( rc == 0 && ( self->interest & RW_INTEREST_EV ) )
                                     rc = ref_walker_add_iterator( self, rwd->ref_name, rwd->ref_start, rwd->ref_end, src_name, 
                                             &cur_id_vector, db, ref_obj, ref_iter, TBL_EV, evidence_align_ids );
 
@@ -839,66 +847,86 @@ static rc_t ref_walker_walk_ref_range( struct ref_walker * self, ref_walker_data
         if ( rc == 0 )
         {
             /* walk the reference iterator */
+            
+            /* because in this strategy, each ref-iter contains only 1 ref-obj, no need for a loop */
             struct ReferenceObj const * ref_obj;
             rc = ReferenceIteratorNextReference( ref_iter, NULL, NULL, &ref_obj );
             if ( rc == 0 && ref_obj != NULL )
             {
-                if ( self->use_seq_name )
+
+                if ( self->interest & RW_INTEREST_SEQNAME )
                     rc = ReferenceObj_Name( ref_obj, &rwd->ref_name );
                 else
                     rc = ReferenceObj_SeqId( ref_obj, &rwd->ref_name );
+
                 if ( rc == 0 )
                 {
                     INSDC_coord_zero first_pos;
                     INSDC_coord_len len;
-                    rc_t rc_w = ReferenceIteratorNextWindow ( ref_iter, &first_pos, &len );
+                    rc_t rc_w = 0, rc_p;
                     while ( rc == 0 && rc_w == 0 )
                     {
-                        rc_t rc_p = ReferenceIteratorNextPos ( ref_iter, !self->no_skip );
-                        if ( rc_p == 0 )
+                        rc_w = ReferenceIteratorNextWindow ( ref_iter, &first_pos, &len );
+                        if ( rc_w == 0 )
                         {
-                            rc = ReferenceIteratorPosition ( ref_iter, &rwd->pos, &rwd->depth, &rwd->bin_ref_base );
-                            if ( rwd->depth > 0 && rc == 0 )
+                            rc_p = 0;
+                            while( rc == 0 && rc_p == 0 )
                             {
-                                rc_t rc_sg = 0;
-                                rwd->ascii_ref_base = _4na_to_ascii( rwd->bin_ref_base, false );
-                                if ( self->on_enter_ref_pos != NULL )
-                                    rc = self->on_enter_ref_pos( rwd );
-
-                                while ( rc_sg == 0 && rc == 0 )
+                                rc_p = ReferenceIteratorNextPos ( ref_iter, ( self->interest & RW_INTEREST_SKIP ) );
+                                if ( rc_p == 0 )
                                 {
-                                    rc_sg = ReferenceIteratorNextSpotGroup ( ref_iter, &rwd->spot_group, &rwd->spot_group_len );
-                                    if ( rc_sg == 0 )
+                                    rc = ReferenceIteratorPosition ( ref_iter, &rwd->pos, &rwd->depth, &rwd->bin_ref_base );
+                                    if ( rwd->depth > 0 && rc == 0 )
                                     {
-                                        rc_t rc_pr = 0;
-                                        if ( self->on_enter_spot_group != NULL )
-                                            rc = self->on_enter_spot_group( rwd );
+                                        rc_t rc_sg = 0;
+                                        bool skip = false;
 
-                                        while ( rc == 0 && rc_pr == 0 )
+                                        if ( self->skiplist != NULL )
+                                            skip = skiplist_is_skip_position( self->skiplist, rwd->pos + 1 );
+
+                                        if ( !skip )
                                         {
-                                            const PlacementRecord * rec;
-                                            rc_pr = ReferenceIteratorNextPlacement ( ref_iter, &rec );
-                                            if ( rc_pr == 0 && self->on_alignment != NULL )
-                                                rc = ref_walker_walk_alignment( self, ref_iter, rec, rwd );
-                                        }
+                                            rwd->ascii_ref_base = _4na_to_ascii( rwd->bin_ref_base, false );
+                                            if ( self->on_enter_ref_pos != NULL )
+                                                rc = self->on_enter_ref_pos( rwd );
 
-                                        if ( self->on_exit_spot_group != NULL )
-                                            rc = self->on_exit_spot_group( rwd );
+                                            while ( rc_sg == 0 && rc == 0 )
+                                            {
+                                                rc_sg = ReferenceIteratorNextSpotGroup ( ref_iter, &rwd->spot_group, &rwd->spot_group_len );
+                                                if ( rc_sg == 0 )
+                                                {
+                                                    rc_t rc_pr = 0;
+                                                    if ( self->on_enter_spot_group != NULL )
+                                                        rc = self->on_enter_spot_group( rwd );
+
+                                                    while ( rc == 0 && rc_pr == 0 )
+                                                    {
+                                                        const PlacementRecord * rec;
+                                                        rc_pr = ReferenceIteratorNextPlacement ( ref_iter, &rec );
+                                                        if ( rc_pr == 0 && self->on_alignment != NULL )
+                                                            rc = ref_walker_walk_alignment( self, ref_iter, rec, rwd );
+                                                    }
+
+                                                    if ( self->on_exit_spot_group != NULL )
+                                                        rc = self->on_exit_spot_group( rwd );
+                                                }
+                                            }
+                                            if ( self->on_exit_ref_pos != NULL )
+                                                rc = self->on_exit_ref_pos( rwd );
+                                        }
                                     }
+                                    rc = Quitting();
                                 }
-                                if ( self->on_exit_ref_pos != NULL )
-                                    rc = self->on_exit_ref_pos( rwd );
                             }
-                            rc = Quitting();
                         }
                     }
                 }
             }
         }
+        ReferenceIteratorRelease ( ref_iter );
 
         /* free cur_id_vector */
-
-        ReferenceIteratorRelease ( ref_iter );
+        VectorWhack ( &cur_id_vector, cur_id_vector_entry_whack, NULL );
     }
     return rc;
 }
@@ -927,6 +955,9 @@ static rc_t ref_walker_walk_ref_region( struct ref_walker * self,
 
     if ( rc == 0 )
     {
+        if ( self->skiplist != NULL )
+            skiplist_enter_ref( self->skiplist, rwd->ref_name );
+
         for ( idx = 0; idx < count; ++ idx )
         {
             const struct reference_range * range = get_ref_range( region, idx );

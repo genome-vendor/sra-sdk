@@ -68,6 +68,10 @@ HAVE_M=0
 NEED_M=1
 HAVE_XML=0
 NEED_XML=0
+HAVE_KFC=0
+HAVE_KAPP=0
+HAVE_NCBI_VDB=0
+HAVE_NCBI_WVDB=0
 unset BUILD
 unset LDIRS
 unset XDIRS
@@ -291,17 +295,31 @@ do
         ;;
 
     -[lds]ncbi-vdb)
+        HAVE_NCBI_VDB=1
         KPROC=4
         HAVE_GZIP=1
         HAVE_BZIP=1
+        HAVE_KFC=1
+        NEED_M=1
+        NEED_XML=1
+        LIBS="$LIBS $1"
+        ;;
+    -[lds]ncbi-ngs-c++)
+        HAVE_NCBI_VDB=1
+        KPROC=4
+        HAVE_GZIP=1
+        HAVE_BZIP=1
+        HAVE_KFC=1
         NEED_M=1
         NEED_XML=1
         LIBS="$LIBS $1"
         ;;
     -[lds]ncbi-wvdb)
+        HAVE_NCBI_WVDB=1
         KPROC=4
         HAVE_GZIP=1
         HAVE_BZIP=1
+        HAVE_KFC=1
         NEED_M=16
         NEED_XML=1
         LIBS="$LIBS $1"
@@ -352,6 +370,19 @@ do
     -[lds]ncbi-bam)
         LIBS="$LIBS $1"
         #NEED_GZIP=1
+        ;;
+
+    -[lds]kapp)
+        HAVE_KAPP=1
+        ;;
+
+    -[lds]kapp-norsrc)
+        HAVE_KAPP=1
+        ;;
+
+    -[lds]kfc)
+        LIBS="$LIBS $1"
+        HAVE_KFC=1
         ;;
 
     -[ls]*)
@@ -463,6 +494,10 @@ then
     fi
     VERS="$ARG"
 fi
+
+# fix kapp
+[ $HAVE_KAPP -ne 0 ] && [ $HAVE_KFC -ne 0 ] && LIBS="-lkapp $LIBS"
+[ $HAVE_KAPP -ne 0 ] && [ $HAVE_KFC -eq 0 ] && LIBS="-lkapp-norsrc $LIBS"
 
 # detect need for kproc
 if [ $KPROC -eq 0 ] && [ $NEED_KPROC -ne 0 ] && [ $HAVE_KSPROC -eq 0 ]

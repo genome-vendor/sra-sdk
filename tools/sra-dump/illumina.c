@@ -309,22 +309,60 @@ typedef struct IlluminaFormatterFactory_struct {
     KDataBuffer buf;
 } IlluminaFormatterFactory;
 
-static
-rc_t IlluminaFormatterFactory_Init(const SRASplitterFactory* cself)
-{
-    rc_t rc = 0;
-    IlluminaFormatterFactory* self = (IlluminaFormatterFactory*)cself;
+
+/* refactored June 13 2014 by Wolfgang to fix a mysterious bug on windows where b_qseq resolved into false on windows
+   and true on posix! The original code was this:
 
     if( self == NULL ) {
-        rc = RC(rcSRA, rcType, rcConstructing, rcParam, rcNull);
-    } else if( (rc = IlluminaReaderMake(&self->reader, self->table, self->accession,
-                                IlluminaArgs.opt & eRead, IlluminaArgs.opt & (eQual1_S | eQual1_M), IlluminaArgs.opt & eQual4, 
-                                IlluminaArgs.opt & eIntensity, IlluminaArgs.opt & eNoise, IlluminaArgs.opt & eSignal,
-                                IlluminaArgs.opt & (eQSeq_S | eQSeq_M), 0, 0)) == 0 ) {
-        rc = KDataBufferMakeBytes(&self->buf, DATABUFFERINITSIZE);
+          rc = RC(rcSRA, rcType, rcConstructing, rcParam, rcNull);
+      } else if( (rc = IlluminaReaderMake(&self->reader, self->table, self->accession,
+                                  IlluminaArgs.opt & eRead, IlluminaArgs.opt & (eQual1_S | eQual1_M), IlluminaArgs.opt & eQual4, 
+                                  IlluminaArgs.opt & eIntensity, IlluminaArgs.opt & eNoise, IlluminaArgs.opt & eSignal,
+                                  IlluminaArgs.opt & (eQSeq_S | eQSeq_M), 0, 0)) == 0 ) {
+          rc = KDataBufferMakeBytes(&self->buf, DATABUFFERINITSIZE);
+        }
+
+    Anton's old, more dense version should do the same, but it does not on Windows!
+
+    eQSeq_M is an enum, defined at the top of this file to have the value 0x100.
+    It will be type-casted into bool because that is the type IlluminaReaderMake() wants.
+    ( bool )eQSeq_M is true for GCC/LLVM and false for the MS-compiler!
+    Casting enum's directly without comparison into boolean does not work for the MS-compiler.
+*/
+static rc_t IlluminaFormatterFactory_Init( const SRASplitterFactory * cself )
+{
+    rc_t rc = 0;
+    IlluminaFormatterFactory * self = ( IlluminaFormatterFactory * )cself;
+
+    if ( self == NULL )
+        rc = RC( rcSRA, rcType, rcConstructing, rcParam, rcNull );
+    else
+    {
+        bool b_read = ( ( IlluminaArgs.opt & eRead ) != 0 );
+        bool b_qual1 = ( ( IlluminaArgs.opt & ( eQual1_S | eQual1_M ) ) != 0 );
+        bool b_qual4 = ( ( IlluminaArgs.opt & eQual4 ) != 0 );
+        bool b_intensity = ( ( IlluminaArgs.opt & eIntensity ) != 0 );
+        bool b_noise = ( ( IlluminaArgs.opt & eNoise ) != 0 );
+        bool b_signal = ( ( IlluminaArgs.opt & eSignal ) != 0 );
+        bool b_qseq = ( ( IlluminaArgs.opt & ( eQSeq_S | eQSeq_M ) ) != 0 );
+        rc = IlluminaReaderMake( &self->reader,
+                                self->table,
+                                self->accession,
+                                b_read,
+                                b_qual1,
+                                b_qual4,
+                                b_intensity,
+                                b_noise,
+                                b_signal,
+                                b_qseq,
+                                0,
+                                0 );
+        if ( rc == 0 )
+            rc = KDataBufferMakeBytes( &self->buf, DATABUFFERINITSIZE );
     }
     return rc;
 }
+
 
 static
 rc_t IlluminaFormatterFactory_NewObj(const SRASplitterFactory* cself, const SRASplitter** splitter)

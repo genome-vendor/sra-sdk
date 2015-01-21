@@ -82,18 +82,21 @@ typedef col_defs* p_col_defs;
 
 #define MAX_COL_NAME_LEN 64
 
+const char *vdcd_get_platform_txt( const uint32_t id );
+
 char *vdcd_make_domain_txt( const uint32_t domain );
 
 bool vdcd_init( col_defs** defs, const size_t str_limit );
 void vdcd_destroy( col_defs* defs );
 
-bool vdcd_parse_string( col_defs* defs, const char* src, const VTable *my_table );
-bool vdcd_extract_from_table( col_defs* defs, const VTable *my_table );
+uint32_t vdcd_parse_string( col_defs* defs, const char* src, const VTable *my_table );
+uint32_t vdcd_extract_from_table( col_defs* defs, const VTable *my_table );
 bool vdcd_extract_from_phys_table( col_defs* defs, const VTable *my_table );
-bool vdcd_add_to_cursor( col_defs* defs, const VCursor *my_cursor );
+uint32_t vdcd_add_to_cursor( col_defs* defs, const VCursor *my_cursor );
 void vdcd_reset_content( col_defs* defs );
 void vdcd_ins_trans_fkt( col_defs* defs, const VSchema *my_schema );
 void vdcd_exclude_these_columns( col_defs* defs, const char* column_names );
+bool vdcd_get_first_none_static_column_idx( col_defs* defs, const VCursor * cur, uint32_t * idx );
 
 #ifdef __cplusplus
 }

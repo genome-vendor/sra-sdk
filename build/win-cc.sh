@@ -201,6 +201,7 @@ then
 else
     # determine current directory
     CURDIR="$(pwd)"
+	if [ "$VERBOSE" != "" ] ; then echo "${TOP}/build/run_remotely.sh $PROXY_TOOL $RHOST $RPORT $RHOME $LHOME $CURDIR $ROUTDIR $LOUTDIR $CMD"; fi
     ${TOP}/build/run_remotely.sh $PROXY_TOOL $RHOST $RPORT $RHOME $LHOME $CURDIR $ROUTDIR $LOUTDIR $CMD > $TARG.out 2> $TARG.err
     STATUS=$?
 fi

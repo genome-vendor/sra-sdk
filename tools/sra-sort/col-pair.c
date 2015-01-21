@@ -182,7 +182,7 @@ ColumnReader *TablePairMakeColumnReader ( TablePair *self, const ctx_t *ctx,
     else
     {
         uint32_t idx;
-        rc = VCursorAddColumn ( curs, & idx, colspec );
+        rc = VCursorAddColumn ( curs, & idx, "%s", colspec );
         if ( rc != 0 && GetRCState ( rc ) != rcExists )
         {
             if ( required )
@@ -473,7 +473,7 @@ ColumnWriter *TablePairMakeColumnWriter ( TablePair *self, const ctx_t *ctx,
     else
     {
         uint32_t idx;
-        rc = VCursorAddColumn ( curs, & idx, colspec );
+        rc = VCursorAddColumn ( curs, & idx, "%s", colspec );
         if ( rc != 0 )
             ERROR ( rc, "failed to add column 'dst.%s.%s' to cursor", self -> full_spec, colspec );
         else

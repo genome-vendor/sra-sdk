@@ -58,6 +58,7 @@ static char const option_min_mapq[] = "min-mapq";
 static char const option_qual_compress[] = "qual-quant";
 static char const option_cache_size[] = "cache-size";
 static char const option_unsorted[] = "unsorted";
+static char const option_sorted[] = "sorted";
 static char const option_max_err_count[] = "max-err-count";
 static char const option_max_rec_count[] = "max-rec-count";
 static char const option_no_verify[] = "no-verify";
@@ -164,6 +165,13 @@ static
 char const * unsorted_usage[] = 
 {
     "Tell the loader to expect unsorted input (requires more memory)",
+    NULL
+};
+
+static
+char const * sorted_usage[] =
+{
+    "Tell the loader to require sorted input",
     NULL
 };
 
@@ -340,6 +348,7 @@ OptDef Options[] =
     { OPTION_MIN_MATCH, NULL, NULL, use_min_match, 1, true, false },
     { OPTION_NO_SECONDARY, ALIAS_NO_SECONDARY, NULL, use_no_secondary, 1, false, false },
     { option_unsorted, NULL, NULL, unsorted_usage, 1, false,  false },
+    { option_sorted, NULL, NULL, sorted_usage, 1, false,  false },
     { option_no_verify, NULL, NULL, no_verify_usage, 1, false,  false },
     { option_only_verify, NULL, NULL, only_verify_usage, 1, false,  false },
     { option_use_qual, NULL, NULL, use_QUAL_usage, 1, false,  false },
@@ -358,35 +367,36 @@ OptDef Options[] =
 const char* OptHelpParam[] =
 {
     /* order here is same as in OptDef array above!!! */
-    "path",
-    "path",
-    "path-to-file",
-    "path-to-file",
-    "path",
-    "path-to-file",
-    NULL,
-    NULL,
-    NULL,
-    "level",
-    "phred-score",
-    "mbytes",
-    NULL,
-    "count",
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    "name",
-    "new-value",
-    NULL,
-    NULL,
-    NULL,
-    "path-to-file",
-    NULL,
-    "count",
-    NULL
+    "path",				/* input */
+    "path",				/* output */
+    "path-to-file",		/* config */
+    "path-to-file",		/* header */
+    "path",				/* tmpfs */
+    "path-to-file",		/* unaligned */
+    NULL,				/* accept dups */
+    NULL,				/* accept no-match */
+    "path-to-file",		/* no-match log */
+    "level",			/* quality compression */
+    "phred-score",		/* min. mapq */
+    "mbytes",			/* cache size */
+    NULL,				/* no colorspace */
+    "count",			/* min. match count */
+    NULL,				/* no secondary */
+    NULL,				/* unsorted */
+    NULL,				/* sorted */
+    NULL,				/* no verify ref's */
+    NULL,				/* quit after verify ref's */
+    NULL,				/* force QUAL */
+    NULL,				/* ref's from config */
+    "name",				/* only this ref */
+    "new-value",		/* value for aligned qualities */
+    NULL,				/* no quantize mismatch qualities */
+    "number",			/* max. record count to process */
+    "number",			/* max. error count */
+    "path-to-file",		/* reference fasta file */
+    NULL,				/* use XT->TI */
+    "count",			/* max. duplicate warning count */
+    NULL				/* allow hard clipping */
 };
 
 rc_t UsageSummary (char const * progname)
@@ -493,7 +503,7 @@ static rc_t OpenFile(KFile const **kf, char const path[], char const base[])
         
         rc = KDirectoryNativeDir(&dir);
         if (rc == 0) {
-            rc = KDirectoryOpenFileRead(dir, kf, fname);
+            rc = KDirectoryOpenFileRead(dir, kf, "%s", fname);
             KDirectoryRelease(dir);
         }
     }
@@ -568,9 +578,10 @@ rc_t CC KMain (int argc, char * argv[])
     G.minMapQual = 0; /* accept all */
     G.tmpfs = "/tmp";
 #if _ARCH_BITS == 32
-    G.cache_size = ( size_t ) 1 << 30;
+#warning 32-bit build is not tested. BEWARE!!!
+    G.cache_size = ((size_t) 1) << 30;
 #else
-    G.cache_size = ( size_t ) 10 << 30;
+    G.cache_size = ((size_t)16) << 30;
 #endif
     G.maxErrCount = 1000;
     G.minMatchCount = 10;
@@ -783,6 +794,11 @@ rc_t CC KMain (int argc, char * argv[])
             break;
         G.expectUnsorted = pcount > 0;
         
+        rc = ArgsOptionCount (args, option_sorted, &pcount);
+        if (rc)
+            break;
+        G.requireSorted = pcount > 0;
+        
         rc = ArgsOptionCount (args, OPTION_MAX_REC_COUNT, &pcount);
         if (rc)
             break;
@@ -862,7 +878,7 @@ rc_t CC KMain (int argc, char * argv[])
             if (rc) break;
             rc = KDirectoryNativeDir(&dir);
             if (rc) break;
-            rc = KDirectoryCreateFile(dir, &G.noMatchLog, 0, 0664, kcmInit, value);
+            rc = KDirectoryCreateFile(dir, &G.noMatchLog, 0, 0664, kcmInit, "%s", value);
             KDirectoryRelease(dir);
             if (rc) break;
         }

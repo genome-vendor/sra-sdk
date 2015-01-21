@@ -31,14 +31,16 @@
 #include <vdb/vdb-priv.h> /* VDBManagerDisablePagemapThread() */
 #include <kdb/manager.h> /* for different path-types */
 #include <vdb/dependencies.h> /* UIError */
-#include <klib/report.h> /* ReportInit */
 #include <vdb/report.h>
 #include <vdb/database.h>
+
 #include <klib/container.h>
 #include <klib/log.h>
+#include <klib/report.h> /* ReportInit */
 #include <klib/out.h>
 #include <klib/status.h>
 #include <klib/text.h>
+
 #include <kapp/main.h>
 #include <kfs/directory.h>
 #include <sra/sradb-priv.h>
@@ -643,7 +645,7 @@ static rc_t SRADumper_DumpRun( const SRATable* table,
             if ( ( GetRCModule( rc ) == rcXF ) &&
                  ( GetRCTarget( rc ) == rcFunction ) &&
                  ( GetRCContext( rc ) == rcExecuting ) &&
-                 ( GetRCObject( rc ) == rcData ) &&
+                 ( GetRCObject( rc ) == ( enum RCObject )rcData ) &&
                  ( GetRCState( rc ) == rcInconsistent ) )
             {
                 rc = 0;
@@ -923,7 +925,7 @@ static bool database_contains_table_name( const VDBManager * vmgr, const char * 
     if ( ( vmgr != NULL ) && ( acc_or_path != NULL ) && ( tablename != NULL ) )
     {
         const VDatabase * db;
-        rc_t rc = VDBManagerOpenDBRead( vmgr, &db, NULL, acc_or_path );
+        rc_t rc = VDBManagerOpenDBRead( vmgr, &db, NULL, "%s", acc_or_path );
         if ( rc == 0 )
         {
             KNamelist * tbl_names;
@@ -974,7 +976,7 @@ rc_t CC KMain ( int argc, char* argv[] )
     bool to_stdout = false, do_gzip = false, do_bzip2 = false;
     char const* outdir = NULL;
     spotid_t minSpotId = 1;
-    spotid_t maxSpotId = ~0;
+    spotid_t maxSpotId = 0x7FFFFFFFFFFFFFFF; /* 9,223,372,036,854,775,807 max int64_t value !!! ~0 is wrong !!! */
     bool sub_dir = false;
     bool keep_empty = false;
     const char* table_path[10240];
@@ -1351,7 +1353,7 @@ rc_t CC KMain ( int argc, char* argv[] )
             a CONSENSUS-table ( only PacBio-Runs have one ! )...
         */
 
-        path_type = ( VDBManagerPathType ( vmgr, table_path[ i ] ) & ~ kptAlias );
+        path_type = ( VDBManagerPathType ( vmgr, "%s", table_path[ i ] ) & ~ kptAlias );
         switch ( path_type )
         {
             case kptDatabase        :   ;   /* types defined in <kdb/manager.h> */
@@ -1376,7 +1378,7 @@ rc_t CC KMain ( int argc, char* argv[] )
             }
             if ( table_to_open != NULL )
             {
-                rc = SRAMgrOpenAltTableRead( sraMGR, &fmt.table, table_to_open, table_path[ i ] ); /* from sradb-priv.h */
+                rc = SRAMgrOpenAltTableRead( sraMGR, &fmt.table, table_to_open, "%s", table_path[ i ] ); /* from sradb-priv.h */
                 if ( rc != 0 )
                 {
                     PLOGERR( klogErr, ( klogErr, rc, 
@@ -1392,7 +1394,7 @@ rc_t CC KMain ( int argc, char* argv[] )
 
         if ( fmt.table == NULL )
         {
-            rc = SRAMgrOpenTableRead( sraMGR, &fmt.table, table_path[ i ] );
+            rc = SRAMgrOpenTableRead( sraMGR, &fmt.table, "%s", table_path[ i ] );
             if ( rc != 0 )
             {
                 if ( UIError( rc, NULL, NULL ) )
@@ -1535,16 +1537,24 @@ rc_t CC KMain ( int argc, char* argv[] )
                         /* platform constands in insdc/sra.h */
                         switch( *platform )
                         {
-                            case SRA_PLATFORM_454           : quality_N_limit = 30;   break;
+                            case SRA_PLATFORM_454           : quality_N_limit = 30; nreads_max = 8;  break;
                             case SRA_PLATFORM_ION_TORRENT   : ;
-                            case SRA_PLATFORM_ILLUMINA      : quality_N_limit = 35;   break;
-                            case SRA_PLATFORM_ABSOLID       : quality_N_limit = 25;   break;
-                            case SRA_PLATFORM_PACBIO_SMRT   : nreads_max = 32; break;
+                            case SRA_PLATFORM_ILLUMINA      : quality_N_limit = 35; nreads_max = 8;  break;
+                            case SRA_PLATFORM_ABSOLID       : quality_N_limit = 25; nreads_max = 8;  break;
+
+                            case SRA_PLATFORM_PACBIO_SMRT   : if ( fmt.split_files )
+                                                               {
+                                                                    /* only if we split into files we limit the number of reads */
+                                                                    nreads_max = 32;
+                                                               }
+                                                               break;
+
+                            default : nreads_max = 8; break;    /* for unknown platforms */
                         }
                     }
                     SRAColumnRelease( c );
                 }
-                else if ( GetRCState( rc ) == rcNotFound && GetRCObject( rc ) == rcColumn )
+                else if ( GetRCState( rc ) == rcNotFound && GetRCObject( rc ) == ( enum RCObject )rcColumn )
                 {
                     rc = 0;
                 }

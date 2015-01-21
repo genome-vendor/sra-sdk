@@ -28,6 +28,7 @@
 #include <klib/printf.h>
 #include <kfs/file.h>
 #include <vdb/table.h>
+#include <align/align.h>
 
 #include "defs.h"
 #include "writer-evidence-intervals.h"
@@ -47,6 +48,7 @@ typedef struct CGWriterEvdInt_match_struct {
     INSDC_coord_len read_len[CG_EVDNC_PLOIDY];
     bool has_ref_offset[CG_EVDNC_ALLELE_LEN];
     int32_t ref_offset[CG_EVDNC_ALLELE_LEN];
+    uint8_t ref_offset_type[CG_EVDNC_ALLELE_LEN];
     bool has_mismatch[CG_EVDNC_ALLELE_LEN];
     char mismatch[CG_EVDNC_ALLELE_LEN];
     int64_t ref_id;
@@ -84,6 +86,7 @@ rc_t CGWriterEvdInt_Make(const CGWriterEvdInt** cself, TEvidenceIntervalsData** 
             self->algn.read_len.buffer = &self->match.read_len;
             self->algn.has_ref_offset.buffer = self->match.has_ref_offset;
             self->algn.ref_offset.buffer = self->match.ref_offset;
+            self->algn.ref_offset_type.buffer = self->match.ref_offset_type;
             self->algn.has_mismatch.buffer = self->match.has_mismatch;
             self->algn.mismatch.buffer = self->match.mismatch;
             self->algn.ref_id.buffer = &self->match.ref_id;
@@ -145,7 +148,7 @@ rc_t CGWriterEvdInt_Write(const CGWriterEvdInt* cself, const TEvidenceDnbsData* 
                 self->algn.ploidy = 0;
                 rc = ReferenceMgr_Compress(cself->rmgr, ewrefmgr_cmp_Exact, self->data.chr, self->data.offset, self->data.allele[i], self->data.allele_length[i],
                                            self->data.allele_alignment[i], self->data.allele_alignment_length[i],
-                                           0, NULL, 0, 0, NULL, 0, &self->algn);
+                                           0, NULL, 0, 0, NULL, 0, NCBI_align_ro_intron_unknown, &self->algn);
                 self->data.allele_indexes_to_read_number[i] = 1; /* 1st read */
             }
         }
@@ -168,14 +171,14 @@ rc_t CGWriterEvdInt_Write(const CGWriterEvdInt* cself, const TEvidenceDnbsData* 
                 self->algn.ploidy = 0;
                 rc = ReferenceMgr_Compress(cself->rmgr, ewrefmgr_cmp_Exact, self->data.chr, self->data.offset, self->data.allele[i1], self->data.allele_length[i1],
                                            self->data.allele_alignment[i1], self->data.allele_alignment_length[i1],
-                                           0, NULL, 0, 0, NULL, 0, &self->algn);
+                                           0, NULL, 0, 0, NULL, 0, NCBI_align_ro_intron_unknown, &self->algn);
                 self->data.allele_indexes_to_read_number[i1] = 1; /* 1st read */
             }
             if( rc == 0 ) {
 		if ( i2 != i1 ) {
 			rc = ReferenceMgr_Compress(cself->rmgr, ewrefmgr_cmp_Exact, self->data.chr, self->data.offset, self->data.allele[i2], self->data.allele_length[i2],
                                            self->data.allele_alignment[i2], self->data.allele_alignment_length[i2],
-                                           0, NULL, 0, 0, NULL, 0, &self->algn);
+                                           0, NULL, 0, 0, NULL, 0, NCBI_align_ro_intron_unknown, &self->algn);
 			self->data.allele_indexes_to_read_number[i2] = 2; /* 2nd read */
 		} else {
 			self->data.ploidy = 1;
@@ -203,19 +206,19 @@ rc_t CGWriterEvdInt_Write(const CGWriterEvdInt* cself, const TEvidenceDnbsData* 
                 self->algn.ploidy = 0;
                 rc = ReferenceMgr_Compress(cself->rmgr, ewrefmgr_cmp_Exact, self->data.chr, self->data.offset, self->data.allele[i1], self->data.allele_length[i1],
                                            self->data.allele_alignment[i1], self->data.allele_alignment_length[i1],
-                                           0, NULL, 0, 0, NULL, 0, &self->algn);
+                                           0, NULL, 0, 0, NULL, 0, NCBI_align_ro_intron_unknown, &self->algn);
                 self->data.allele_indexes_to_read_number[i1] = 1; /* 1st read */
             }
             if( rc == 0 ) {
                 rc = ReferenceMgr_Compress(cself->rmgr, ewrefmgr_cmp_Exact, self->data.chr, self->data.offset, self->data.allele[i2], self->data.allele_length[i2],
                                            self->data.allele_alignment[i2], self->data.allele_alignment_length[i2],
-                                           0, NULL, 0, 0, NULL, 0, &self->algn);
+                                           0, NULL, 0, 0, NULL, 0, NCBI_align_ro_intron_unknown, &self->algn);
                 self->data.allele_indexes_to_read_number[i2] = 2; /* 2nd read */
             }
             if( rc == 0 ) {
                 rc = ReferenceMgr_Compress(cself->rmgr, ewrefmgr_cmp_Exact, self->data.chr, self->data.offset, self->data.allele[i3], self->data.allele_length[i3],
                                            self->data.allele_alignment[i3], self->data.allele_alignment_length[i3],
-                                           0, NULL, 0, 0, NULL, 0, &self->algn);
+                                           0, NULL, 0, 0, NULL, 0, NCBI_align_ro_intron_unknown, &self->algn);
                 self->data.allele_indexes_to_read_number[i3] = 3; /* 3rd read */
             }
         }

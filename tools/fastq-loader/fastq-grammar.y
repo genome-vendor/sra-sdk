@@ -25,31 +25,39 @@
 */
  
 %{  
+    #include <sysalloc.h>
     #include <ctype.h>
     #include <stdlib.h>
+    #include <string.h>
 
-	#include "fastq-parse.h"
+    #include "fastq-parse.h"
 
-   	#define YYSTYPE FASTQToken
+    #define YYSTYPE FASTQToken
     #define YYLEX_PARAM pb->scanner
     #define YYDEBUG 1
 
-	#include "fastq-tokens.h"
+    #include "fastq-tokens.h"
 
-    static uint64_t string_touint(const char* str, size_t length);
-    static void AddBinaryQuality(FASTQParseBlock* pb, int8_t value);
+    static void AddQuality(FASTQParseBlock* pb, const FASTQToken* token);
     static void SetReadNumber(FASTQParseBlock* pb, const FASTQToken* token);
-    static void SetTagLine(FASTQParseBlock* pb, const char* start, size_t length, const FASTQToken* coords);
+    static void StartSpotName(FASTQParseBlock* pb, size_t offset);
+    static void GrowSpotName(FASTQParseBlock* pb, const FASTQToken* token);
+    static void StopSpotName(FASTQParseBlock* pb);
     static void SetSpotGroup(FASTQParseBlock* pb, const FASTQToken* token);
+    static void SetRead(FASTQParseBlock* pb, const FASTQToken* token);
 
+    #define UNLEX do { if (yychar != YYEMPTY && yychar != YYEOF) FASTQ_unlex(pb, & yylval); } while (0)
+    
+    #define IS_PACBIO(pb) ((pb)->defaultReadNumber == -1)
 %}
 
 %pure-parser
 %parse-param {FASTQParseBlock* pb }
 %lex-param {FASTQParseBlock* pb }
-
+%error-verbose 
 %name-prefix="FASTQ_"
 
+%token fqRUNDOTSPOT
 %token fqNUMBER
 %token fqALPHANUM
 %token fqWS
@@ -57,28 +65,35 @@
 %token fqBASESEQ
 %token fqCOLORSEQ
 %token fqTOKEN
-%token fqASC33QUAL
-%token fqASC64QUAL
+%token fqASCQUAL
+%token fqCOORDS
 %token fqUNRECOGNIZED
 %token fqENDOFTEXT 0
 
+
 %%
 
-sequence
-    : readLines qualityLines    { return 1; }
-    | readLines                 { if (yychar != YYEMPTY && yychar != YYEOF) FASTQ_unlex(pb, & yylval); return 1; }
-    | readQualityLines          { return 1; }
-    | qualityLines              { return 1; } 
-    | name ':' coords ':'           { FASTQScan_inline_sequence(pb); } 
-                 read ':'           { FASTQScan_inline_quality(pb); } 
-                 quality endline    { return 1; }
-    | name error endline        { return 1; }
+sequence /* have to return the lookahead symbol before returning since it belongs to the next record and cannot be dropped */
+    : readLines qualityLines    { UNLEX; return 1; }
+    
+    | readLines                 { UNLEX; return 1; }
+    
+    | qualityLines              { UNLEX; return 1; } 
+    
+    | name                      { StartSpotName(pb, 0); }
+        fqCOORDS                { GrowSpotName(pb, &$3); StopSpotName(pb); }
+        ':'                     { FASTQScan_inline_sequence(pb); } 
+        inlineRead              
+        ':'                     { FASTQScan_inline_quality(pb); } 
+        quality                 { UNLEX; return 1; }
+           
+    | fqALPHANUM error endline  { UNLEX; return 1; }
+           
     | endfile                   { return 0; }
     ;
 
 endfile
     : fqENDOFTEXT
-    | endline fqENDOFTEXT
     | endline endfile
     ;
 
@@ -87,93 +102,159 @@ endline
     ;
 
 readLines
-    : header  endline  read endline  
-    | qheader endline  read endline  
+    : header  endline  read   
     | header  endline error endline
-    | error   endline  read endline
-    ;
-
-readQualityLines
-    : qheader endline quality endline
-    | qheader endline   error endline
-    ;
-
-read
-    : fqBASESEQ                  { pb->record->seq.read = string_dup($1.tokenText, $1.tokenLength); pb->record->seq.is_colorspace = false; }
-    | fqCOLORSEQ                 { pb->record->seq.read = string_dup($1.tokenText, $1.tokenLength); pb->record->seq.is_colorspace = true; }
+    | error   endline  read 
     ;
 
 header 
-    : headerStart tagLine;
-
-headerStart
-    : '@' { pb->tagStart = $1.tokenText + 1; }
+    : '@' { StartSpotName(pb, 1); } tagLine
+    | '>' { StartSpotName(pb, 1); } tagLine
     ;
 
-qheader 
-    : qheaderStart tagLine;
-
-qheaderStart
-    : '>' { pb->tagStart = $1.tokenText + 1; }
+read
+    : baseRead  { pb->record->seq.is_colorspace = false; }
+    | csRead    { pb->record->seq.is_colorspace = true; }
     ;
 
-tagLine    
-    : name ':' coords tail  { SetTagLine(pb, $1.tokenText, $1.tokenLength + $2.tokenLength + $3.tokenLength + $4.tokenLength, &$3); }  
-    | name ':' coords       { SetTagLine(pb, $1.tokenText, $1.tokenLength + $2.tokenLength + $3.tokenLength, &$3); }  
-    | name                  { SetTagLine(pb, $1.tokenText, $1.tokenLength, 0); /* coords may be embbedded in the name with '_' as the separator */ }
-    | coords tail           { SetTagLine(pb, $1.tokenText, $1.tokenLength + $2.tokenLength, &$1); }  
-    | coords                { SetTagLine(pb, $1.tokenText, $1.tokenLength, &$1); }  
+baseRead
+    : fqBASESEQ { SetRead(pb, & $1); } 
+        endline            
+    | baseRead fqBASESEQ { SetRead(pb, & $2); } 
+        endline  
+    ;
+ 
+csRead
+    : fqCOLORSEQ { SetRead(pb, & $1); } 
+        endline           
+    | csRead fqCOLORSEQ { SetRead(pb, & $2); } 
+        endline
     ;
 
-name
-    : fqALPHANUM        { $$ = $1; }
-    | name '_'          { $$ = $1; $$.tokenLength += $2.tokenLength; }
-    | name '-'          { $$ = $1; $$.tokenLength += $2.tokenLength; }
-    | name fqALPHANUM   { $$ = $1; $$.tokenLength += $2.tokenLength; }
-    | name fqNUMBER     { $$ = $1; $$.tokenLength += $2.tokenLength; }
+inlineRead
+    : fqBASESEQ                   { SetRead(pb, & $1); pb->record->seq.is_colorspace = false; }
+    | fqCOLORSEQ                  { SetRead(pb, & $1); pb->record->seq.is_colorspace = true; }
     ;
-
-coords
-    : fqNUMBER ':' fqNUMBER ':' signedNumber ':' signedNumber 
-        { $$ = $1; $$.tokenLength += ($2.tokenLength + $3.tokenLength + $4.tokenLength + $5.tokenLength + $6.tokenLength + $7.tokenLength); }
-    ;
-
-signedNumber
-    : '+' fqNUMBER  { pb->signedNumber =    (int8_t)string_touint($2.tokenText, $2.tokenLength); }
-    | '-' fqNUMBER  { pb->signedNumber =  - (int8_t)string_touint($2.tokenText, $2.tokenLength); }
-    | fqNUMBER      { pb->signedNumber =    (int8_t)string_touint($1.tokenText, $1.tokenLength); }
-    ;
-
-tail
-    : tailPiece
-    | tail tailPiece
-    ;
-
-tailPiece
-    : ':'                           { $$ = $1; }
-    | ':' fqNUMBER                  { $$ = $1; $$.tokenLength += $2.tokenLength; }
-    | '.' fqNUMBER                  { $$ = $1; $$.tokenLength += $2.tokenLength; }
     
-    | '#' fqNUMBER                  { $$ = $1; $$.tokenLength += $2.tokenLength; SetSpotGroup(pb, & $2); }
-    | '#' fqALPHANUM                { $$ = $1; $$.tokenLength += $2.tokenLength; SetSpotGroup(pb, & $2); }
-    | '/' fqNUMBER                  { $$ = $1; $$.tokenLength += $2.tokenLength; SetReadNumber(pb, & $2); }
-
-    | fqWS fqALPHANUM '=' value     { $$ = $1; $$.tokenLength += ($2.tokenLength + $3.tokenLength + $4.tokenLength); }
+ /*************** tag line rules *****************/
+tagLine    
+    : nameSpotGroup 
+    | nameSpotGroup readNumberOrTail
+    | runSpotRead 
+    ;
+    
+nameSpotGroup
+    : name { StopSpotName(pb); } 
+        spotGroup 
+    | name fqCOORDS         { GrowSpotName(pb, &$2); StopSpotName(pb); }                                               
+        spotGroup
+    | name fqCOORDS '_' 
+                {   /* another crazy variation by Illumina, this time "_" is used as " /" */
+                    GrowSpotName(pb, &$2); 
+                    StopSpotName(pb);
+                    GrowSpotName(pb, &$3);
+                }    
+                casava1_8
+    | name fqCOORDS ':'     { GrowSpotName(pb, &$2); GrowSpotName(pb, &$3); StopSpotName(pb); }                          
+        spotGroup  
+    | name fqCOORDS ':'     { GrowSpotName(pb, &$2); GrowSpotName(pb, &$3);}                          
+        name
+    | name fqCOORDS '.'     { GrowSpotName(pb, &$2); GrowSpotName(pb, &$3);}                          
+        name
+    | name fqCOORDS ':' '.' { GrowSpotName(pb, &$2); GrowSpotName(pb, &$3); GrowSpotName(pb, &$3);}    
+        name
+    ;
+    
+name
+    : fqALPHANUM        { GrowSpotName(pb, &$1); }
+    | fqNUMBER          { GrowSpotName(pb, &$1); }
+    | name '_'          { GrowSpotName(pb, &$2); }
+    | name '-'          { GrowSpotName(pb, &$2); }
+    | name '.'          { GrowSpotName(pb, &$2); }
+    | name ':'          { GrowSpotName(pb, &$2); }
+    | name fqALPHANUM   { GrowSpotName(pb, &$2); }
+    | name fqNUMBER     { GrowSpotName(pb, &$2); }
     ;
 
-value
-    : anyToken                      
-    | value anyToken                { $$ = $1; $$.tokenLength += $2.tokenLength; }
+spotGroup
+    : '#'           { GrowSpotName(pb, &$1); }
+        fqNUMBER    { SetSpotGroup(pb, &$3);  GrowSpotName(pb, &$3); }
+    | '#'           { GrowSpotName(pb, &$1); }    
+        fqALPHANUM  { SetSpotGroup(pb, &$3);  GrowSpotName(pb, &$3); }    
+    |
+    ;
+    
+readNumberOrTail
+    : readNumber
+    | fqWS  { GrowSpotName(pb, &$1); }    
+        casava1_8
+    | fqWS  { GrowSpotName(pb, &$1); }  
+        tail
+    | readNumberOrTail fqWS { GrowSpotName(pb, &$2); } tail
     ;
 
-anyToken
-    : fqNUMBER
-    | fqALPHANUM
-    |'_'
+readNumber
+    : '/'       
+        {   /* in PACBIO fastq, the first '/' and the following digits are treated as a continuation of the spot name, not a read number */
+            if (IS_PACBIO(pb)) pb->spotNameDone = false; 
+            GrowSpotName(pb, &$1); 
+        } 
+      fqNUMBER  
+        { 
+            if (!IS_PACBIO(pb)) SetReadNumber(pb, &$3); 
+            GrowSpotName(pb, &$3); 
+            StopSpotName(pb); 
+        }
+ 
+    | readNumber '/' 
+        { 
+            if (IS_PACBIO(pb)) pb->spotNameDone = false; 
+            GrowSpotName(pb, &$2); 
+        } 
+        name 
+        { 
+            if (IS_PACBIO(pb)) StopSpotName(pb); 
+        }
     ;
+    
+casava1_8
+    : fqNUMBER          { SetReadNumber(pb, &$1); GrowSpotName(pb, &$1); StopSpotName(pb); }
+     ':'                { GrowSpotName(pb, &$3); }
+     fqALPHANUM         { GrowSpotName(pb, &$5); if ($5.tokenLength == 1 && TokenTextPtr(pb, &$5)[0] == 'Y') pb->record->seq.lowQuality = true; }
+     ':'                { GrowSpotName(pb, &$7); }
+     fqNUMBER           { GrowSpotName(pb, &$9); }
+     ':'                { GrowSpotName(pb, &$11); } 
+     indexSequence
+    ;
+     
+indexSequence
+    : fqALPHANUM        { SetSpotGroup(pb, &$1); GrowSpotName(pb, &$1); } 
+    | fqNUMBER          { SetSpotGroup(pb, &$1); GrowSpotName(pb, &$1); } 
+    |
+    ;
+    
+tail
+    : fqALPHANUM        { GrowSpotName(pb, &$1); }
+    | tail fqNUMBER          { GrowSpotName(pb, &$2); }
+    | tail fqALPHANUM        { GrowSpotName(pb, &$2); }
+    | tail '_'               { GrowSpotName(pb, &$2); }
+    | tail '/'               { GrowSpotName(pb, &$2); }
+    | tail '='               { GrowSpotName(pb, &$2); }
+    ;
+   
+runSpotRead
+    : fqRUNDOTSPOT '.' fqNUMBER     { SetReadNumber(pb, &$3); GrowSpotName(pb, &$3); StopSpotName(pb); }
+    | fqRUNDOTSPOT '/' fqNUMBER     { SetReadNumber(pb, &$3); GrowSpotName(pb, &$3); StopSpotName(pb); }
+    | fqRUNDOTSPOT                  { StopSpotName(pb); }
+    | runSpotRead fqWS tail
+    | runSpotRead fqWS fqNUMBER 
+    | runSpotRead fqWS fqNUMBER tail
+    ;
+    
+ /*************** quality rules *****************/
 
 qualityLines
-    : qualityHeader endline quality endline
+    : qualityHeader endline quality 
     | qualityHeader endline error endline
     ;
 
@@ -183,112 +264,128 @@ qualityHeader
     ;
 
 quality
-    : fqASC33QUAL                { 
-                                    pb->record->seq.qualityBase     = 33; 
-                                    pb->record->seq.qualityType     = QT_Phred; 
-                                    pb->record->seq.quality         = (int8_t*)string_dup($1.tokenText, $1.tokenLength); 
-                                    pb->record->seq.qualityLength   = $1.tokenLength;
-                                 }
-    | fqASC64QUAL                { 
-                                    pb->record->seq.qualityBase     = 64; 
-                                    pb->record->seq.qualityType     = QT_Phred; 
-                                    pb->record->seq.quality         = (int8_t*)string_dup($1.tokenText, $1.tokenLength); 
-                                    pb->record->seq.qualityLength   = $1.tokenLength;
-                                 }
-    | decList                    {  /*consume the quality buffer */
-                                    pb->record->seq.qualityBase     = 0; 
-                                    pb->record->seq.qualityType     = QT_LogOdds; 
-                                    pb->record->seq.quality         = pb->quality.buffer; 
-                                    pb->record->seq.qualityLength   = pb->quality.curIdx;
-                                    pb->quality.buffer = 0; 
-                                    pb->quality.curIdx = 0;
-                                 }
-    ;
-
-decList
-    : signedNumber              { AddBinaryQuality(pb, (int8_t)pb->signedNumber); }
-    | decList signedNumber      { AddBinaryQuality(pb, (int8_t)pb->signedNumber); }
-    | decList ',' signedNumber  { AddBinaryQuality(pb, (int8_t)pb->signedNumber); }
+    : qualityLine endline           
+    | quality qualityLine endline
+    
+qualityLine
+    : fqASCQUAL                {  AddQuality(pb, & $1); }
     ;
 
 %%
 
-static
-uint64_t string_touint(const char* str, size_t length)
+void AddQuality(FASTQParseBlock* pb, const FASTQToken* token)
 {
-    size_t i;
-    uint64_t ret = 0;
-    for (i = 0; i < length; ++i)
+    if (pb->phredOffset != 0)
     {
-        if (isdigit(str[i]))
+        uint8_t floor   = pb->phredOffset == 33 ? MIN_PHRED_33 : MIN_PHRED_64;
+        uint8_t ceiling = pb->maxPhred == 0 ? (pb->phredOffset == 33 ? MAX_PHRED_33 : MAX_PHRED_64) : pb->maxPhred;
+        unsigned int i;
+        for (i=0; i < token->tokenLength; ++i)
         {
-            ret = ret*10 + (str[i] - '0');
+            char buf[200];
+			char ch = TokenTextPtr(pb, token)[i];
+            if (ch < floor || ch > ceiling)
+            {
+                sprintf(buf, "Invalid quality value ('%c'=%d, position %d): for %s, valid range is from %d to %d.", 
+                                                         ch,
+														 ch,
+														 i,
+                                                         pb->phredOffset == 33 ? "Phred33": "Phred64", 
+                                                         floor, 
+                                                         ceiling);
+                pb->fatalError = true;
+                yyerror(pb, buf);
+                return;
+            }
         }
     }
-    return ret;
-}
-
-void AddBinaryQuality(FASTQParseBlock* pb, int8_t value)
-{
-    #define ChunkSize 128
-
-    if (pb->quality.buffer == 0) 
-    {   /* allocate based on the size of the previous buffer, if any */
-        if (pb->quality.bufLen == 0)
-        {
-            pb->quality.bufLen = ChunkSize;
-        }
-        pb->quality.buffer = (int8_t*)malloc(pb->quality.bufLen);
-        pb->quality.curIdx = 0;
+    if (pb->qualityLength == 0)
+    {
+        pb->qualityOffset = token->tokenStart;
+        pb->qualityLength= token->tokenLength;
     }
-    else if (pb->quality.curIdx == pb->quality.bufLen)
-    {   /* grow the buffer */
-        pb->quality.bufLen += ChunkSize;
-        pb->quality.buffer = (int8_t*)realloc(pb->quality.buffer, pb->quality.bufLen);
+    else
+    {
+        pb->qualityLength += token->tokenLength;
     }
-    pb->quality.buffer[pb->quality.curIdx] = value;
-    ++ pb->quality.curIdx;
-
-    #undef ChunkSize
 }
 
 void SetReadNumber(FASTQParseBlock* pb, const FASTQToken* token)
-{
-    if (token->tokenLength == 1)
-    {
-        switch (token->tokenText[0])
+{   /* token is known to be numeric */
+    if (pb->defaultReadNumber != -1)
+    {   /* we will only handle 1-digit read numbers for now*/
+        if (token->tokenLength == 1)
         {
-        case '1': pb->record->seq.readnumber = 1; return;
-        case '2': pb->record->seq.readnumber = 2; return;
+            switch (TokenTextPtr(pb, token)[0])
+            {
+            case '1': 
+                {
+                    pb->record->seq.readnumber = 1; 
+                    break;
+                }
+            case '0': 
+                {
+                    pb->record->seq.readnumber = pb->defaultReadNumber;
+                    break;
+                }
+            default: 
+                {   /* all secondary read numbers should be the same across an input file */
+                    uint8_t readNum = TokenTextPtr(pb, token)[0] - '0';
+                    if (pb->secondaryReadNumber == 0) /* this is the first secondary read observed */
+                    {
+                        pb->secondaryReadNumber = readNum;
+                    }
+                    else if (pb->secondaryReadNumber != readNum)
+                    {
+                        char buf[200];
+                        sprintf(buf, 
+                                "Inconsistent secondary read number: previously used %d, now seen %d", 
+                                pb->secondaryReadNumber, readNum);
+                        pb->fatalError = true;
+                        yyerror(pb, buf);
+                        return;
+                    }
+                    /* all secondary read numbers are internally represented as 2 */
+                    pb->record->seq.readnumber = 2; 
+                    
+                    break;
+                }
+            }
         }
+        else
+            pb->record->seq.readnumber = pb->defaultReadNumber;
     }
-    pb->record->seq.readnumber = 0;
 }
 
-void SetTagLine(FASTQParseBlock* pb, const char* start, size_t length, const FASTQToken* coords)
+void StartSpotName(FASTQParseBlock* pb, size_t offset)
 {
-    pb->record->seq.tagline = string_dup(start, length);
-    if (coords != 0)
-    {   /* assumes that a buffer switch can only happen at a line boundary*/ 
-        StringInit(& pb->record->seq.spotname, pb->record->seq.tagline, coords->tokenText - start + coords->tokenLength + 1, coords->tokenText - start + coords->tokenLength);
-    }
-    else
-    {
-        StringInit(& pb->record->seq.spotname, pb->record->seq.tagline, length + 1, length);
-    }
-    if (pb->spotGroupOffset != 0)
-    {
-        StringInit(& pb->record->seq.spotgroup, pb->record->seq.tagline + pb->spotGroupOffset, pb->spotGroupLength, pb->spotGroupLength);
-        pb->spotGroupOffset = 0;
-    }
-    else
-    {
-        StringInit(& pb->record->seq.spotgroup, 0, 0, 0);
-    }
+    pb->spotNameOffset = offset;
+}
+void GrowSpotName(FASTQParseBlock* pb, const FASTQToken* token)
+{
+    if (!pb->spotNameDone)
+        pb->spotNameLength += token->tokenLength;
+}
+
+void StopSpotName(FASTQParseBlock* pb)
+{   /* there may be more tokens coming, they will not be a part of the spot name */
+    pb->spotNameDone = true;
 }
 
 void SetSpotGroup(FASTQParseBlock* pb, const FASTQToken* token)
 {
-    pb->spotGroupOffset = token->tokenText - pb->tagStart;    
-    pb->spotGroupLength = token->tokenLength;
+    if ( ! pb->ignoreSpotGroups )
+    {
+        if (token->tokenLength != 1 || TokenTextPtr(pb, token)[0] != '0') /* ignore spot group 0 */
+        {
+            pb->spotGroupOffset = token->tokenStart;    
+            pb->spotGroupLength = token->tokenLength;
+        }
+    }
+}
+
+void SetRead(FASTQParseBlock* pb, const FASTQToken* token)
+{ 
+    pb->readOffset = token->tokenStart;
+    pb->readLength = token->tokenLength;
 }

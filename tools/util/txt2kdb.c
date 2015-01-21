@@ -197,7 +197,7 @@ rc_t txt2kdb_kfs (void)
     }
     else
     {
-        rc = KDirectoryOpenFileRead (G.dir, &G.txt, G.txtpath);
+        rc = KDirectoryOpenFileRead (G.dir, &G.txt, "%s", G.txtpath);
         if (rc != 0)
         {
             G.txt = NULL;
@@ -217,7 +217,7 @@ rc_t txt2kdb_kfs (void)
                 KPathType kpt;
                 const char * err = "";
 
-                kpt = KDirectoryPathType (G.dir, G.colpath) & ~ kptAlias;
+                kpt = KDirectoryPathType (G.dir, "%s", G.colpath) & ~ kptAlias;
                 kcm = kcmCreate;
 /* Force means replace if exists */
 /* Append means open in append mode if it exists */
@@ -260,7 +260,7 @@ rc_t txt2kdb_kfs (void)
                 }
                 if (rc == 0)
                 {
-                    rc = KDBManagerCreateColumn (G.mgr, &G.col, kcm, kcsNone, 0, G.colpath);
+                    rc = KDBManagerCreateColumn (G.mgr, &G.col, kcm, kcsNone, 0, "%s", G.colpath);
                     if (rc)
                         err = "Manager can not open column";
                 }

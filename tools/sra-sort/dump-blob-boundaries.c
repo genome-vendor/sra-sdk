@@ -65,7 +65,7 @@ static
 void dump_col_name ( const KTable *tbl, const char *dbname, const char *tblname, const char *colname )
 {
     const KColumn *col;
-    rc_t rc = KTableOpenColumnRead ( tbl, & col, colname );
+    rc_t rc = KTableOpenColumnRead ( tbl, & col, "%s", colname );
     if ( rc != 0 )
         fprintf ( stderr, "failed to open column '%s.%s.%s'\n", dbname, tblname, colname );
     else
@@ -127,7 +127,7 @@ static
 void dump_tbl_name ( const KDatabase *db, const char *tblname, int argc, char *argv [] )
 {
     const KTable *tbl;
-    rc_t rc = KDatabaseOpenTableRead ( db, & tbl, tblname );
+    rc_t rc = KDatabaseOpenTableRead ( db, & tbl, "%s", tblname );
     if ( rc != 0 )
         fprintf ( stderr, "failed to open table '%s.%s'\n", argv [ 1 ], tblname );
     else
@@ -186,7 +186,7 @@ int main ( int argc, char *argv [] )
         if ( rc == 0 )
         {
             const KDatabase *db;
-            rc = KDBManagerOpenDBRead ( mgr, & db, argv [ 1 ] );
+            rc = KDBManagerOpenDBRead ( mgr, & db, "%s", argv [ 1 ] );
             if ( rc != 0 )
                 fprintf ( stderr, "failed to open database '%s'\n", argv [ 1 ] );
             else

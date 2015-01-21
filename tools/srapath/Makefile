@@ -25,7 +25,7 @@
 
 default: std
 
-TOP ?= $(shell ../../build/abspath.sh ../..)
+TOP ?= $(abspath ../..)
 MODULE = tools/srapath
 
 include $(TOP)/build/Makefile.env
@@ -84,7 +84,8 @@ SRAPATH_OBJ = \
 
 SRAPATH_LIB += \
 	-lkapp \
-	-lncbi-vdb \
+	-sncbi-vdb \
 
 $(BINDIR)/srapath: $(SRAPATH_OBJ)
 	$(LD) --exe --vers $(SRCDIR) -o $@ $^ $(SRAPATH_LIB)
+

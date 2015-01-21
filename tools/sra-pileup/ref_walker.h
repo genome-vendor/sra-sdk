@@ -40,6 +40,17 @@ struct ref_walker;
 /* create the ref-walker ( not ref-counted ) */
 rc_t ref_walker_create( struct ref_walker ** self );
 
+#define RW_INTEREST_INDEL   0x0001
+#define RW_INTEREST_DEBUG   0x0002
+#define RW_INTEREST_BASE    0x0004
+#define RW_INTEREST_QUAL    0x0008
+#define RW_INTEREST_SKIP    0x0010
+#define RW_INTEREST_DUPS    0x0020
+#define RW_INTEREST_TLEN    0x0040
+#define RW_INTEREST_SEQNAME 0x0080
+#define RW_INTEREST_PRIM    0x0100
+#define RW_INTEREST_SEC     0x0200
+#define RW_INTEREST_EV      0x0400
 
 typedef struct ref_walker_data
 {
@@ -64,7 +75,20 @@ typedef struct ref_walker_data
     char ascii_alignment_base;
     char quality;
     INSDC_coord_zero seq_pos;
-    bool reverse, first, last, skip, match, valid;
+    bool ins, del, reverse, first, last, skip, match, valid;
+
+    /* indels for alignment */
+    const INSDC_4na_bin * ins_bases;
+    uint32_t ins_bases_count;
+
+    INSDC_coord_zero del_ref_pos;
+    const INSDC_4na_bin * del_bases;
+    uint32_t del_bases_count;
+
+    /* for debugging purpose */
+    uint64_t alignment_id;
+    uint32_t alignment_start_pos;
+    uint32_t alignment_len;
 
     void * data;
 } ref_walker_data;
@@ -93,15 +117,10 @@ typedef struct ref_walker_callbacks
 
 /* set boolean / numeric parameters */
 rc_t ref_walker_set_min_mapq( struct ref_walker * self, int32_t min_mapq );
-rc_t ref_walker_set_omit_quality( struct ref_walker * self, bool omit_quality );
-rc_t ref_walker_set_read_tlen( struct ref_walker * self, bool read_tlen );
-rc_t ref_walker_set_process_dups( struct ref_walker * self, bool process_dups );
-rc_t ref_walker_set_use_seq_name( struct ref_walker * self, bool use_seq_name );
-rc_t ref_walker_set_no_skip( struct ref_walker * self, bool no_skip );
-rc_t ref_walker_set_primary_alignments( struct ref_walker * self, bool enabled );
-rc_t ref_walker_set_secondary_alignments( struct ref_walker * self, bool enabled );
-rc_t ref_walker_set_evidence_alignments( struct ref_walker * self, bool enabled );
 rc_t ref_walker_set_spot_group( struct ref_walker * self, const char * spot_group );
+rc_t ref_walker_set_merge_diff( struct ref_walker * self, uint64_t merge_diff );
+rc_t ref_walker_set_interest( struct ref_walker * self, uint32_t interest );
+rc_t ref_walker_get_interest( struct ref_walker * self, uint32_t * interest );
 
 /* set callbacks */
 rc_t ref_walker_set_callbacks( struct ref_walker * self, ref_walker_callbacks * callbacks );

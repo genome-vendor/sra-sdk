@@ -111,7 +111,7 @@ rc_t get_table_platform( const char * table_path, char ** dst,
             if ( rc == 0 )
             {
                 const VTable *my_table;
-                rc = VDBManagerOpenTableRead( my_manager, &my_table, my_schema, table_path );
+                rc = VDBManagerOpenTableRead( my_manager, &my_table, my_schema, "%s", table_path );
                 if ( rc == 0 )
                 {
                     rc = get_platform_from_table( my_table, dst, pre_and_postfix );
@@ -146,11 +146,11 @@ rc_t get_db_platform( const char * db_path, const char * tab_name,
             if ( rc == 0 )
             {
                 const VDatabase *my_database;
-                rc = VDBManagerOpenDBRead( my_manager, &my_database, my_schema, db_path );
+                rc = VDBManagerOpenDBRead( my_manager, &my_database, my_schema, "%s", db_path );
                 if ( rc == 0 )
                 {
                     const VTable *my_table;
-                    rc = VDatabaseOpenTableRead( my_database, &my_table, tab_name );
+                    rc = VDatabaseOpenTableRead( my_database, &my_table, "%s", tab_name );
                     if ( rc == 0 )
                     {
                         rc = get_platform_from_table( my_table, dst, pre_and_postfix );

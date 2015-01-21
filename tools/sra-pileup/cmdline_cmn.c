@@ -71,6 +71,7 @@ const char * schema_usage[] = { "optional schema-file to be used", NULL };
 
 const char * no_mt_usage[] = { "disable multithreading", NULL };
 
+const char * timing_usage[] = { "write timing log-file", NULL };
 
 #define OPTION_OUTF    "outfile"
 #define ALIAS_OUTF     "o"
@@ -91,6 +92,7 @@ const char * no_mt_usage[] = { "disable multithreading", NULL };
 #define ALIAS_SCHEMA  "S"
 
 #define OPTION_NO_MT  "disable-multithreading"
+#define OPTION_TIMING "timing"
 
 OptDef CommonOptions[] =
 {
@@ -102,7 +104,8 @@ OptDef CommonOptions[] =
     { OPTION_BZIP,    ALIAS_BZIP,    NULL, bzip_usage,    1,        false,       false },
     { OPTION_INF,     ALIAS_INF,     NULL, inf_usage,     0,        true,        false },
     { OPTION_SCHEMA,  ALIAS_SCHEMA,  NULL, schema_usage,  1,        true,        false },
-    { OPTION_NO_MT,   NULL,          NULL, no_mt_usage,   1,        false,       false }    
+    { OPTION_NO_MT,   NULL,          NULL, no_mt_usage,   1,        false,       false },  
+    { OPTION_TIMING,  NULL,          NULL, timing_usage,  1,        true,        false }
 };
 
 
@@ -169,6 +172,9 @@ rc_t get_common_options( Args * args, common_options *opts )
         rc = get_str_option( args, OPTION_SCHEMA, &opts->schema_file );
 
     if ( rc == 0 )
+        rc = get_str_option( args, OPTION_TIMING, &opts->timing_file );
+
+    if ( rc == 0 )
     {
         const char * table2use = NULL;
         rc = get_str_option( args, OPTION_TABLE, &table2use );
@@ -201,7 +207,8 @@ void print_common_helplines( void )
     HelpOptionLine ( ALIAS_TABLE, OPTION_TABLE, "shortcut", table_usage );
     HelpOptionLine ( ALIAS_BZIP, OPTION_BZIP, NULL, bzip_usage );
     HelpOptionLine ( ALIAS_GZIP, OPTION_GZIP, NULL, gzip_usage );
-    HelpOptionLine ( NULL, OPTION_NO_MT, NULL, no_mt_usage );    
+    HelpOptionLine ( NULL, OPTION_NO_MT, NULL, no_mt_usage );
+    HelpOptionLine ( NULL, OPTION_TIMING, NULL, timing_usage );
 }
 
 
@@ -218,7 +225,7 @@ size_t CommonOptions_count( void )
 
 /* =========================================================================================== */
 
-
+#if 0
 static int cmp_pchar( const char * a, const char * b )
 {
     int res = 0;
@@ -230,7 +237,7 @@ static int cmp_pchar( const char * a, const char * b )
     }
     return res;
 }
-
+#endif
 
 /* =========================================================================================== */
 
@@ -456,7 +463,7 @@ static rc_t split_argument_into_path_and_readgroup( const char *argument, char *
         if ( rc == 0 )
         {
             VPath * vpath;
-            rc = VFSManagerMakePath ( mgr, &vpath, argument );
+            rc = VFSManagerMakePath ( mgr, &vpath, "%s", argument );
             if ( rc == 0 )
             {
                 rc = test_split_vpath_into_path_and_readgroup( vpath, argument, path, attribute );
@@ -563,7 +570,7 @@ static rc_t prepare_whole_file( prepare_ctx * ctx )
                 }
                 else
                 {
-                    rc = ctx->on_section( ctx, 0, 0 );
+                    rc = ctx->on_section( ctx, NULL );
                     if ( rc == 0 )
                         ReferenceObj_Release( ctx->refobj );
                 }
@@ -573,23 +580,23 @@ static rc_t prepare_whole_file( prepare_ctx * ctx )
     else
     {
         ctx->refobj = NULL;
-        rc = ctx->on_section( ctx, 0, 0 );
+        rc = ctx->on_section( ctx, NULL );
     }
     return rc;
 }
 
 
-static rc_t CC prepare_region_cb( const char * name, uint32_t start, uint32_t end, void * data )
+static rc_t CC prepare_region_cb( const char * name, const struct reference_range * range, void * data )
 {
     prepare_ctx * ctx = ( prepare_ctx * )data;
     rc_t rc = ReferenceList_Find( ctx->reflist, &ctx->refobj, name, string_size( name ) );
     if ( rc != 0 )
     {
-        LOGERR( klogInt, rc, "ReferenceList_Find() failed" );
+        rc = 0;
     }
     else
     {
-        rc = ctx->on_section( ctx, start, end );
+        rc = ctx->on_section( ctx, range );
         if ( rc == 0 )
             ReferenceObj_Release( ctx->refobj );
     }
@@ -681,7 +688,7 @@ rc_t prepare_ref_iter( prepare_ctx *ctx,
             else
             {
                 /* pick only the requested ranges... */
-                rc = foreach_ref_region( regions, prepare_region_cb, ctx );
+                rc = foreach_ref_region( regions, prepare_region_cb, ctx ); /* ref_regions.c */
             }
         }
         if ( ctx->reflist != NULL )

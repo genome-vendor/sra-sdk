@@ -31,12 +31,12 @@
 #include "helper.h"
 #include "coldefs.h"
 #include "get_platform.h"
-#include "progressbar.h"
 #include "copy_meta.h"
 #include "type_matcher.h"
 #include "redactval.h"
 
 #include <kapp/main.h>
+#include <klib/progressbar.h>
 #include <sysalloc.h>
 
 /*
@@ -379,24 +379,6 @@ static rc_t vdb_copy_read_row_flags( const p_context ctx,
 }
 
 
-static uint8_t vdb_copy_calc_fract_digits( const num_gen_iter *iter )
-{
-    uint8_t res = 0;
-    uint64_t count;
-    if ( num_gen_iterator_count( iter, &count ) == 0 )
-    {
-        if ( count > 10000 )
-        {
-            if ( count > 100000 )
-                res = 2;
-            else
-                res = 1;
-        }
-    }
-    return res;
-}
-
-
 static rc_t vdb_copy_row_loop( const p_context ctx,
                                const VCursor * src_cursor,
                                VCursor * dst_cursor,
@@ -404,13 +386,13 @@ static rc_t vdb_copy_row_loop( const p_context ctx,
                                redact_vals * rvals )
 {
     rc_t rc;
-    const num_gen_iter *iter;
-    uint64_t count, row_id;
+    const struct num_gen_iter * iter;
+    int64_t row_id;
+    uint64_t count;
     uint32_t percent;
-    uint8_t fract_digits;
     p_col_def filter_col_def = NULL;
     redact_buffer rbuf;
-    progressbar * progress;
+    struct progressbar * progress = NULL;
 
     if ( columns->filter_idx != -1 )
         filter_col_def = col_defs_get( columns, columns->filter_idx );
@@ -418,19 +400,18 @@ static rc_t vdb_copy_row_loop( const p_context ctx,
     rc = num_gen_iterator_make( ctx->row_generator, &iter );
     if ( rc != 0 ) return rc;
 
-    rc = make_progressbar( &progress );
+    rc = make_progressbar( &progress, 2 );
     DISP_RC( rc, "vdb_copy_row_loop:make_progressbar() failed" );
     if ( rc != 0 ) return rc;
 
     redact_buf_init( &rbuf );
     col_defs_find_redact_vals( columns, rvals );
-
-    fract_digits = vdb_copy_calc_fract_digits( iter );
+	
     count = 0;
-    rc = num_gen_iterator_next( iter, &row_id );
-    while ( rc == 0 )
+    while ( rc == 0 && num_gen_iterator_next( iter, &row_id, &rc ) )
     {
-        rc = Quitting();    /* to be able to cancel the loop by signal */
+        if ( rc == 0 )
+            rc = Quitting();    /* to be able to cancel the loop by signal */
         if ( rc == 0 )
         {
             rc = VCursorSetRowId( src_cursor, row_id );
@@ -469,13 +450,12 @@ static rc_t vdb_copy_row_loop( const p_context ctx,
                                      "row_nr=%lu", row_id ) );
                     }
                 }
-                rc = num_gen_iterator_next( iter, &row_id );
+
                 if ( ctx->show_progress )
                 {
-                    if ( num_gen_iterator_percent( iter, fract_digits, &percent ) == 0 )
-                        update_progressbar( progress, fract_digits, percent );
+                    if ( num_gen_iterator_percent( iter, 2, &percent ) == 0 )
+                        update_progressbar( progress, percent );
                 }
-
             }
         }
     }
@@ -536,7 +516,7 @@ static rc_t vdb_copy_make_dst_table( const p_context ctx,
                          rc, "VDBManagerMakeSRASchema(dst) failed", "" ));
             }
         }
-        rc = VSchemaParseFile ( *dst_schema, ctx->legacy_schema_file );
+        rc = VSchemaParseFile ( *dst_schema, "%s", ctx->legacy_schema_file );
         if ( rc != 0 )
         {
             PLOGERR( klogInt,
@@ -555,7 +535,7 @@ static rc_t vdb_copy_make_dst_table( const p_context ctx,
     {
         rc = VDBManagerCreateTable( vdb_mgr, dst_table,
                              *dst_schema, ctx->dst_schema_tabname,
-                             cmode, ctx->dst_path );
+                                    cmode, "%s", ctx->dst_path );
         DISP_RC( rc, "vdb_copy_make_dst_table:VDBManagerCreateTable() failed" );
         if ( rc == 0 )
         {
@@ -1107,7 +1087,7 @@ static rc_t vdb_copy_db_tab( const p_context ctx,
                              const char *tab_name )
 {
     const VTable * src_tab;
-    rc_t rc = VDatabaseOpenTableRead( src_db, &src_tab, tab_name );
+    rc_t rc = VDatabaseOpenTableRead( src_db, &src_tab, "%s", tab_name );
     DISP_RC( rc, "vdb_copy_db_tab:VDatabaseOpenTableRead(src) failed" );
     if ( rc == 0 )
     {
@@ -1116,7 +1096,7 @@ static rc_t vdb_copy_db_tab( const p_context ctx,
                             ctx->force_kcmInit, ctx->md5_mode );
 
         rc = VDatabaseCreateTable ( dst_db, &dst_tab, tab_name, 
-                                    cmode, tab_name );
+                                    cmode, "%s", tab_name );
         DISP_RC( rc, "vdb_copy_db_tab:VDatabaseCreateTable(dst) failed" );
         if ( rc == 0 )
         {
@@ -1205,7 +1185,7 @@ static rc_t vdb_copy_sub_dbs( const p_context ctx,
                 {
                     const VDatabase * src_sub_db;
                     /* try to open the sub-database */
-                    rc = VDatabaseOpenDBRead ( src_db, &src_sub_db, a_name );
+                    rc = VDatabaseOpenDBRead ( src_db, &src_sub_db, "%s", a_name );
                     DISP_RC( rc, "vdb_copy_sub_dbs:VDatabaseOpenDBRead() failed" );
                     if ( rc == 0 )
                     {
@@ -1219,7 +1199,7 @@ static rc_t vdb_copy_sub_dbs( const p_context ctx,
                             if ( ctx->md5_mode == MD5_MODE_ON )
                                 cmode |= kcmMD5;
                             rc = VDatabaseCreateDB ( dst_db, &dst_sub_db,
-                                                     typespec, cmode, a_name );
+                                                     typespec, cmode, "%s", a_name );
                             DISP_RC( rc, "vdb_copy_sub_dbs:VDBManagerCreateDB( dst ) failed" );
                             if ( rc == 0 )
                             {
@@ -1297,7 +1277,7 @@ static rc_t vdb_copy_database( const p_context ctx,
             if ( ctx->md5_mode == MD5_MODE_ON )
                 cmode |= kcmMD5;
             rc = VDBManagerCreateDB ( vdb_mgr, &dst_db, schema,
-                                      typespec, cmode, ctx->dst_path );
+                                      typespec, cmode, "%s", ctx->dst_path );
             DISP_RC( rc, "vdb_copy_database:VDBManagerCreateDB( dst ) failed" );
             if ( rc == 0 )
             {
@@ -1338,7 +1318,7 @@ static rc_t vdb_copy_perform( const p_context ctx,
     {
         const VDatabase * src_db;
         /* try to open it as a database */
-        rc = VDBManagerOpenDBRead ( vdb_mgr, &src_db, dflt_schema, ctx->src_path );
+        rc = VDBManagerOpenDBRead ( vdb_mgr, &src_db, dflt_schema, "%s", ctx->src_path );
         if ( rc == 0 )
         {
             /* if it succeeds it is a database, continue to copy it */
@@ -1358,7 +1338,7 @@ static rc_t vdb_copy_perform( const p_context ctx,
             const VTable * src_table;
             /* try to open it as a table */
             rc = VDBManagerOpenTableRead( vdb_mgr, &src_table,
-                                          dflt_schema, ctx->src_path );
+                                          dflt_schema, "%s", ctx->src_path );
             /* if it succeeds it is a table, continue to copy it */
             if ( rc == 0 )
             {

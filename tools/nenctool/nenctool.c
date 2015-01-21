@@ -313,7 +313,7 @@ rc_t nenctool (const char * srcstr, const char * dststr, bool force)
     {
         VPath * srcpath;
 
-        rc = VFSManagerMakePath (mgr, &srcpath, srcstr);
+        rc = VFSManagerMakePath (mgr, &srcpath, "%s", srcstr);
         if (rc)
             PLOGERR (klogErr,
                      (klogErr, rc, "Failed to parse source path '$(path)'",
@@ -322,7 +322,7 @@ rc_t nenctool (const char * srcstr, const char * dststr, bool force)
         {
             VPath * dstpath;
 
-            rc = VFSManagerMakePath (mgr, &dstpath, dststr);
+            rc = VFSManagerMakePath (mgr, &dstpath, "%s", dststr);
             if (rc)
                 PLOGERR (klogErr,
                          (klogErr, rc, "Failed to parse destination path '$(path)'",

@@ -608,7 +608,7 @@ void cSRATblPairPostCopySeq ( cSRATblPair *self, const ctx_t *ctx )
         MetaPair *meta = self -> dad . meta;
         KMDataNode *unaligned_node;
         const char *node_path = "unaligned";
-        rc_t rc = KMetadataOpenNodeUpdate ( meta -> dmeta, & unaligned_node, node_path );
+        rc_t rc = KMetadataOpenNodeUpdate ( meta -> dmeta, & unaligned_node, "%s", node_path );
         if ( rc != 0 )
             INTERNAL_ERROR ( rc, "KMetadataOpenNodeUpdate failed to open '%s'", node_path );
         else
@@ -617,7 +617,7 @@ void cSRATblPairPostCopySeq ( cSRATblPair *self, const ctx_t *ctx )
             if ( csra -> first_half_aligned_spot != 0 )
             {
                 node_path = "first-half-aligned";
-                rc = KMDataNodeOpenNodeUpdate ( unaligned_node, & node, node_path );
+                rc = KMDataNodeOpenNodeUpdate ( unaligned_node, & node, "%s", node_path );
                 if ( rc != 0 )
                     INTERNAL_ERROR ( rc, "KMDataNodeOpenNodeUpdate failed to open 'unaligned/%s'", node_path );
                 else
@@ -633,7 +633,7 @@ void cSRATblPairPostCopySeq ( cSRATblPair *self, const ctx_t *ctx )
             if ( ! FAILED () && csra -> first_unaligned_spot != 0 )
             {
                 node_path = "first-unaligned";
-                rc = KMDataNodeOpenNodeUpdate ( unaligned_node, & node, node_path );
+                rc = KMDataNodeOpenNodeUpdate ( unaligned_node, & node, "%s", node_path );
                 if ( rc != 0 )
                     INTERNAL_ERROR ( rc, "KMDataNodeOpenNodeUpdate failed to open 'unaligned/%s'", node_path );
                 else

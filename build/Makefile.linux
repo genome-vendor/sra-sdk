@@ -58,25 +58,17 @@ LIBX = a
 SHLX = so
 
 # compilation defines
-DEFINES	:= -DLINUX -DUNIX -D_GNU_SOURCE -D_REENTRANT -D_FILE_OFFSET_BITS=64
+DEFINES	:= -DLINUX -DUNIX -D_GNU_SOURCE -D_REENTRANT -D_FILE_OFFSET_BITS=64 -DPKGNAME=linux$(BITS)
 
 # linux is a Unix variant
 OS_DAD = unix
 
-# support for libxml
-## TBD - move to libs/kxml, but this will break static builds...
-ifdef NCBI
-  ifeq (dbg,$(BUILD))
-	LIBXML_LPATH = $(NCBI)/libxml/DebugMT/lib
-  else
-	LIBXML_LPATH = $(NCBI)/libxml/lib
-  endif
-	DFLT_LIBXML_INCLUDES = $(NCBI)/libxml/include/libxml2
-endif
-
-# flex+bison
-LEX  = @ true
+# flex+bison: on Mac, use source-controlled generated .c/.h files
 YACC = @ true
+LEX = @ true
 
 # build matrix
 COMPILERS = GCC # ICC
+
+# copy without following symlinks
+COPY = cp -P

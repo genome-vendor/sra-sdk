@@ -697,7 +697,7 @@ ColumnPair *TablePairMatchColumnPair ( TablePair *self, const ctx_t *ctx, const 
                                 break;
                             }
 
-                            rc = VCursorAddColumn ( scurs, & idx, colspec );
+                            rc = VCursorAddColumn ( scurs, & idx, "%s", colspec );
                             if ( rc == 0 )
                             {
                                 ColumnReader *reader;
