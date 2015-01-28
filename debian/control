@@ -34,37 +34,3 @@ Description: utilities for the NCBI Sequence Read Archive
  Tool options may change in the next release. Version 1 tool options
  will remain supported wherever possible in order to preserve
  operation of any existing scripts.
-
-Package: sra-toolkit-libs0
-Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}
-Description: Libraries for the SRA Toolkit
- This package provides all libraries and modules for executing the
- NCBI SRA toolkit's programs.  This currently includes:
- .
-  libkdb                # physical layer reading library
-  libkfg                # configuration library
-  libkfs                # file system library
-  libklib               # support library
-  libkproc              # process synchronization library
-  libkq                 # cross-thread queue library
-  libksproc             # single-threaded emulation library
-  libksrch              # search algorithm library
-  libkxfs               # XML to filesystem library
-  libkxml               # XML container support library
-  libload               # loader tool utility library
-  libsra-schema         # weak-linked sra schema
-  libsradb              # API for accessing sra
-  libsrapath            # weak-link stubs for srapath
-  libsrareader          # reader library
-  libvdb                # virtual layer reading library
-  libwkdb               # physical layer update library
-  libwsradb             # update API for SRA
-  libwvdb               # virtual layer update library
-
-Package: sra-toolkit-libs-dev
-Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}
-Description: Development files for the NCBI SRA Toolkit's libraries
- This package provides development support files for the
- NCBI SRA Toolkit's libraries.
