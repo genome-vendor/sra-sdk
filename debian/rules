@@ -3,16 +3,14 @@
 	dh $@
 
 OUTDIR=$(CURDIR)/debian/tmp
+BINDIR=$(OUTDIR)/sra-tools/linux/gcc/x86_64/rel/bin
 
 override_dh_auto_configure:
-	export OUTDIR=$(OUTDIR) ; make OUTDIR=$(OUTDIR) out ; make release dynamic
-
-override_dh_auto_build:
-	export LD_LIBRARY_PATH="$$LD_LIBRARY_PATH:$(OUTDIR)/lib"; export OUTDIR=$(OUTDIR) ; make
+	./configure --build-prefix=$(OUTDIR)
 
 override_dh_auto_install:
-	dh_auto_install $@
-	install configuration-assistant.perl $(OUTDIR)/bin64/sra-configuration-assistant
+	mv $(BINDIR) $(OUTDIR)
+	rm -rfv $(OUTDIR)/sra-tools
 
 override_dh_auto_test:
 

@@ -1,3 +1,1 @@
-bin??/*	usr/bin
-schema/*/*.vschema usr/lib/ncbi/schema
-lib??/ncbi/*.kfg /etc/ncbi
+bin/*	usr/bin
