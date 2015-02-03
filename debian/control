@@ -4,11 +4,7 @@ Priority: optional
 Maintainer: Debian Med Packaging Team <debian-med-packaging@lists.alioth.debian.org>
 Uploaders: Charles Plessy <plessy@debian.org>, Andreas Tille <tille@debian.org>
 DM-Upload-Allowed: yes
-Build-Depends: debhelper (>= 7),
- libbz2-dev,
- zlib1g-dev,
- libxml2-dev,
- wget
+Build-Depends: debhelper (>= 7), libbz2-dev, zlib1g-dev, libxml2-dev, wget
 Standards-Version: 3.9.2
 Homepage: http://trace.ncbi.nlm.nih.gov/Traces/sra/sra.cgi?view=software
 Vcs-Git: git://git.debian.org/debian-med/sra-sdk.git
@@ -16,6 +12,8 @@ Vcs-Browser: http://git.debian.org/?p=debian-med/sra-sdk.git;a=summary
 
 Package: sra-toolkit
 Architecture: any
+Breaks: sra-toolkit-libs0, sra-toolkit-libs-dev
+Replaces: sra-toolkit-libs0, sra-toolkit-libs-dev
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Description: utilities for the NCBI Sequence Read Archive
  Tools for reading the SRA archive, generally by converting individual runs

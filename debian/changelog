@@ -1,3 +1,9 @@
+sra-sdk (2.4.3-0ubuntu0tgi2) precise; urgency=low
+
+  * Break sra-toolkit-libs0 and sra-toolkit-libs-dev
+
+ -- Ian Ferguson <iferguso@genome.wustl.edu>  Tue, 03 Feb 2015 14:46:42 -0600
+
 sra-sdk (2.4.3-0ubuntu0tgi1) precise; urgency=low
 
   * New upstream 2.4.3
